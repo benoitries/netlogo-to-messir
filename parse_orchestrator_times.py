@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+import os
+import re
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(BASE_DIR, 'output')
+TODAY_TAG = '20250827'
+
+# Matches lines like:
+# "✅ syntax_parser completed in 84.16s..."
+COMP_LINE = re.compile(r'^.*completed in\s+([0-9]+\.[0-9]+|[0-9]+)s')
+# Or AGENT EXECUTION DETAILS lines like:
+# "syntax_parser             ✓ SUCCESS  84.16s ..."
+DETAIL_LINE = re.compile(r'^.*SUCCESS\s+([0-9]+\.[0-9]+|[0-9]+)s')
+
+STEP_ORDER = [
+    ('syntax_parser', 1),
+    ('semantics_parser', 2),
+    ('messir_mapper', 3),
+    ('scenario_writer', 4),
+    ('plantuml_writer', 5),
+    ('plantuml_messir_auditor', 6)
+]
+
+ORCH_RE = re.compile(r'^(.+?)_(\d{8})_(\d{4})_(gpt-5(?:-mini|-nano)?)_orchestrator\.log$')
+
+
+def extract_times_from_log(path):
+    times = {i: 0 for i in range(1, 9)}
+    try:
+        with open(path, 'r') as f:
+            lines = f.readlines()
+        # First, try DETAIL table
+        detail_map = {}
+        for line in lines:
+            for name, step in STEP_ORDER:
+                if name in line and 'SUCCESS' in line:
+                    m = DETAIL_LINE.search(line)
+                    if m:
+                        val = m.group(1)
+                        try:
+                            sec = round(float(val))
+                        except:
+                            sec = 0
+                        detail_map[step] = sec
+        if detail_map:
+            times.update(detail_map)
+            return times
+        # Fallback to completed in lines in sequence
+        current_step = 0
+        for line in lines:
+            if 'Step 1:' in line: current_step = 1
+            elif 'Step 2:' in line: current_step = 2
+            elif 'Step 3:' in line: current_step = 3
+            elif 'Step 4:' in line: current_step = 4
+            elif 'Step 5:' in line: current_step = 5
+            elif 'Step 6:' in line: current_step = 6
+            elif 'Step 7:' in line: current_step = 7
+            elif 'Step 8:' in line: current_step = 8
+            if 'completed in' in line and current_step:
+                m = COMP_LINE.search(line)
+                if m:
+                    val = m.group(1)
+                    try:
+                        sec = round(float(val))
+                    except:
+                        sec = 0
+                    times[current_step] = sec
+        return times
+    except Exception:
+        return times
+
+
+def discover_orchestrators():
+    logs = []
+    for fname in os.listdir(OUTPUT_DIR):
+        if fname.endswith('_orchestrator.log') and f'_{TODAY_TAG}_' in fname:
+            logs.append(fname)
+    return sorted(logs)
+
+
+def main():
+    logs = discover_orchestrators()
+    rows = []
+    for log in logs:
+        m = ORCH_RE.match(log)
+        if not m:
+            continue
+        base, date, time, model = m.groups()
+        times = extract_times_from_log(os.path.join(OUTPUT_DIR, log))
+        total = sum(times[i] for i in range(1, 9))
+        row = f"{base} & {model} & low & {total} & " + ' & '.join(str(times[i]) for i in range(1, 9)) + " \\\\" 
+        rows.append(row)
+    print("TABLE3_ROWS_START")
+    for r in rows:
+        print(r)
+    print("TABLE3_ROWS_END")
+
+if __name__ == '__main__':
+    main()
