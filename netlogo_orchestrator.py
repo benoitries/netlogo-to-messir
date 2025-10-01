@@ -5,6 +5,7 @@ Orchestrates the processing of NetLogo files using both AST and Semantic agents 
 """
 
 import os
+import asyncio
 import json
 import datetime
 import pathlib
@@ -50,9 +51,11 @@ from netlogo_plantuml_auditor_agent import NetLogoPlantUMLMessirAuditorAgent
 from config import (
     INPUT_NETLOGO_DIR, INPUT_ICRASH_DIR, OUTPUT_DIR, 
     AGENT_CONFIGS, AVAILABLE_MODELS, ensure_directories,
-    validate_agent_response
+    validate_agent_response, ENABLE_PARALLEL_FIRST_STAGE
 )
 from logging_utils import setup_orchestration_logger
+from pathlib import Path
+from config import OUTPUT_DIR
 
 # Ensure all directories exist
 ensure_directories()
@@ -522,7 +525,18 @@ class NetLogoOrchestrator:
             return None
         
         pattern = step_patterns[step]
-        files = glob.glob(str(OUTPUT_DIR / pattern))
+        # Search recursively under OUTPUT_DIR to include run-specific subdirectories (e.g., 01-syntax_parser)
+        recursive_pattern = str(OUTPUT_DIR / "**" / pattern)
+        files = glob.glob(recursive_pattern, recursive=True)
+        if not files:
+            # Fallback: non-recursive search at the root of OUTPUT_DIR (legacy layout)
+            legacy_files = glob.glob(str(OUTPUT_DIR / pattern))
+            files = legacy_files
+        # Log discovery details for troubleshooting
+        try:
+            self.logger.debug(f"Artifact discovery (step {step}) using pattern: {pattern} | recursive matches: {len(files)}")
+        except Exception:
+            pass
         
         if not files:
             return None
@@ -608,7 +622,16 @@ class NetLogoOrchestrator:
         result["agent_type"] = "syntax_parser"
         
         # Save results using the AST agent's save method
-        self.syntax_parser_agent.save_results(result, base_name, self.model, self.step_counter)
+        step_str = f"{int(self.step_counter):02d}"
+        agent_id = "syntax_parser"
+        # New per-run/per-case directory: output/runs/<YYYY-MM-DD>/<HHMM>/<case-name>
+        ts = self.timestamp  # YYYYMMDD_HHMM
+        day_folder = f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}"
+        time_folder = ts.split("_")[1]
+        run_dir = OUTPUT_DIR / "runs" / day_folder / time_folder / base_name
+        agent_output_dir = run_dir / f"{step_str}-{agent_id}"
+        agent_output_dir.mkdir(parents=True, exist_ok=True)
+        self.syntax_parser_agent.save_results(result, base_name, self.model, self.step_counter, output_dir=agent_output_dir)
         self.step_counter += 1
         
         return result
@@ -652,7 +675,16 @@ class NetLogoOrchestrator:
         result["agent_type"] = "semantics_parser"
         
         # Save results using the Semantics Parser agent's save method
-        self.semantics_parser_agent.save_results(result, base_name, self.model, self.step_counter)
+        step_str = f"{int(self.step_counter):02d}"
+        agent_id = "semantics_parser"
+        # New per-run/per-case directory: output/runs/<YYYY-MM-DD>/<HHMM>/<case-name>
+        ts = self.timestamp  # YYYYMMDD_HHMM
+        day_folder = f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}"
+        time_folder = ts.split("_")[1]
+        run_dir = OUTPUT_DIR / "runs" / day_folder / time_folder / base_name
+        agent_output_dir = run_dir / f"{step_str}-{agent_id}"
+        agent_output_dir.mkdir(parents=True, exist_ok=True)
+        self.semantics_parser_agent.save_results(result, base_name, self.model, self.step_counter, output_dir=agent_output_dir)
         self.step_counter += 1
         
         return result
@@ -669,6 +701,13 @@ class NetLogoOrchestrator:
             Dictionary containing all processing results
         """
         base_name = file_info["base_name"]
+        # Prepare per-run/per-case directories
+        # New structure: output/runs/<YYYY-MM-DD>/<HHMM>/<case-name>
+        ts = self.timestamp  # format YYYYMMDD_HHMM
+        day_folder = f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}"
+        time_folder = ts.split("_")[1]
+        run_dir = OUTPUT_DIR / "runs" / day_folder / time_folder / base_name
+        run_dir.mkdir(parents=True, exist_ok=True)
         
         # Start timing the total orchestration
         total_orchestration_start_time = time.time()
@@ -775,7 +814,9 @@ class NetLogoOrchestrator:
                 syntax_parser_result["agent_type"] = "syntax_parser"
                 
                 # Save results using the Syntax Parser agent's save method
-                self.syntax_parser_agent.save_results(syntax_parser_result, base_name, self.model, "1")  # Step 1 for Syntax Parser
+                agent_output_dir = run_dir / "01-syntax_parser"
+                agent_output_dir.mkdir(parents=True, exist_ok=True)
+                self.syntax_parser_agent.save_results(syntax_parser_result, base_name, self.model, "1", output_dir=agent_output_dir)  # Step 1 for Syntax Parser
                 self.step_counter = 2  # Set step counter for next sequential agent
                 
                 processed_results["ast"] = syntax_parser_result
@@ -816,7 +857,9 @@ class NetLogoOrchestrator:
                 semantics_parser_result["agent_type"] = "semantics_parser"
                 
                 # Save results using the Semantics Parser agent's save method
-                self.semantics_parser_agent.save_results(semantics_parser_result, base_name, self.model, "2")  # Step 2 for Semantics Parser
+                agent_output_dir = run_dir / "02-semantics_parser"
+                agent_output_dir.mkdir(parents=True, exist_ok=True)
+                self.semantics_parser_agent.save_results(semantics_parser_result, base_name, self.model, "2", output_dir=agent_output_dir)  # Step 2 for Semantics Parser
                 self.step_counter = 3  # Set step counter for next sequential agent
                 
                 processed_results["semantics"] = semantics_parser_result
@@ -863,7 +906,9 @@ class NetLogoOrchestrator:
                 messir_result["agent_type"] = "messir_mapper"
                 
                 # Save results using the Messir mapper agent's save method
-                self.messir_mapper_agent.save_results(messir_result, base_name, self.model, "3")  # Step 3 for Messir Mapper
+                agent_output_dir = run_dir / "03-messir_mapper"
+                agent_output_dir.mkdir(parents=True, exist_ok=True)
+                self.messir_mapper_agent.save_results(messir_result, base_name, self.model, "3", output_dir=agent_output_dir)  # Step 3 for Messir Mapper
                 self.step_counter = 4  # Set step counter for next sequential agent
                 
                 processed_results["messir_mapper"] = messir_result
@@ -901,7 +946,9 @@ class NetLogoOrchestrator:
                 scenario_result["agent_type"] = "scenario_writer"
                 
                 # Save results using the Scenario writer agent's save method
-                self.scenario_writer_agent.save_results(scenario_result, base_name, self.model, "4")  # Step 4 for Scenario Writer
+                agent_output_dir = run_dir / "04-scenario_writer"
+                agent_output_dir.mkdir(parents=True, exist_ok=True)
+                self.scenario_writer_agent.save_results(scenario_result, base_name, self.model, "4", output_dir=agent_output_dir)  # Step 4 for Scenario Writer
                 self.step_counter = 5  # Set step counter for next sequential agent
                 
                 processed_results["scenario_writer"] = scenario_result
@@ -937,7 +984,9 @@ class NetLogoOrchestrator:
                 plantuml_writer_result["agent_type"] = "plantuml_writer"
                 
                 # Save results using the PlantUML writer agent's save method
-                self.plantuml_writer_agent.save_results(plantuml_writer_result, base_name, self.model, "5")  # Step 5 for PlantUML Writer
+                agent_output_dir = run_dir / "05-plantuml_writer"
+                agent_output_dir.mkdir(parents=True, exist_ok=True)
+                self.plantuml_writer_agent.save_results(plantuml_writer_result, base_name, self.model, "5", output_dir=agent_output_dir)  # Step 5 for PlantUML Writer
                 self.step_counter = 6  # Set step counter for next sequential agent
                 
                 processed_results["plantuml_writer"] = plantuml_writer_result
@@ -977,7 +1026,9 @@ class NetLogoOrchestrator:
                 plantuml_messir_auditor_result["agent_type"] = "plantuml_messir_auditor"
                 
                 # Save results using the PlantUML Messir auditor agent's save method
-                self.plantuml_messir_auditor_agent.save_results(plantuml_messir_auditor_result, base_name, self.model, "6")  # Step 6 for PlantUML Messir Auditor
+                agent_output_dir = run_dir / "06-plantuml_messir_auditor"
+                agent_output_dir.mkdir(parents=True, exist_ok=True)
+                self.plantuml_messir_auditor_agent.save_results(plantuml_messir_auditor_result, base_name, self.model, "6", output_dir=agent_output_dir)  # Step 6 for PlantUML Messir Auditor
                 self.step_counter = 7  # Set step counter for next sequential agent
                 
                 processed_results["plantuml_messir_auditor"] = plantuml_messir_auditor_result
@@ -1054,7 +1105,9 @@ class NetLogoOrchestrator:
                     plantuml_messir_corrector_result["agent_type"] = "plantuml_messir_corrector"
                     
                     # Save results using the PlantUML Messir corrector agent's save method
-                    self.plantuml_messir_corrector_agent.save_results(plantuml_messir_corrector_result, base_name, self.model, "7")  # Step 7 for PlantUML Messir Corrector
+                    agent_output_dir = run_dir / "07-plantuml_messir_corrector"
+                    agent_output_dir.mkdir(parents=True, exist_ok=True)
+                    self.plantuml_messir_corrector_agent.save_results(plantuml_messir_corrector_result, base_name, self.model, "7", output_dir=agent_output_dir)  # Step 7 for PlantUML Messir Corrector
                     self.step_counter = 8  # Set step counter for next sequential agent
                     
                     processed_results["plantuml_messir_corrector"] = plantuml_messir_corrector_result
@@ -1159,7 +1212,9 @@ class NetLogoOrchestrator:
                 plantuml_messir_final_auditor_result["agent_type"] = "plantuml_messir_final_auditor"
                 
                 # Save results using the PlantUML Messir auditor agent's save method
-                self.plantuml_messir_final_auditor_agent.save_results(plantuml_messir_final_auditor_result, base_name, self.model, "8")  # Step 8 for Final Auditor
+                agent_output_dir = run_dir / "08-plantuml_messir_final_auditor"
+                agent_output_dir.mkdir(parents=True, exist_ok=True)
+                self.plantuml_messir_final_auditor_agent.save_results(plantuml_messir_final_auditor_result, base_name, self.model, "8", output_dir=agent_output_dir)  # Step 8 for Final Auditor
                 self.step_counter = 9  # Set step counter for next sequential agent
                 
                 processed_results["plantuml_messir_final_auditor"] = plantuml_messir_final_auditor_result
@@ -1200,6 +1255,144 @@ class NetLogoOrchestrator:
         processed_results["detailed_timing"] = self.detailed_timing.copy()
         
         return processed_results
+
+    async def process_netlogo_file_parallel_first_stage(self, file_info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Run Step 1 (syntax) and an independent semantics derivation in parallel,
+        then reconcile by re-running semantics with AST if AST succeeded.
+        Mirrors the OpenAI Cookbook fan-out/fan-in pattern via asyncio.gather.
+        """
+        base_name = file_info["base_name"]
+        # New per-run/per-case directory: output/runs/<YYYY-MM-DD>/<HHMM>/<case-name>
+        ts = self.timestamp  # YYYYMMDD_HHMM
+        day_folder = f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}"
+        time_folder = ts.split("_")[1]
+        run_dir = OUTPUT_DIR / "runs" / day_folder / time_folder / base_name
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        total_orchestration_start_time = time.time()
+        self.logger.info(f"Starting parallel first stage for {base_name} (syntax + semantics)...")
+
+        code_file = file_info["code_file"]
+        try:
+            code_content = code_file.read_text(encoding="utf-8")
+        except Exception as e:
+            return {"error": f"Error reading code file: {e}", "results": {}}
+
+        async def run_syntax():
+            # Offload blocking call to a worker thread so it does not block the event loop
+            return await asyncio.to_thread(
+                self._execute_agent_with_tracking,
+                "syntax_parser",
+                self.syntax_parser_agent.parse_netlogo_code,
+                code_content,
+                f"{base_name}-netlogo-code.md"
+            )
+
+        async def run_semantics_direct():
+            # Offload blocking call to a worker thread so it does not block the event loop
+            return await asyncio.to_thread(
+                self._execute_agent_with_tracking,
+                "semantics_parser",
+                self.semantics_parser_agent.parse_netlogo_code_direct,
+                code_content,
+                f"{base_name}-netlogo-code.md"
+            )
+
+        # Fan-out: run both concurrently
+        syntax_result, semantics_result_direct = await asyncio.gather(
+            run_syntax(),
+            run_semantics_direct(),
+            return_exceptions=True
+        )
+
+        processed_results: Dict[str, Any] = {}
+
+        # Handle syntax result
+        if isinstance(syntax_result, Exception):
+            self.logger.error(f"Syntax Parser failed in parallel path: {syntax_result}")
+            processed_results["ast"] = {
+                "agent_type": "syntax_parser",
+                "reasoning_summary": f"Syntax Parser agent failed: {syntax_result}",
+                "data": None,
+                "errors": [f"Syntax Parser agent error: {syntax_result}"]
+            }
+        else:
+            syntax_result["agent_type"] = "syntax_parser"
+            agent_output_dir = run_dir / "01-syntax_parser"
+            agent_output_dir.mkdir(parents=True, exist_ok=True)
+            self.syntax_parser_agent.save_results(syntax_result, base_name, self.model, "1", output_dir=agent_output_dir)
+            self.step_counter = max(self.step_counter, 2)
+            processed_results["ast"] = syntax_result
+
+        # Handle semantics direct result
+        if isinstance(semantics_result_direct, Exception):
+            self.logger.error(f"Semantics Parser (direct) failed in parallel path: {semantics_result_direct}")
+            processed_results["semantics"] = {
+                "agent_type": "semantics_parser",
+                "reasoning_summary": f"Semantics Parser direct failed: {semantics_result_direct}",
+                "data": None,
+                "errors": [f"Semantics Parser direct error: {semantics_result_direct}"]
+            }
+        else:
+            # Prefer the direct semantics result; only re-run with AST if
+            # - AST exists, and
+            # - direct result is missing or invalid per validation
+            should_rerun_with_ast = False
+            if processed_results.get("ast", {}).get("data"):
+                if not semantics_result_direct.get("data"):
+                    should_rerun_with_ast = True
+                else:
+                    try:
+                        # Validate direct semantics result if validator is available
+                        is_valid = validate_agent_response(semantics_result_direct)
+                        should_rerun_with_ast = not is_valid
+                    except Exception:
+                        # If validation fails unexpectedly, keep direct result
+                        should_rerun_with_ast = False
+
+            if should_rerun_with_ast:
+                try:
+                    ast_data = processed_results["ast"]["data"]
+                    if isinstance(ast_data, dict):
+                        import json
+                        ast_str = json.dumps(ast_data, indent=2, ensure_ascii=False)
+                    else:
+                        ast_str = ast_data
+                    semantics_result = self._execute_agent_with_tracking(
+                        "semantics_parser",
+                        self.semantics_parser_agent.parse_ast_to_state_machine,
+                        ast_str,
+                        f"{base_name}-netlogo-code.md"
+                    )
+                except Exception as e:
+                    semantics_result = {
+                        "agent_type": "semantics_parser",
+                        "reasoning_summary": f"Semantics Parser (AST) failed post-parallel: {e}",
+                        "data": None,
+                        "errors": [f"Semantics Parser (AST) error: {e}"]
+                    }
+            else:
+                semantics_result = semantics_result_direct
+
+            semantics_result["agent_type"] = "semantics_parser"
+            agent_output_dir = run_dir / "02-semantics_parser"
+            agent_output_dir.mkdir(parents=True, exist_ok=True)
+            self.semantics_parser_agent.save_results(semantics_result, base_name, self.model, "2", output_dir=agent_output_dir)
+            self.step_counter = max(self.step_counter, 3)
+            processed_results["semantics"] = semantics_result
+
+        # Total timing
+        total_orchestration_time = time.time() - total_orchestration_start_time
+        self.execution_times["total_orchestration"] = total_orchestration_time
+        self.logger.info(f"Parallel first stage completed in {format_duration(total_orchestration_time)}")
+
+        # Summary and bookkeeping
+        self._generate_detailed_summary(base_name, processed_results)
+        processed_results["execution_times"] = self.execution_times.copy()
+        processed_results["token_usage"] = self.token_usage.copy()
+        processed_results["detailed_timing"] = self.detailed_timing.copy()
+        return processed_results
     
     async def run(self, base_name: str, start_step: int = 1) -> Dict[str, Any]:
         """
@@ -1234,10 +1427,21 @@ class NetLogoOrchestrator:
         
         results = {}
         
-        # Process each file with sequential agent calls
+        # Process each file with sequential or parallel-first-stage
         for file_info in files:
             base_name = file_info["base_name"]
-            result = await self.process_netlogo_file_sequential(file_info, start_step)
+            if ENABLE_PARALLEL_FIRST_STAGE and start_step <= 2:
+                result = await self.process_netlogo_file_parallel_first_stage(file_info)
+                # After parallel first stage, continue sequentially from step 3
+                if isinstance(result, dict):
+                    # Merge continuation from step 3
+                    cont = await self.process_netlogo_file_sequential(file_info, start_step=3)
+                    # Merge maps conservatively; keep earlier entries from parallel stage
+                    for k, v in cont.items():
+                        if k not in result:
+                            result[k] = v
+            else:
+                result = await self.process_netlogo_file_sequential(file_info, start_step)
             results[base_name] = result
             
                     # Print status
@@ -1587,7 +1791,9 @@ async def main():
     for i, model in enumerate(available_models, 1):
         print(f"{i}. {model}")
     
-    print("\nEnter the number of the AI model to use (or press Enter for default model 1, or 'q' to quit):")
+    print("\nEnter the number of the AI model to use")
+    print(" - Press Enter once to immediately start the default run: gpt-5-nano, 3d-solids, low effort, step 0 (parallel first stage)")
+    print(" - Or type a number (or 'q' to quit):")
     
     while True:
         try:
@@ -1597,12 +1803,33 @@ async def main():
                 print("Exiting...")
                 return
             
-            # Default to model 1 if no input provided
+            # Short-circuit: single Enter triggers immediate default run
             if model_input == "":
-                model_number = 1
-                selected_models = [available_models[0]]
-                print(f"Using default: {available_models[0]}")
-                break
+                print("\nStarting default run (single Enter detected):")
+                print(" - AI model: gpt-5-nano")
+                print(" - NetLogo model: 3d-solids (first case)")
+                print(" - Reasoning effort: low (summary: auto)")
+                print(" - Start from step 0 (parallel first stage)")
+
+                # Token configuration derived from AGENT_CONFIGS
+                token_config = {
+                    agent: config["max_completion_tokens"]
+                    for agent, config in AGENT_CONFIGS.items()
+                }
+
+                # Prepare orchestrator and apply reasoning config
+                model = "gpt-5-nano"
+                base_name = "3d-solids"
+                orchestrator = NetLogoOrchestrator(model_name=model, max_tokens_config=token_config)
+                orchestrator.update_reasoning_config("low", "auto")
+
+                # Execute with step 0 (parallel first stage)
+                results = await orchestrator.run(base_name, start_step=0)
+
+                # Summarize and exit main()
+                ok = bool(results)
+                print(f"\nDefault run finished. Success: {ok}")
+                return
             
             model_number = int(model_input)
             if model_number == 0:
@@ -1668,6 +1895,7 @@ async def main():
     print("\nNetLogo Orchestrator - Step Selection")
     print("="*40)
     print("Available Steps:")
+    print("0. Parallel first stage (Steps 1+2 together)")
     print("1. Syntax Parser (AST generation)")
     print("2. Semantics Parser (State Machine generation)")
     print("3. Messir Mapper (Messir concepts mapping)")
@@ -1677,8 +1905,9 @@ async def main():
     print("7. PlantUML Messir Corrector (Compliance correction)")
     print("8. PlantUML Messir Final Auditor (Final compliance verification)")
     
-    print("\nEnter the step number to start from (1-8, or press Enter for default step 1, or 'q' to quit):")
-    print("Note: Starting from step N will skip steps 1 to N-1 and use existing results if available.")
+    print("\nEnter the step number to start from (0-8, or press Enter for default step 1, or 'q' to quit):")
+    print("Note: Step 0 runs steps 1+2 in parallel, then continues from step 3.")
+    print("Note: Starting from step N (N>=1) will skip steps 1 to N-1 and use existing results if available.")
     
     while True:
         try:
@@ -1695,15 +1924,18 @@ async def main():
                 break
             
             start_step = int(step_input)
-            if 1 <= start_step <= 8:
+            if 0 <= start_step <= 8:
                 break
             else:
-                print(f"Error: Invalid step number {start_step}. Available options: 1-8")
+                print(f"Error: Invalid step number {start_step}. Available options: 0-8")
                 print("Please enter a valid step number, press Enter for default, or 'q' to quit:")
         except ValueError:
             print("Error: Please enter a valid number, press Enter for default, or 'q' to quit:")
     
-    print(f"\nStarting workflow from step {start_step}")
+    if start_step == 0:
+        print("\nStarting workflow from step 0 (Parallel first stage: steps 1+2)")
+    else:
+        print(f"\nStarting workflow from step {start_step}")
     
     # Use default token configuration
     token_config = {

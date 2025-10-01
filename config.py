@@ -151,6 +151,10 @@ MODEL_CONFIG = {
 
 
 
+# Feature flags
+# Controls whether the orchestrator runs the first two agents (syntax & semantics) in parallel
+ENABLE_PARALLEL_FIRST_STAGE = True
+
 def ensure_directories():
     """Ensure all required directories exist"""
     OUTPUT_DIR.mkdir(exist_ok=True)
