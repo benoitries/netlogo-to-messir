@@ -35,10 +35,15 @@ def setup_orchestration_logger(base_name: str, model_name: str, timestamp: str) 
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     
-    # Create file handler
-    # Format: base-name_timestamp_AI-model_orchestrator.log
+    # Create file handler under per-run/per-case directory
+    # New format: output/runs/<YYYY-MM-DD>/<HHMM>/<case-name>/<case>_<timestamp>_<model>_orchestrator.log
+    ts = timestamp  # format YYYYMMDD_HHMM
+    day_folder = f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}"
+    time_folder = ts.split("_")[1]
+    run_dir = OUTPUT_DIR / "runs" / day_folder / time_folder / base_name
+    run_dir.mkdir(parents=True, exist_ok=True)
     log_filename = f"{base_name}_{timestamp}_{model_name}_orchestrator.log"
-    log_file = OUTPUT_DIR / log_filename
+    log_file = run_dir / log_filename
     
     file_handler = logging.FileHandler(log_file, encoding='utf-8')
     file_handler.setLevel(logging.INFO)

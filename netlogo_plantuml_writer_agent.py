@@ -323,7 +323,7 @@ Scenarios Data:
     
 
     
-    def save_results(self, results: Dict[str, Any], base_name: str, model_name: str, step_number = None):
+    def save_results(self, results: Dict[str, Any], base_name: str, model_name: str, step_number = None, output_dir = None):
         """Save parsing results to a single JSON file."""
         if not WRITE_FILES:
             return
@@ -338,8 +338,10 @@ Scenarios Data:
         else:
             prefix = f"{base_name}_{self.timestamp}_{model_name}_{agent_name}_{AGENT_VERSION}_{reasoning_suffix}_"
         
+        # Resolve base output directory (per-agent if provided)
+        base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
         # Save complete response as single JSON file
-        json_file = OUTPUT_DIR / f"{prefix}response.json"
+        json_file = base_output_dir / f"{prefix}response.json"
         
         # Create complete response structure
         complete_response = {
@@ -367,7 +369,7 @@ Scenarios Data:
         print(f"OK: {base_name} -> {prefix}response.json")
         
         # Save reasoning summary as markdown file
-        reasoning_file = OUTPUT_DIR / f"{prefix}reasoning.md"
+        reasoning_file = base_output_dir / f"{prefix}reasoning.md"
         reasoning_content = f"""# Reasoning Summary - {agent_name.title().replace('_', ' ')}
 
 **Base Name:** {base_name}
@@ -396,7 +398,7 @@ Scenarios Data:
         print(f"OK: {base_name} -> {prefix}reasoning.md")
         
         # Save data field as separate file
-        data_file = OUTPUT_DIR / f"{prefix}data.json"
+        data_file = base_output_dir / f"{prefix}data.json"
         if results.get("data"):
             data_file.write_text(json.dumps(results["data"], indent=2, ensure_ascii=False), encoding="utf-8")
             print(f"OK: {base_name} -> {prefix}data.json")
