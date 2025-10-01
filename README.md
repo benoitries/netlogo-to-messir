@@ -77,7 +77,7 @@ netlogo-to-messir/
 │   └── messir-uci-compliance-rules-v2.md
 ├── input-icrash/                          # Reference materials
 ├── input-images/                          # Supporting images
-└── output/                                # Generated results
+└── output/                                # Generated results (see Output Layout below)
 ```
 
 ## 🛠️ Installation
@@ -109,79 +109,59 @@ netlogo-to-messir/
 
 ## 🚀 Usage
 
-### Basic Usage
+### Quick Start: Default Nano Model (Parallel)
 
-Run the orchestrator on a specific NetLogo case study:
+Run the orchestrator with a single command using the default nano model, the first case study (3d-solids), low reasoning effort, and parallel execution enabled:
 
-```python
-from netlogo_orchestrator import NetLogoOrchestrator
-
-# Initialize orchestrator
-orchestrator = NetLogoOrchestrator()
-
-# Process a case study
-result = orchestrator.process_case_study(
-    case_study_name="3d-solids",
-    ai_model="gpt-5-nano",
-    reasoning_level="low"
-)
+```bash
+export OPENAI_API_KEY="<YOUR_API_KEY>" && \
+python3 /Users/benoit.ries/Library/CloudStorage/OneDrive-UniversityofLuxembourg/cursor-workspace-individual/research.publi.reverse.engineering.netlogo.to.messir.ucid/code-netlogo-to-messir/scripts/run_default_nano.py | cat
 ```
 
-### Available Models
+This will persist outputs under the canonical structure in `code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>/<case>/`.
 
-- `gpt-5` - Highest quality, highest cost
-- `gpt-5-mini` - Balanced quality/cost
-- `gpt-5-nano` - Most cost-effective
+## 📂 Output Layout
 
-### Reasoning Levels
+All artifacts are organized per run, case, and agent step to improve traceability and avoid collisions:
 
-- `low` - Basic reasoning (recommended)
-- `medium` - Enhanced reasoning
-- `high` - Maximum reasoning depth
-
-## 📊 Performance Metrics
-
-The system tracks comprehensive metrics:
-
-- **Cost Analysis**: Token usage and pricing
-- **Execution Time**: Per-step and total duration
-- **Compliance Rate**: MESSIR rule adherence
-- **Success Rate**: Pipeline completion rate
-
-### Cost Comparison (per conversion)
-
-| Model | Input Cost | Output Cost | Total Cost |
-|-------|------------|-------------|------------|
-| gpt-5 | $1.25/1M tokens | $10.00/1M tokens | $0.189-$0.201 |
-| gpt-5-mini | $0.25/1M tokens | $2.00/1M tokens | $0.036-$0.039 |
-| gpt-5-nano | $0.05/1M tokens | $0.40/1M tokens | $0.007-$0.009 |
-
-## 📈 Experimental Results
-
-Based on comprehensive testing across 10 NetLogo case studies:
-
-- **100% Success Rate** - All orchestrations completed successfully
-- **100% Compliance** - All final diagrams achieved MESSIR compliance
-- **22-27x Cost Reduction** - Using gpt-5-nano vs gpt-5
-- **Consistent Performance** - Stable across different model sizes
-
-## 🔧 Configuration
-
-Key configuration options in `config.py`:
-
-```python
-# Available AI models
-AVAILABLE_MODELS = ["gpt-5", "gpt-5-mini", "gpt-5-nano"]
-
-# Reasoning levels
-REASONING_LEVELS = ["low", "medium", "high"]
-
-# File patterns
-NETLOGO_CODE_PATTERN = "*-netlogo-code.md"
-NETLOGO_INTERFACE_PATTERN = "*-netlogo-interface-*.png"
+```
+code-netlogo-to-messir/
+  output/
+    runs/
+      YYYY-MM-DD/
+        HHMM/
+          <case-name>/
+            01-syntax_parser/
+            02-semantics_parser/
+            03-messir_mapper/
+            04-scenario_writer/
+            05-plantuml_writer/
+            06-plantuml_messir_auditor/
+            07-plantuml_messir_corrector/
+            08-plantuml_messir_final_auditor/
+          <another-case>/
+            ...
 ```
 
-## 📝 Case Studies
+Each subfolder contains the agent’s files named with the existing prefix format. Orchestrator logs are stored per case under the same run folder.
+
+> Deprecation: The legacy `output/runs-<YYYYMMDD_HHMM>/` structure is no longer used for new runs. Historical runs remain as-is for reference.
+
+### Validation
+
+Layout validated on 2025-09-24 16:58 (timestamp tag `20250924_1658`).
+Validation script: `code-netlogo-to-messir/validate_output_layout.py` (simulated structure + checks for all step folders and orchestrator log presence).
+
+Success Criteria rule validation executed on 2025-09-25 09:45 (local time).
+Validation script: `code-netlogo-to-messir/validate_task_success_criteria.py` (checks checked criteria have end-of-line timestamps and unchecked ones do not).
+
+Cursor Rules validation executed on 2025-09-25 10:15 (local time).
+Created rules:
+- `.cursor/rules/000-core-project.mdc` (always applied)
+- `.cursor/rules/100-orchestration-workflows.mdc` (manual workflows)
+- `.cursor/rules/200-python-agents-patterns.mdc` (auto-attached to Python files)
+- `.cursor/rules/210-latex-publication.mdc` (auto-attached to LaTeX files)
+Templates added under `.cursor/rules/templates/`.
 
 The system has been tested on diverse NetLogo models:
 

@@ -1,9 +1,4 @@
-
-**Version**
-v2.1
-
 # **Messir-Compliance Rules**
-  
 
 1. PLANT_UML_SEQUENCE_DIAGRAM. A Messir use case instance **must be represented as a UML Sequence Diagram** using strictly plantUML textual syntax.
 

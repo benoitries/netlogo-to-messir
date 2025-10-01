@@ -1,0 +1,64 @@
+{
+  "version": "0.1",
+  "generatedAt": "2025-10-01T12:00:00",
+  "m2": {
+    "abstractSyntax": [
+      {
+        "id": "AS1_SYS_UNIQUE",
+        "concept": "SYS",
+        "title": "Single System named 'System'",
+        "intent": "Ensure a unique System lifeline exists and is named 'System'",
+        "preconditions": [],
+        "constraint": "Exactly one System per model, named 'System'",
+        "examples": { "valid": [], "invalid": [] },
+        "severity": "Error",
+        "scope": "M2",
+        "rationale": "Guarantees a single system-centered interaction",
+        "notes": "See also CS declaration in M1"
+      }
+    ],
+    "staticSemantics": [
+      {
+        "id": "SS1_OEIE_MESSAGE_DIRECTIONALITY",
+        "concept": "OEIE",
+        "title": "Message Directionality",
+        "intent": "Restrict messages to Actor↔System only",
+        "preconditions": [],
+        "constraint": "Messages connect an Actor lifeline and the System lifeline only",
+        "examples": { "valid": [], "invalid": [] },
+        "severity": "Error",
+        "scope": "M2",
+        "rationale": "Aligns with system-centered interaction discipline",
+        "notes": "Consolidates AS directionality variants"
+      }
+    ]
+  },
+  "m1": {
+    "concreteSyntax": [
+      {
+        "id": "CS3_SYS_DECLARATION",
+        "concept": "SYS",
+        "title": "System Declaration",
+        "pattern": "participant System as system",
+        "examples": { "valid": [], "invalid": [] },
+        "severity": "Error",
+        "scope": "M1",
+        "rationale": "Ensures canonical rendering of the System lifeline",
+        "notes": "Related to AS_SYS_UNIQUE (M2)"
+      }
+    ],
+    "naming": [
+      {
+        "id": "NAM1_ACT_INSTANCE_FORMAT",
+        "concept": "ACT",
+        "title": "Actor Instance Naming",
+        "pattern": "camelCase with 'act' prefix (e.g., actAdministrator)",
+        "examples": { "valid": [], "invalid": [] },
+        "severity": "Warning",
+        "scope": "M1",
+        "rationale": "Improves readability and consistency",
+        "notes": "See Actor Type naming for PascalCase"
+      }
+    ]
+  }
+}
