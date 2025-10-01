@@ -22,14 +22,27 @@ STEP_ORDER = [
     ('plantuml_messir_auditor', 6)
 ]
 
-ORCH_RE = re.compile(r'^(.+?)_(\d{8})_(\d{4})_(gpt-5(?:-mini|-nano)?)_orchestrator\.log$')
+ORCH_RE = re.compile(r'^(.*?)_(\d{8})_(\d{4})_(gpt-5(?:-mini|-nano)?)_orchestrator\.log$')
 
 
 def extract_times_from_log(path):
     times = {i: 0 for i in range(1, 9)}
+    mode = 'sequential'
+    total_orchestration_seconds = None
     try:
         with open(path, 'r') as f:
             lines = f.readlines()
+        # Detect execution mode and attempt to read total orchestration line
+        for line in lines:
+            if 'Starting parallel first stage' in line:
+                mode = 'parallel'
+            if 'Total orchestration time:' in line:
+                m = COMP_LINE.search(line)
+                if m:
+                    try:
+                        total_orchestration_seconds = round(float(m.group(1)))
+                    except Exception:
+                        total_orchestration_seconds = None
         # First, try DETAIL table
         detail_map = {}
         for line in lines:
@@ -40,12 +53,12 @@ def extract_times_from_log(path):
                         val = m.group(1)
                         try:
                             sec = round(float(val))
-                        except:
+                        except Exception:
                             sec = 0
                         detail_map[step] = sec
         if detail_map:
             times.update(detail_map)
-            return times
+            return times, mode, total_orchestration_seconds
         # Fallback to completed in lines in sequence
         current_step = 0
         for line in lines:
@@ -63,12 +76,12 @@ def extract_times_from_log(path):
                     val = m.group(1)
                     try:
                         sec = round(float(val))
-                    except:
+                    except Exception:
                         sec = 0
                     times[current_step] = sec
-        return times
+        return times, mode, total_orchestration_seconds
     except Exception:
-        return times
+        return times, mode, total_orchestration_seconds
 
 
 def discover_orchestrators():
@@ -87,9 +100,9 @@ def main():
         if not m:
             continue
         base, date, time, model = m.groups()
-        times = extract_times_from_log(os.path.join(OUTPUT_DIR, log))
-        total = sum(times[i] for i in range(1, 9))
-        row = f"{base} & {model} & low & {total} & " + ' & '.join(str(times[i]) for i in range(1, 9)) + " \\\\" 
+        times, mode, total_orch = extract_times_from_log(os.path.join(OUTPUT_DIR, log))
+        total = total_orch if total_orch is not None else sum(times[i] for i in range(1, 9))
+        row = f"{base} & {model} & {mode} & {total} & " + ' & '.join(str(times[i]) for i in range(1, 9)) + " \\\\"
         rows.append(row)
     print("TABLE3_ROWS_START")
     for r in rows:
