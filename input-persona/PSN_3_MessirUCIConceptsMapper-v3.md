@@ -60,8 +60,8 @@ Illustrations (non-normative) to ground concepts:
 - Input event example: System → `Coordinator` `ieAcknowledge(reportId)`
 
 Anti-patterns to avoid:
-- Forcer l'utilisation d'acteurs iCrash quand le domaine cible ne correspond pas
-- Dériver des événements d'implémentation (UI, threads) au lieu d'interactions métier
+- Forcing the use of iCrash actors when the target domain does not match
+- Deriving events from implementation details (UI, threads) instead of business interactions
 
 **Actor/Event Structure**
 Output must include:
