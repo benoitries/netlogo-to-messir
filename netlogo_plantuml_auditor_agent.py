@@ -13,12 +13,13 @@ from typing import Dict, Any
 from google.adk.agents import LlmAgent
 from openai import OpenAI
 from response_dump_utils import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
+from openai_client_utils import create_and_wait, get_output_text, get_reasoning_summary
 from response_schema_expected import expected_keys_for_agent
 
 from config import (
     PERSONA_PLANTUML_AUDITOR, OUTPUT_DIR, MESSIR_RULES_FILE,
     AGENT_VERSION_PLANTUML_AUDITOR, get_reasoning_config,
-    validate_agent_response, DEFAULT_MODEL)
+    validate_agent_response, DEFAULT_MODEL, AGENT_TIMEOUTS)
 
 # Configuration
 PERSONA_FILE = PERSONA_PLANTUML_AUDITOR
@@ -177,54 +178,14 @@ PlantUML Diagrams to Audit:
                 "input": input_text
             })
             
-            response = self.client.responses.create(**api_config)
+            # Use unified helper with configured timeout
+            timeout = AGENT_TIMEOUTS.get("plantuml_auditor") if 'AGENT_TIMEOUTS' in globals() or 'AGENT_TIMEOUTS' in locals() else None
+            response = create_and_wait(self.client, api_config, timeout_seconds=timeout)
             
-            # Poll for completion
-            while response.status not in ("completed", "failed", "cancelled"):
-                import time
-                time.sleep(1)
-                response = self.client.responses.retrieve(response.id)
-            
-            if response.status != "completed":
-                return {
-                    "reasoning_summary": f"Response failed with status: {response.status}",
-                    "data": None,
-                    "errors": [f"Response failed with status: {response.status}"],
-                    "tokens_used": 0,
-                    "input_tokens": 0,
-                    "output_tokens": 0
-                }
-            
-            # Extract content from response - use the correct path
-            content = ""
-            reasoning_summary = ""
+            # Extract content and reasoning via helpers
+            content = get_output_text(response)
+            reasoning_summary = get_reasoning_summary(response)
             raw_response_serialized = serialize_response_to_dict(response)
-            
-            if response.output:
-                if len(response.output) > 1:
-                    # Model supports reasoning: reasoning is in first output item, content in second
-                    reasoning_item = response.output[0]
-                    if hasattr(reasoning_item, 'summary') and reasoning_item.summary:
-                        for summary_item in reasoning_item.summary:
-                            if hasattr(summary_item, 'text'):
-                                reasoning_summary += summary_item.text + "\n"
-                    
-                    # The actual content is in the second output item (index 1)
-                    message_item = response.output[1]
-                    if hasattr(message_item, 'content') and message_item.content:
-                        content_item = message_item.content[0]
-                        if hasattr(content_item, 'text'):
-                            content = content_item.text
-                else:
-                    # Fallback: content is in the first (and only) output item
-                    message_item = response.output[0]
-                    if hasattr(message_item, 'content') and message_item.content:
-                        content_item = message_item.content[0]
-                        if hasattr(content_item, 'text'):
-                            content = content_item.text
-                    
-                    # Set a default reasoning summary for unexpected response structure
-                    reasoning_summary = "Unexpected response structure - no reasoning summary available."
             
             # Check if response is empty
             if not content or content.strip() == "":
