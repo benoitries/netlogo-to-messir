@@ -15,6 +15,12 @@ This project implements an 8-step orchestration pipeline that transforms NetLogo
 - **Comprehensive Logging**: Detailed execution tracking and performance metrics
 - **Cost Optimization**: Built-in cost analysis and token usage monitoring
 
+### Workflow Summary
+
+For a concise overview of the orchestration flow, per-agent inputs/outputs, and known ambiguities/inconsistencies, see:
+
+- `code-netlogo-to-messir/Workflow_summary.md`
+
 ## 🏗️ Architecture
 
 ### The 8-Step Orchestration Pipeline

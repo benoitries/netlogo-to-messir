@@ -172,7 +172,7 @@ class NetLogoSyntaxParserAgent(LlmAgent):
             description_path = pathlib.Path(getattr(self, "il_syn_description_path", IL_SYN_DESCRIPTION_DEFAULT))
             mapping_txt = mapping_path.read_text(encoding="utf-8") if mapping_path.exists() else ""
             description_txt = description_path.read_text(encoding="utf-8") if description_path.exists() else ""
-            ilsyn_refs = f"\n\n[REFERENCE: DSL_IL_SYN-mapping.md]\n{mapping_txt}\n\n[REFERENCE: DSL_IL_SYN-description.md]\n{description_txt}\n"
+            ilsyn_refs = f"\n\n[REFERENCE: DSL_IL_SYN-description.md]\n{description_txt}\n\n[REFERENCE: DSL_IL_SYN-mapping.md]\n{mapping_txt}\n"
             # Log reference ingestion status similarly to semantics agent
             if mapping_path and not mapping_txt:
                 print(f"[WARNING] IL-SYN mapping file not found: {mapping_path}")
