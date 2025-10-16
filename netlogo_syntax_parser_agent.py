@@ -163,7 +163,9 @@ class NetLogoSyntaxParserAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def parse_netlogo_code(self, code: str, filename: str = "input.nlogo", output_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
+    def parse_netlogo_code(self, code: str, filename: str, output_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
+        if not filename or not isinstance(filename, str):
+            raise ValueError("filename is required and must be a non-empty string")
         # Compose instructions: persona + explicit IL-SYN references as separate context files
         ilsyn_refs = ""
         try:
