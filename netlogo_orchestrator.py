@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 NetLogo Orchestrator Agent
-Orchestrates the processing of NetLogo files using both AST and Semantic agents in parallel using Google ADK inspired ParallelAgent.
+Orchestrates the processing of NetLogo files using Syntax and Semantics agents in parallel using Google ADK inspired ParallelAgent.
 """
 
 import os
@@ -46,7 +46,6 @@ from netlogo_scenario_writer_agent import NetLogoScenarioWriterAgent
 from netlogo_plantuml_writer_agent import NetLogoPlantUMLWriterAgent
 from netlogo_plantuml_auditor_agent import NetLogoPlantUMLMessirAuditorAgent
 from netlogo_plantuml_messir_corrector_agent import NetLogoPlantUMLMessirCorrectorAgent
-from netlogo_plantuml_auditor_agent import NetLogoPlantUMLMessirAuditorAgent
 
 from config import (
     INPUT_NETLOGO_DIR, INPUT_ICRASH_DIR, OUTPUT_DIR, INPUT_PERSONA_DIR,
@@ -62,7 +61,7 @@ from config import OUTPUT_DIR
 ensure_directories()
 
 class NetLogoOrchestrator:
-    """Orchestrator for processing NetLogo files using both AST and Semantic agents in parallel."""
+    """Orchestrator for processing NetLogo files using Syntax and Semantics agents in parallel."""
     
     def __init__(self, model_name: str = DEFAULT_MODEL):
         """
