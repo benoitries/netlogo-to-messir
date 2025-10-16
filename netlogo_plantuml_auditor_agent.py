@@ -12,11 +12,13 @@ import tiktoken
 from typing import Dict, Any
 from google.adk.agents import LlmAgent
 from openai import OpenAI
+from response_dump_utils import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
+from response_schema_expected import expected_keys_for_agent
 
 from config import (
     PERSONA_PLANTUML_AUDITOR, OUTPUT_DIR, MESSIR_RULES_FILE,
-    AGENT_VERSION_PLANTUML_AUDITOR, get_reasoning_config, get_reasoning_suffix,
-    validate_agent_response)
+    AGENT_VERSION_PLANTUML_AUDITOR, get_reasoning_config,
+    validate_agent_response, DEFAULT_MODEL)
 
 # Configuration
 PERSONA_FILE = PERSONA_PLANTUML_AUDITOR
@@ -24,7 +26,11 @@ WRITE_FILES = True
 
 # Load persona and Messir rules
 persona = PERSONA_FILE.read_text(encoding="utf-8")
-messir_rules = MESSIR_RULES_FILE.read_text(encoding="utf-8")
+messir_rules = ""
+try:
+    messir_rules = MESSIR_RULES_FILE.read_text(encoding="utf-8")
+except FileNotFoundError:
+    print(f"[WARNING] Compliance rules file not found: {MESSIR_RULES_FILE}")
 
 # Concatenate persona and rules
 combined_persona = f"{persona}\n\n{messir_rules}"
@@ -36,22 +42,23 @@ def sanitize_model_name(model_name: str) -> str:
     return model_name.replace("-", "_")
 
 class NetLogoPlantUMLMessirAuditorAgent(LlmAgent):
-    model: str = "gpt-5"
+    model: str = DEFAULT_MODEL
     timestamp: str = ""
     name: str = "NetLogo PlantUML Auditor"
-    max_tokens: int = 8000
-    client: OpenAI = None
-    reasoning_effort: str = "low"
-    reasoning_summary: str = "auto"
     
-    def __init__(self, model_name: str = "gpt-5", external_timestamp: str = None, max_tokens: int = 8000):
+    client: OpenAI = None
+    reasoning_effort: str = "medium"
+    reasoning_summary: str = "auto"
+    text_verbosity: str = "medium"
+    
+    def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
         sanitized_name = sanitize_model_name(model_name)
         super().__init__(
             name=f"netlogo_plantuml_auditor_agent_{sanitized_name}",
             description="PlantUML auditor agent for Messir UCI compliance checking"
         )
         self.model = model_name
-        # Pydantic will handle max_tokens field assignment automatically
+        
         # Use external timestamp if provided, otherwise generate new one
         if external_timestamp:
             self.timestamp = external_timestamp
@@ -75,6 +82,23 @@ class NetLogoPlantUMLMessirAuditorAgent(LlmAgent):
         """
         self.reasoning_effort = reasoning_effort
         self.reasoning_summary = reasoning_summary
+
+    def update_text_config(self, text_verbosity: str):
+        """Update text verbosity configuration for this agent."""
+        self.text_verbosity = text_verbosity
+    
+    def apply_config(self, config: Dict[str, Any]) -> None:
+        """Apply a unified configuration bundle to this agent.
+
+        Supported keys (optional): "reasoning_effort", "reasoning_summary", "text_verbosity".
+        Unknown keys are ignored.
+        """
+        if not isinstance(config, dict):
+            return
+        for key in ("reasoning_effort", "reasoning_summary", "text_verbosity"):
+            value = config.get(key)
+            if value is not None:
+                setattr(self, key, value)
     
     def count_input_tokens(self, instructions: str, input_text: str) -> int:
         """
@@ -89,10 +113,9 @@ class NetLogoPlantUMLMessirAuditorAgent(LlmAgent):
         """
         try:
             # Get the appropriate encoding for the model
-            if "gpt-4" in self.model or "gpt-3.5" in self.model:
+            try:
                 encoding = tiktoken.encoding_for_model(self.model)
-            else:
-                # For other models, use cl100k_base which is used by GPT-4 and GPT-3.5
+            except Exception:
                 encoding = tiktoken.get_encoding("cl100k_base")
             
             # Combine instructions and input text (this is what gets sent to the model)
@@ -143,9 +166,6 @@ PlantUML Diagrams to Audit:
         exact_input_tokens = self.count_input_tokens(instructions, input_text)
         
         try:
-            # Use the configured max_tokens value
-            max_completion_tokens = self.max_tokens
-            
             # Create response using OpenAI Responses API
             api_config = get_reasoning_config("plantuml_auditor")
             # Update reasoning configuration with agent's settings
@@ -178,6 +198,7 @@ PlantUML Diagrams to Audit:
             # Extract content from response - use the correct path
             content = ""
             reasoning_summary = ""
+            raw_response_serialized = serialize_response_to_dict(response)
             
             if response.output:
                 if len(response.output) > 1:
@@ -210,10 +231,11 @@ PlantUML Diagrams to Audit:
                 return {
                     "reasoning_summary": "Received empty response from API",
                     "data": None,
-                    "errors": ["Empty response from API - this may indicate a model issue or token limit problem"],
+                    "errors": ["Empty response from API - this may indicate a model issue or timeout"],
                     "tokens_used": 0,
                     "input_tokens": 0,
-                    "output_tokens": 0
+                    "output_tokens": 0,
+                    "raw_response": raw_response_serialized
                 }
             
             # Parse JSON response
@@ -244,47 +266,16 @@ PlantUML Diagrams to Audit:
                         audit_results = response_data
                 errors = response_data.get("errors", []) if isinstance(response_data, dict) else []
 
-                # Extract token usage from response
-                tokens_used = 0
-                input_tokens = 0
-                output_tokens = 0
-                reasoning_tokens = 0
-                
-                # Get token usage from OpenAI Responses API
-                usage_dict = None
-                if hasattr(response, 'usage') and response.usage:
-                    tokens_used = getattr(response.usage, 'total_tokens', 0)
-                    api_input_tokens = getattr(response.usage, 'input_tokens', 0)
-                    api_output_tokens = getattr(response.usage, 'output_tokens', 0)
-                    reasoning_details = getattr(response.usage, 'output_tokens_details', None)
-                    if reasoning_details is not None:
-                        reasoning_tokens = getattr(reasoning_details, 'reasoning_tokens', 0)
-                    else:
-                        reasoning_tokens = getattr(response.usage, 'reasoning_tokens', 0)
-                    
-                    if api_input_tokens and api_input_tokens > 0:
-                        input_tokens = api_input_tokens
-                        output_tokens = api_output_tokens
-                    else:
-                        input_tokens = exact_input_tokens
-                        output_tokens = tokens_used - exact_input_tokens if tokens_used > exact_input_tokens else 0
-                    
-                    usage_dict = {
-                        "total_tokens": tokens_used,
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
-                        "reasoning_tokens": reasoning_tokens
-                    }
-                    # Debug: Print usage details
-                    print(f"# Usage details")
-                    print(f"response.usage: {response.usage}")
-                    print(f"Exact input tokens: {exact_input_tokens}")
-                    print(f"API input tokens: {api_input_tokens}")
-                    print(f"Final input tokens: {input_tokens}")
-                    print(f"Output tokens: {output_tokens}")
-                    print(f"Total tokens: {tokens_used}")
-                else:
-                    print(f"[WARNING] No usage data available in response")
+                # Extract token usage from response (centralized helper)
+                from openai_client_utils import get_usage_tokens
+                usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
+                tokens_used = usage.get("total_tokens", 0)
+                input_tokens = usage.get("input_tokens", 0)
+                api_output_tokens = usage.get("output_tokens", 0)
+                reasoning_tokens = usage.get("reasoning_tokens", 0)
+                visible_output_tokens = max((api_output_tokens or 0) - (reasoning_tokens or 0), 0)
+                total_output_tokens = visible_output_tokens + (reasoning_tokens or 0)
+                usage_dict = usage
 
                 return {
                     "reasoning_summary": reasoning_summary,
@@ -292,9 +283,11 @@ PlantUML Diagrams to Audit:
                     "errors": [],
                     "tokens_used": tokens_used,
                     "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
+                    "visible_output_tokens": visible_output_tokens,
                     "raw_usage": usage_dict,
-                    "reasoning_tokens": reasoning_tokens
+                    "reasoning_tokens": reasoning_tokens,
+                    "total_output_tokens": total_output_tokens,
+                    "raw_response": raw_response_serialized
                 }
             except json.JSONDecodeError as e:
                 return {
@@ -303,14 +296,15 @@ PlantUML Diagrams to Audit:
                     "errors": [f"Failed to parse audit results JSON: {e}", f"Raw response: {content[:200]}..."],
                     "tokens_used": 0,
                     "input_tokens": 0,
-                    "output_tokens": 0
+                    "output_tokens": 0,
+                    "raw_response": raw_response_serialized
                 }
                 
         except Exception as e:
             return {
                 "reasoning_summary": f"Error during model inference: {e}",
                 "data": None,
-                "errors": [f"Model inference error: {e}", f"Model used: {self.model}", f"Token limit: {max_completion_tokens}"],
+                "errors": [f"Model inference error: {e}", f"Model used: {self.model}"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
@@ -328,15 +322,10 @@ PlantUML Diagrams to Audit:
         # Use the agent's current reasoning level instead of global config
         reasoning_suffix = f"reasoning-{self.reasoning_effort}-{self.reasoning_summary}"
         
-        if step_number is not None:
-            prefix = f"{base_name}_{self.timestamp}_{model_name}_{step_number}_{agent_name}_{AGENT_VERSION}_{reasoning_suffix}_"
-        else:
-            prefix = f"{base_name}_{self.timestamp}_{model_name}_{agent_name}_{AGENT_VERSION}_{reasoning_suffix}_"
-        
         # Resolve base output directory (per-agent if provided)
         base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
-        # Save complete response as single JSON file
-        json_file = base_output_dir / f"{prefix}response.json"
+        # Save complete response as single JSON file (simplified)
+        json_file = base_output_dir / "output-response.json"
         
         # Create complete response structure
         complete_response = {
@@ -350,8 +339,10 @@ PlantUML Diagrams to Audit:
             "errors": results.get("errors", []),
             "tokens_used": results.get("tokens_used", 0),
             "input_tokens": results.get("input_tokens", 0),
-            "output_tokens": results.get("output_tokens", 0),
-            "reasoning_tokens": results.get("reasoning_tokens", 0)
+            "visible_output_tokens": results.get("visible_output_tokens", 0),
+            "reasoning_tokens": results.get("reasoning_tokens", 0),
+            "total_output_tokens": results.get("total_output_tokens", (results.get("visible_output_tokens", 0) or 0) + (results.get("reasoning_tokens", 0) or 0)),
+            "raw_response": results.get("raw_response")
         }
         
         # Validate response before saving
@@ -359,12 +350,18 @@ PlantUML Diagrams to Audit:
         if validation_errors:
             print(f"[WARNING] Validation errors in plantuml auditor response: {validation_errors}")
         
+        # Verify exact keys before saving
+        expected_keys = expected_keys_for_agent("plantuml_auditor")
+        ok, missing, extra = verify_exact_keys(complete_response, expected_keys)
+        if not ok:
+            raise ValueError(f"response.json keys mismatch for plantuml_auditor. Missing: {sorted(missing)} Extra: {sorted(extra)}")
+
         # Save complete response as JSON file
         json_file.write_text(json.dumps(complete_response, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"OK: {base_name} -> {prefix}response.json")
+        print(f"OK: {base_name} -> output-response.json")
         
         # Save reasoning summary as markdown file
-        reasoning_file = base_output_dir / f"{prefix}reasoning.md"
+        reasoning_file = base_output_dir / "output-reasoning.md"
         reasoning_content = f"""# Reasoning Summary - {agent_name.title().replace('_', ' ')}
 
 **Base Name:** {base_name}
@@ -372,30 +369,34 @@ PlantUML Diagrams to Audit:
 **Timestamp:** {self.timestamp}
 **Step Number:** {step_number if step_number else 'N/A'}
 **Reasoning Level:** {self.reasoning_effort}
-**Reasoning Summary:** {self.reasoning_summary}
+**Reasoning Summary:** {results.get("reasoning_summary") or "No explicit reasoning summary available."}
 
 ## Token Usage
 
 - **Total Tokens:** {results.get("tokens_used", 0):,}
 - **Input Tokens:** {results.get("input_tokens", 0):,}
-- **Output Tokens:** {results.get("output_tokens", 0):,}
- - **Reasoning Tokens:** {results.get("reasoning_tokens", 0):,}
+- **Visible Output Tokens:** {results.get("output_tokens", 0):,}
+- **Reasoning Tokens:** {results.get("reasoning_tokens", 0):,}
+- **Total Output Tokens (reasoning + visible):** {(results.get('output_tokens', 0) or 0) + (results.get('reasoning_tokens', 0) or 0):,}
 
 ## Reasoning Summary
 
-{results.get("reasoning_summary", "No reasoning summary available")}
+{results.get("reasoning_summary") or "No explicit reasoning summary available."}
 
 ## Errors
 
 {chr(10).join(f"- {error}" for error in results.get("errors", [])) if results.get("errors") else "No errors"}
 """
         reasoning_file.write_text(reasoning_content, encoding="utf-8")
-        print(f"OK: {base_name} -> {prefix}reasoning.md")
+        print(f"OK: {base_name} -> output-reasoning.md")
         
         # Save data field as separate file
-        data_file = base_output_dir / f"{prefix}data.json"
+        data_file = base_output_dir / "output-data.json"
         if results.get("data"):
             data_file.write_text(json.dumps(results["data"], indent=2, ensure_ascii=False), encoding="utf-8")
-            print(f"OK: {base_name} -> {prefix}data.json")
+            print(f"OK: {base_name} -> output-data.json")
         else:
             print(f"WARNING: No data to save for {base_name}")
+        
+        # Write minimal artifacts (non-breaking additions)
+        write_minimal_artifacts(base_output_dir, results.get("raw_response"))

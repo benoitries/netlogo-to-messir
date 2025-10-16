@@ -121,3 +121,74 @@ Generate only the data structure in JSON format:
   "output_events": {...}
 }
 ```
+
+---
+
+## Messir Concept Reference — Rationale and iCrash Illustrations
+
+This section provides a compact, operational reference for the most frequently mapped Messir concepts. Use it to maintain coherence, justify naming and direction choices, and ground edge cases with iCrash.
+
+- Actor
+  - Rationale: Defines system boundaries and responsibilities; drives use cases and message contracts.
+  - iCrash Examples: `Coordinator`, `Hospital`, `Police`.
+  - Anti-patterns: Modelling internal classes as actors; vague actor roles.
+
+- Output Event (Actor → System)
+  - Rationale: Captures externally initiated intentions that the system must react to.
+  - iCrash Example: `Coordinator` → `oeReportCrisis(details)` → System.
+  - Anti-patterns: System self-loop actions; UI gestures without domain intent.
+
+- Input Event (System → Actor)
+  - Rationale: Conveys observable system responses or notifications to actors.
+  - iCrash Example: System → `Coordinator` `ieAcknowledge(reportId)`.
+  - Anti-patterns: Hidden state changes without outwardly observable effects.
+
+- Domain Object / Class
+  - Rationale: Stabilizes vocabulary and data; enables constraints and diagrams.
+  - iCrash Examples: `Crisis`, `Location`, `Victim`.
+  - Anti-patterns: Low-level implementation details or derived attributes without rules.
+
+- Association / Relationship
+  - Rationale: Expresses cardinalities, roles, and navigability required by the domain.
+  - iCrash Example: `Crisis` —occursAt→ `Location`.
+  - Anti-patterns: Missing cardinalities; implicit symmetric relations without rationale.
+
+- Constraint / Invariant
+  - Rationale: Guards domain integrity; aligns with auditing and later verification.
+  - iCrash Example: A `Crisis` must have a valid `Reporter`.
+  - Anti-patterns: Ambiguous or unverifiable wording; dangling references.
+
+---
+
+## Prompt-Engineering Guidelines (Persona 3)
+
+Use the following structure when prompting for Messir mapping on unfamiliar domains:
+
+1) Scope and Anchors
+   - State the System boundary; list suspected Actors (external only).
+   - Confirm events are observable and directionally correct.
+
+2) Naming and Compliance
+   - Enforce `act<ActorName>`, `oe<OutputEvent>`, `ie<InputEvent>`.
+   - Prefer concise names with domain intent; avoid technical jargon.
+
+3) Evidence and Rationale
+   - For each proposed item, keep an internal one-sentence rationale (not in final JSON).
+   - Use iCrash as an analogy when helpful; do not force it.
+
+4) Consistency Checks
+   - No self-loops; unique names; direction correctness.
+   - Cross-check Actor goals with emitted events.
+
+5) Output Discipline
+   - Emit JSON only; exclude reasoning.
+   - If uncertain, return a best-effort mapping with explicit errors in the `errors` field.
+
+---
+
+## Terminology Consistency Checklist
+
+- Actor names reflect external roles with clear goals.
+- Event names encode intent and are aligned with direction conventions.
+- Object and relation names are stable and reused across artifacts.
+- Constraints are actionable, testable, and reference existing objects and relations.

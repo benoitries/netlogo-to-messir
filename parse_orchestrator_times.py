@@ -22,7 +22,8 @@ STEP_ORDER = [
     ('plantuml_messir_auditor', 6)
 ]
 
-ORCH_RE = re.compile(r'^(.*?)_(\d{8})_(\d{4})_(gpt-5(?:-mini|-nano)?)_orchestrator\.log$')
+# Accept any model token (no hard-coded names); model part excludes underscores
+ORCH_RE = re.compile(r'^(.*?)_(\d{8})_(\d{4})_([^_]+)_orchestrator\.log$')
 
 
 def extract_times_from_log(path):

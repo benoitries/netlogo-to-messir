@@ -12,15 +12,18 @@ import tiktoken
 from typing import Dict, Any
 from config import (
     PERSONA_PLANTUML_WRITER, OUTPUT_DIR, MESSIR_RULES_FILE,
-    AGENT_VERSION_PLANTUML_WRITER, get_reasoning_config, get_reasoning_suffix,
-    validate_agent_response)
+    AGENT_VERSION_PLANTUML_WRITER, get_reasoning_config,
+    validate_agent_response, DEFAULT_MODEL)
 
 from google.adk.agents import LlmAgent
 from openai import OpenAI
+from openai_client_utils import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens
+from response_dump_utils import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
+from schema_loader import get_template_for_agent, validate_data_against_template
+from response_schema_expected import expected_keys_for_agent
+from logging_utils import write_reasoning_md_from_payload
 
 # Configuration
-MODELS = ["o3"]  # Using o3 as requested
-
 PERSONA_FILE = PERSONA_PLANTUML_WRITER
 
 WRITE_FILES = True
@@ -30,7 +33,11 @@ WRITE_FILES = True
 
 # Load persona and Messir rules
 persona = PERSONA_FILE.read_text(encoding="utf-8")
-messir_rules = MESSIR_RULES_FILE.read_text(encoding="utf-8")
+messir_rules = ""
+try:
+    messir_rules = MESSIR_RULES_FILE.read_text(encoding="utf-8")
+except FileNotFoundError:
+    print(f"[WARNING] Compliance rules file not found: {MESSIR_RULES_FILE}")
 
 # Concatenate persona and rules
 combined_persona = f"{persona}\n\n{messir_rules}"
@@ -42,22 +49,23 @@ def sanitize_model_name(model_name: str) -> str:
     return model_name.replace("-", "_")
 
 class NetLogoPlantUMLWriterAgent(LlmAgent):
-    model: str = "gpt-5"
+    model: str = DEFAULT_MODEL
     timestamp: str = ""
     name: str = "NetLogo PlantUML Writer"
-    max_tokens: int = 8000
-    client: OpenAI = None
-    reasoning_effort: str = "low"
-    reasoning_summary: str = "auto"  # Add client field
     
-    def __init__(self, model_name: str = "gpt-5", external_timestamp: str = None, max_tokens: int = 8000):
+    client: OpenAI = None
+    reasoning_effort: str = "medium"
+    reasoning_summary: str = "auto"  # Add client field
+    text_verbosity: str = "medium"
+    
+    def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
         sanitized_name = sanitize_model_name(model_name)
         super().__init__(
             name=f"netlogo_plantuml_writer_agent_{sanitized_name}",
             description="PlantUML writer agent for generating sequence diagrams from scenarios"
         )
         self.model = model_name
-        # Pydantic will handle max_tokens field assignment automatically
+        
         # Use external timestamp if provided, otherwise generate new one
         if external_timestamp:
             self.timestamp = external_timestamp
@@ -82,6 +90,23 @@ class NetLogoPlantUMLWriterAgent(LlmAgent):
         self.reasoning_effort = reasoning_effort
         self.reasoning_summary = reasoning_summary
     
+    def update_text_config(self, text_verbosity: str):
+        """Update text verbosity configuration for this agent."""
+        self.text_verbosity = text_verbosity
+    
+    def apply_config(self, config: Dict[str, Any]) -> None:
+        """Apply a unified configuration bundle to this agent.
+
+        Supported keys (optional): "reasoning_effort", "reasoning_summary", "text_verbosity".
+        Unknown keys are ignored.
+        """
+        if not isinstance(config, dict):
+            return
+        for key in ("reasoning_effort", "reasoning_summary", "text_verbosity"):
+            value = config.get(key)
+            if value is not None:
+                setattr(self, key, value)
+    
     def count_input_tokens(self, instructions: str, input_text: str) -> int:
         """
         Count input tokens exactly using tiktoken for the given model.
@@ -95,10 +120,9 @@ class NetLogoPlantUMLWriterAgent(LlmAgent):
         """
         try:
             # Get the appropriate encoding for the model
-            if "gpt-4" in self.model or "gpt-3.5" in self.model:
+            try:
                 encoding = tiktoken.encoding_for_model(self.model)
-            else:
-                # For other models, use cl100k_base which is used by GPT-4 and GPT-3.5
+            except Exception:
                 encoding = tiktoken.get_encoding("cl100k_base")
             
             # Combine instructions and input text (this is what gets sent to the model)
@@ -148,9 +172,6 @@ Scenarios Data:
         exact_input_tokens = self.count_input_tokens(instructions, input_text)
         
         try:
-            # Use the configured max_tokens value
-            max_completion_tokens = self.max_tokens
-            
             # Create response using OpenAI Responses API
             api_config = get_reasoning_config("plantuml_writer")
             # Update reasoning configuration with agent's settings
@@ -162,63 +183,25 @@ Scenarios Data:
                 "input": input_text
             })
             
-            response = self.client.responses.create(**api_config)
+            from config import AGENT_TIMEOUTS
+            timeout = AGENT_TIMEOUTS.get("plantuml_writer")
+            response = create_and_wait(self.client, api_config, timeout_seconds=timeout)
             
-            # Poll for completion
-            while response.status not in ("completed", "failed", "cancelled"):
-                import time
-                time.sleep(1)
-                response = self.client.responses.retrieve(response.id)
-            
-            if response.status != "completed":
-                return {
-                    "reasoning_summary": f"Response failed with status: {response.status}",
-                    "data": None,
-                    "errors": [f"Response failed with status: {response.status}"],
-                    "tokens_used": 0,
-                    "input_tokens": 0,
-                    "output_tokens": 0
-                }
-            
-            # Extract content from response - use the correct path
-            content = ""
-            reasoning_summary = ""
-            
-            if response.output:
-                if len(response.output) > 1:
-                    # Model supports reasoning: reasoning is in first output item, content in second
-                    reasoning_item = response.output[0]
-                    if hasattr(reasoning_item, 'summary') and reasoning_item.summary:
-                        for summary_item in reasoning_item.summary:
-                            if hasattr(summary_item, 'text'):
-                                reasoning_summary += summary_item.text + "\n"
-                    
-                    # The actual content is in the second output item (index 1)
-                    message_item = response.output[1]
-                    if hasattr(message_item, 'content') and message_item.content:
-                        content_item = message_item.content[0]
-                        if hasattr(content_item, 'text'):
-                            content = content_item.text
-                else:
-                    # Fallback: content is in the first (and only) output item
-                    message_item = response.output[0]
-                    if hasattr(message_item, 'content') and message_item.content:
-                        content_item = message_item.content[0]
-                        if hasattr(content_item, 'text'):
-                            content = content_item.text
-                    
-                    # Set a default reasoning summary for unexpected response structure
-                    reasoning_summary = "Unexpected response structure - no reasoning summary available."
+            # Extract content and reasoning via helpers
+            content = get_output_text(response)
+            reasoning_summary = get_reasoning_summary(response)
+            raw_response_serialized = serialize_response_to_dict(response)
             
             # Check if response is empty
             if not content or content.strip() == "":
                 return {
                     "reasoning_summary": "Received empty response from API",
                     "data": None,
-                    "errors": ["Empty response from API - this may indicate a model issue or token limit problem"],
+                    "errors": ["Empty response from API - this may indicate a model issue or timeout"],
                     "tokens_used": 0,
                     "input_tokens": 0,
-                    "output_tokens": 0
+                    "output_tokens": 0,
+                    "raw_response": raw_response_serialized
                 }
             
             # Parse JSON response
@@ -234,9 +217,35 @@ Scenarios Data:
                     content_clean = content_clean.replace("```json", "").replace("```", "").strip()
                 elif content_clean.startswith("```"):
                     content_clean = content_clean.replace("```", "").strip()
-                
-                # Parse the response as JSON
-                response_data = json.loads(content_clean)
+
+                def _parse_best_effort_json(s: str) -> Any:
+                    """Best-effort JSON extraction when prose wraps a JSON object.
+                    Tries direct loads; if it fails, extracts the first top-level JSON object substring.
+                    """
+                    try:
+                        return json.loads(s)
+                    except Exception:
+                        pass
+                    start = s.find("{")
+                    end = s.rfind("}")
+                    if start != -1 and end != -1 and end > start:
+                        candidate = s[start:end+1].strip()
+                        try:
+                            return json.loads(candidate)
+                        except Exception:
+                            anchor = s.find('{"data"')
+                            if anchor != -1:
+                                end2 = s.find("\n\n", anchor)
+                                end2 = end if end2 == -1 else end2
+                                candidate2 = s[anchor:end2].strip()
+                                try:
+                                    return json.loads(candidate2)
+                                except Exception:
+                                    pass
+                    raise json.JSONDecodeError("Unable to parse JSON from response", s, 0)
+
+                # Parse the response as JSON (best-effort)
+                response_data = _parse_best_effort_json(content_clean)
                 print(f"[DEBUG] Successfully parsed response as JSON")
                 
                 # Extract and normalize fields from JSON response.
@@ -249,47 +258,31 @@ Scenarios Data:
                         plantuml_diagrams = response_data
                 errors = response_data.get("errors", []) if isinstance(response_data, dict) else []
 
-                # Extract token usage from response
-                tokens_used = 0
-                input_tokens = 0
-                output_tokens = 0
-                reasoning_tokens = 0
-                
-                # Get token usage from OpenAI Responses API
-                usage_dict = None
-                if hasattr(response, 'usage') and response.usage:
-                    tokens_used = getattr(response.usage, 'total_tokens', 0)
-                    api_input_tokens = getattr(response.usage, 'input_tokens', 0)
-                    api_output_tokens = getattr(response.usage, 'output_tokens', 0)
-                    reasoning_details = getattr(response.usage, 'output_tokens_details', None)
-                    if reasoning_details is not None:
-                        reasoning_tokens = getattr(reasoning_details, 'reasoning_tokens', 0)
-                    else:
-                        reasoning_tokens = getattr(response.usage, 'reasoning_tokens', 0)
-                    
-                    if api_input_tokens and api_input_tokens > 0:
-                        input_tokens = api_input_tokens
-                        output_tokens = api_output_tokens
-                    else:
-                        input_tokens = exact_input_tokens
-                        output_tokens = tokens_used - exact_input_tokens if tokens_used > exact_input_tokens else 0
-                    
-                    usage_dict = {
-                        "total_tokens": tokens_used,
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
-                        "reasoning_tokens": reasoning_tokens
-                    }
-                    # Debug: Print usage details
-                    print(f"# Usage details")
-                    print(f"response.usage: {response.usage}")
-                    print(f"Exact input tokens: {exact_input_tokens}")
-                    print(f"API input tokens: {api_input_tokens}")
-                    print(f"Final input tokens: {input_tokens}")
-                    print(f"Output tokens: {output_tokens}")
-                    print(f"Total tokens: {tokens_used}")
-                else:
-                    print(f"[WARNING] No usage data available in response")
+                # If JSON data is empty or missing PlantUML, attempt to extract raw @startuml...@enduml from content
+                if (not plantuml_diagrams) or (
+                    isinstance(plantuml_diagrams, dict) and not self._extract_plantuml_text(plantuml_diagrams)
+                ):
+                    import re
+                    m = re.search(r"@startuml[\s\S]*?@enduml", content)
+                    if m:
+                        uml_text = m.group(0)
+                        plantuml_diagrams = {
+                            "typical": {
+                                "name": plantuml_diagrams.get("typical", {}).get("name", "typical") if isinstance(plantuml_diagrams, dict) else "typical",
+                                "plantuml": uml_text
+                            }
+                        }
+
+                # Extract token usage from response (centralized helper)
+                usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
+                tokens_used = usage.get("total_tokens", 0)
+                input_tokens = usage.get("input_tokens", 0)
+                api_output_tokens = usage.get("output_tokens", 0)
+                reasoning_tokens = usage.get("reasoning_tokens", 0)
+                api_total_output_tokens = max((tokens_used or 0) - (input_tokens or 0), 0)
+                visible_output_tokens = max((api_total_output_tokens or api_output_tokens or 0) - (reasoning_tokens or 0), 0)
+                total_output_tokens = api_total_output_tokens if api_total_output_tokens is not None else (visible_output_tokens + (reasoning_tokens or 0))
+                usage_dict = usage
 
                 return {
                     "reasoning_summary": reasoning_summary,
@@ -297,9 +290,11 @@ Scenarios Data:
                     "errors": [],
                     "tokens_used": tokens_used,
                     "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
+                    "visible_output_tokens": visible_output_tokens,
                     "raw_usage": usage_dict,
-                    "reasoning_tokens": reasoning_tokens
+                    "reasoning_tokens": reasoning_tokens,
+                    "total_output_tokens": total_output_tokens,
+                    "raw_response": raw_response_serialized
                 }
             except json.JSONDecodeError as e:
                 return {
@@ -308,14 +303,15 @@ Scenarios Data:
                     "errors": [f"Failed to parse PlantUML diagrams JSON: {e}", f"Raw response: {content[:200]}..."],
                     "tokens_used": 0,
                     "input_tokens": 0,
-                    "output_tokens": 0
+                    "output_tokens": 0,
+                    "raw_response": raw_response_serialized
                 }
                 
         except Exception as e:
             return {
                 "reasoning_summary": f"Error during model inference: {e}",
                 "data": None,
-                "errors": [f"Model inference error: {e}", f"Model used: {self.model}", f"Token limit: {max_completion_tokens}"],
+                "errors": [f"Model inference error: {e}", f"Model used: {self.model}"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
@@ -333,15 +329,10 @@ Scenarios Data:
         # Use the agent's current reasoning level instead of global config
         reasoning_suffix = f"reasoning-{self.reasoning_effort}-{self.reasoning_summary}"
         
-        if step_number is not None:
-            prefix = f"{base_name}_{self.timestamp}_{model_name}_{step_number}_{agent_name}_{AGENT_VERSION}_{reasoning_suffix}_"
-        else:
-            prefix = f"{base_name}_{self.timestamp}_{model_name}_{agent_name}_{AGENT_VERSION}_{reasoning_suffix}_"
-        
         # Resolve base output directory (per-agent if provided)
         base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
-        # Save complete response as single JSON file
-        json_file = base_output_dir / f"{prefix}response.json"
+        # Save complete response as single JSON file (simplified)
+        json_file = base_output_dir / "output-response.json"
         
         # Create complete response structure
         complete_response = {
@@ -355,8 +346,10 @@ Scenarios Data:
             "errors": results.get("errors", []),
             "tokens_used": results.get("tokens_used", 0),
             "input_tokens": results.get("input_tokens", 0),
-            "output_tokens": results.get("output_tokens", 0),
-            "reasoning_tokens": results.get("reasoning_tokens", 0)
+            "visible_output_tokens": results.get("visible_output_tokens", 0),
+            "reasoning_tokens": results.get("reasoning_tokens", 0),
+            "total_output_tokens": results.get("total_output_tokens", (results.get("visible_output_tokens", 0) or 0) + (results.get("reasoning_tokens", 0) or 0)),
+            "raw_response": results.get("raw_response")
         }
         
         # Validate response before saving
@@ -364,46 +357,120 @@ Scenarios Data:
         if validation_errors:
             print(f"[WARNING] Validation errors in plantuml writer response: {validation_errors}")
         
+        # Verify exact keys before saving
+        expected_keys = expected_keys_for_agent("plantuml_writer")
+        ok, missing, extra = verify_exact_keys(complete_response, expected_keys)
+        if not ok:
+            raise ValueError(f"response.json keys mismatch for plantuml_writer. Missing: {sorted(missing)} Extra: {sorted(extra)}")
+
         # Save complete response as JSON file
         json_file.write_text(json.dumps(complete_response, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"OK: {base_name} -> {prefix}response.json")
+        print(f"OK: {base_name} -> output-response.json")
         
-        # Save reasoning summary as markdown file
-        reasoning_file = base_output_dir / f"{prefix}reasoning.md"
-        reasoning_content = f"""# Reasoning Summary - {agent_name.title().replace('_', ' ')}
-
-**Base Name:** {base_name}
-**Model:** {self.model}
-**Timestamp:** {self.timestamp}
-**Step Number:** {step_number if step_number else 'N/A'}
-**Reasoning Level:** {self.reasoning_effort}
-**Reasoning Summary:** {self.reasoning_summary}
-
-## Token Usage
-
-- **Total Tokens:** {results.get("tokens_used", 0):,}
-- **Input Tokens:** {results.get("input_tokens", 0):,}
-- **Output Tokens:** {results.get("output_tokens", 0):,}
- - **Reasoning Tokens:** {results.get("reasoning_tokens", 0):,}
-
-## Reasoning Summary
-
-{results.get("reasoning_summary", "No reasoning summary available")}
-
-## Errors
-
-{chr(10).join(f"- {error}" for error in results.get("errors", [])) if results.get("errors") else "No errors"}
-"""
-        reasoning_file.write_text(reasoning_content, encoding="utf-8")
-        print(f"OK: {base_name} -> {prefix}reasoning.md")
+        # Save reasoning payload as markdown file (centralized writer)
+        payload = {
+            "reasoning": results.get("reasoning"),
+            "reasoning_summary": results.get("reasoning_summary"),
+            "tokens_used": results.get("tokens_used"),
+            "input_tokens": results.get("input_tokens"),
+            "visible_output_tokens": results.get("visible_output_tokens"),
+            "total_output_tokens": results.get("total_output_tokens"),
+            "reasoning_tokens": results.get("reasoning_tokens"),
+            "usage": results.get("raw_usage"),
+            "errors": results.get("errors"),
+        }
+        write_reasoning_md_from_payload(
+            output_dir=base_output_dir,
+            agent_name=agent_name,
+            base_name=base_name,
+            model=self.model,
+            timestamp=self.timestamp,
+            reasoning_effort=self.reasoning_effort,
+            step_number=step_number,
+            payload=payload,
+        )
+        print(f"OK: {base_name} -> output-reasoning.md")
         
+        # Optional: Validate data against persona template (shallow)
+        try:
+            template = get_template_for_agent("plantuml_writer")
+            if template is not None:
+                report = validate_data_against_template(complete_response.get("data"), template)
+                if report.get("missing_keys"):
+                    print(f"[WARNING] Data is missing keys from persona template: {report['missing_keys']}")
+        except Exception as e:
+            print(f"[WARNING] Persona template validation failed (plantuml_writer): {e}")
+
         # Save data field as separate file
-        data_file = base_output_dir / f"{prefix}data.json"
+        data_file = base_output_dir / "output-data.json"
         if results.get("data"):
             data_file.write_text(json.dumps(results["data"], indent=2, ensure_ascii=False), encoding="utf-8")
-            print(f"OK: {base_name} -> {prefix}data.json")
+            print(f"OK: {base_name} -> output-data.json")
         else:
             print(f"WARNING: No data to save for {base_name}")
+
+        # Write minimal artifacts (non-breaking additions)
+        write_minimal_artifacts(base_output_dir, results.get("raw_response"))
+
+        # Additionally, write a standalone .puml file containing the diagram text
+        try:
+            diagram_text = self._extract_plantuml_text(results.get("data")) if results.get("data") else None
+            if diagram_text and "@startuml" in diagram_text and "@enduml" in diagram_text:
+                # Canonical simplified filename per task requirement
+                puml_file = base_output_dir / "diagram.puml"
+                puml_file.write_text(diagram_text, encoding="utf-8")
+                print(f"OK: {base_name} -> diagram.puml")
+                # Surface the path for orchestrator logging/downstream use
+                results["puml_file"] = str(puml_file)
+            else:
+                print("WARNING: Could not extract valid PlantUML diagram text to write .puml file")
+        except Exception as e:
+            print(f"[WARNING] Failed to write .puml file: {e}")
+
+    def _extract_plantuml_text(self, data: Dict[str, Any]) -> str:
+        """
+        Attempt to extract the PlantUML diagram text from the agent data structure.
+        The method is defensive against variations in the response shape.
+        """
+        if not isinstance(data, dict):
+            return ""
+
+        # Common structures: data["typical"] may be a string with @startuml or a dict with a field
+        candidate_nodes = []
+        if "typical" in data:
+            candidate_nodes.append(data["typical"])
+        # Fallback: consider any values in data
+        candidate_nodes.extend(list(data.values()))
+
+        def find_in_obj(obj: Any) -> str:
+            # String directly containing plantuml
+            if isinstance(obj, str) and "@startuml" in obj:
+                return obj
+            # Dict: look for likely keys
+            if isinstance(obj, dict):
+                for key in ("plantuml", "diagram", "uml", "content", "text"):
+                    val = obj.get(key)
+                    if isinstance(val, str) and "@startuml" in val:
+                        return val
+                # Also scan nested values
+                for val in obj.values():
+                    found = find_in_obj(val)
+                    if found:
+                        return found
+            # List: scan items
+            if isinstance(obj, list):
+                for item in obj:
+                    found = find_in_obj(item)
+                    if found:
+                        return found
+            return ""
+
+        for node in candidate_nodes:
+            found = find_in_obj(node)
+            if found:
+                return found.strip()
+        # Final attempt: brute-force over the whole dict
+        return find_in_obj(data).strip()
 
 
 def main():
@@ -411,7 +478,7 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description="NetLogo PlantUML Writer Agent")
-    parser.add_argument("--model", default="gpt-5", help="Model to use (default: gpt-5)")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="Model to use (default: from config)")
     parser.add_argument("--base-name", required=True, help="Base name for the input files")
     parser.add_argument("--timestamp", help="External timestamp to use")
     parser.add_argument("--step", type=int, help="Step number for output files")

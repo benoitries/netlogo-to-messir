@@ -12,18 +12,30 @@ import tiktoken
 from typing import Dict, Any, List
 from google.adk.agents import LlmAgent
 from openai import OpenAI
+from openai_client_utils import create_and_wait, get_output_text, get_reasoning_summary
+from response_dump_utils import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
+from response_schema_expected import expected_keys_for_agent
+from logging_utils import write_reasoning_md_from_payload
 
 from config import (
-    PERSONA_MESSIR_MAPPER, OUTPUT_DIR, 
-    AGENT_VERSION_MESSIR_MAPPER, get_reasoning_config, get_reasoning_suffix,
-    validate_agent_response)
+    PERSONA_MESSIR_MAPPER, OUTPUT_DIR, MESSIR_RULES_FILE,
+    AGENT_VERSION_MESSIR_MAPPER, get_reasoning_config,
+    validate_agent_response, DEFAULT_MODEL)
 
 # Configuration
 PERSONA_FILE = PERSONA_MESSIR_MAPPER
 WRITE_FILES = True
 
-# Load persona
+# Load persona and (optionally) compliance rules reference
 persona = PERSONA_FILE.read_text(encoding="utf-8")
+messir_rules = ""
+try:
+    messir_rules = MESSIR_RULES_FILE.read_text(encoding="utf-8")
+except FileNotFoundError:
+    print(f"[WARNING] Compliance rules file not found: {MESSIR_RULES_FILE}")
+
+# Combine persona with compliance rules reference (as guidance context)
+combined_persona = f"{persona}\n\n{messir_rules}" if messir_rules else persona
 
 # Get agent version from config
 AGENT_VERSION = AGENT_VERSION_MESSIR_MAPPER
@@ -33,15 +45,16 @@ def sanitize_model_name(model_name: str) -> str:
     return model_name.replace("-", "_")
 
 class NetLogoMessirMapperAgent(LlmAgent):
-    model: str = "gpt-5"
+    model: str = DEFAULT_MODEL
     timestamp: str = ""
     name: str = "NetLogo Messir Mapper"
-    max_tokens: int = 16000
-    client: OpenAI = None
-    reasoning_effort: str = "low"
-    reasoning_summary: str = "auto"  # Add client field
     
-    def __init__(self, model_name: str = "gpt-5", external_timestamp: str = None, max_tokens: int = 16000):
+    client: OpenAI = None
+    reasoning_effort: str = "medium"
+    reasoning_summary: str = "auto"  # Add client field
+    text_verbosity: str = "medium"
+    
+    def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
         sanitized_name = sanitize_model_name(model_name)
         super().__init__(
             name=f"netlogo_messir_mapper_agent_{sanitized_name}",
@@ -73,6 +86,23 @@ class NetLogoMessirMapperAgent(LlmAgent):
         self.reasoning_effort = reasoning_effort
         self.reasoning_summary = reasoning_summary
     
+    def update_text_config(self, text_verbosity: str):
+        """Update text verbosity configuration for this agent."""
+        self.text_verbosity = text_verbosity
+    
+    def apply_config(self, config: Dict[str, Any]) -> None:
+        """Apply a unified configuration bundle to this agent.
+
+        Supported keys (optional): "reasoning_effort", "reasoning_summary", "text_verbosity".
+        Unknown keys are ignored.
+        """
+        if not isinstance(config, dict):
+            return
+        for key in ("reasoning_effort", "reasoning_summary", "text_verbosity"):
+            value = config.get(key)
+            if value is not None:
+                setattr(self, key, value)
+    
     def count_input_tokens(self, instructions: str, input_text: str) -> int:
         """
         Count input tokens exactly using tiktoken for the given model.
@@ -86,10 +116,9 @@ class NetLogoMessirMapperAgent(LlmAgent):
         """
         try:
             # Get the appropriate encoding for the model
-            if "gpt-4" in self.model or "gpt-3.5" in self.model:
+            try:
                 encoding = tiktoken.encoding_for_model(self.model)
-            else:
-                # For other models, use cl100k_base which is used by GPT-4 and GPT-3.5
+            except Exception:
                 encoding = tiktoken.get_encoding("cl100k_base")
             
             # Combine instructions and input text (this is what gets sent to the model)
@@ -118,7 +147,7 @@ class NetLogoMessirMapperAgent(LlmAgent):
         Returns:
             Dictionary containing reasoning, Messir concepts, and any errors
         """
-        instructions = f"{persona}"
+        instructions = combined_persona
         
         # Prepare icrash reference text
         icrash_reference = ""
@@ -141,9 +170,6 @@ State Machine:
         exact_input_tokens = self.count_input_tokens(instructions, input_text)
         
         try:
-            # Use the configured max_tokens value
-            max_completion_tokens = self.max_tokens
-            
             # Create response using OpenAI Responses API
             api_config = get_reasoning_config("messir_mapper")
             # Update reasoning configuration with agent's settings
@@ -155,63 +181,25 @@ State Machine:
                 "input": input_text
             })
             
-            response = self.client.responses.create(**api_config)
+            from config import AGENT_TIMEOUTS
+            timeout = AGENT_TIMEOUTS.get("messir_mapper")
+            response = create_and_wait(self.client, api_config, timeout_seconds=timeout)
             
-            # Poll for completion
-            while response.status not in ("completed", "failed", "cancelled"):
-                import time
-                time.sleep(1)
-                response = self.client.responses.retrieve(response.id)
-            
-            if response.status != "completed":
-                return {
-                    "reasoning_summary": f"Response failed with status: {response.status}",
-                    "data": None,
-                    "errors": [f"Response failed with status: {response.status}"],
-                    "tokens_used": 0,
-                    "input_tokens": 0,
-                    "output_tokens": 0
-                }
-            
-            # Extract content from response - use the correct path
-            content = ""
-            reasoning_summary = ""
-            
-            if response.output:
-                if len(response.output) > 1:
-                    # Model supports reasoning: reasoning is in first output item, content in second
-                    reasoning_item = response.output[0]
-                    if hasattr(reasoning_item, 'summary') and reasoning_item.summary:
-                        for summary_item in reasoning_item.summary:
-                            if hasattr(summary_item, 'text'):
-                                reasoning_summary += summary_item.text + "\n"
-                    
-                    # The actual content is in the second output item (index 1)
-                    message_item = response.output[1]
-                    if hasattr(message_item, 'content') and message_item.content:
-                        content_item = message_item.content[0]
-                        if hasattr(content_item, 'text'):
-                            content = content_item.text
-                else:
-                    # Fallback: content is in the first (and only) output item
-                    message_item = response.output[0]
-                    if hasattr(message_item, 'content') and message_item.content:
-                        content_item = message_item.content[0]
-                        if hasattr(content_item, 'text'):
-                            content = content_item.text
-                    
-                    # Set a default reasoning summary for unexpected response structure
-                    reasoning_summary = "Unexpected response structure - no reasoning summary available."
+            # Extract content and reasoning via helpers
+            content = get_output_text(response)
+            reasoning_summary = get_reasoning_summary(response)
+            raw_response_serialized = serialize_response_to_dict(response)
             
             # Check if response is empty
             if not content or content.strip() == "":
                 return {
                     "reasoning_summary": "Received empty response from API",
                     "data": None,
-                    "errors": ["Empty response from API - this may indicate a model issue or token limit problem"],
+                    "errors": ["Empty response from API - this may indicate a model issue or timeout"],
                     "tokens_used": 0,
                     "input_tokens": 0,
-                    "output_tokens": 0
+                    "output_tokens": 0,
+                    "raw_response": raw_response_serialized
                 }
             
             # Parse JSON response
@@ -273,6 +261,10 @@ State Machine:
                         "output_tokens": output_tokens,
                         "reasoning_tokens": reasoning_tokens
                     }
+                    # Prefer API fields directly: output_tokens is (visible + reasoning) according to our policy here
+                    # Thus: visible = output_tokens - reasoning_tokens, total_out = output_tokens
+                    visible_output_tokens = max((output_tokens or 0) - (reasoning_tokens or 0), 0)
+                    total_output_tokens = (output_tokens or 0)
                     # Debug: Print usage details
                     print(f"# Usage details")
                     print(f"response.usage: {response.usage}")
@@ -290,9 +282,11 @@ State Machine:
                     "errors": [],
                     "tokens_used": tokens_used,
                     "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
+                    "visible_output_tokens": max((output_tokens or 0) - (reasoning_tokens or 0), 0),
                     "raw_usage": usage_dict,
-                    "reasoning_tokens": reasoning_tokens
+                    "reasoning_tokens": reasoning_tokens,
+                    "total_output_tokens": total_output_tokens,
+                    "raw_response": raw_response_serialized
                 }
             except json.JSONDecodeError as e:
                 return {
@@ -301,14 +295,15 @@ State Machine:
                     "errors": [f"Failed to parse Messir concepts JSON: {e}", f"Raw response: {content[:200]}..."],
                     "tokens_used": 0,
                     "input_tokens": 0,
-                    "output_tokens": 0
+                    "output_tokens": 0,
+                    "raw_response": raw_response_serialized
                 }
                 
         except Exception as e:
             return {
                 "reasoning_summary": f"Error during model inference: {e}",
                 "data": None,
-                "errors": [f"Model inference error: {e}", f"Model used: {self.model}", f"Token limit: {max_completion_tokens}"],
+                "errors": [f"Model inference error: {e}", f"Model used: {self.model}"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
@@ -326,15 +321,10 @@ State Machine:
         # Use the agent's current reasoning level instead of global config
         reasoning_suffix = f"reasoning-{self.reasoning_effort}-{self.reasoning_summary}"
         
-        if step_number is not None:
-            prefix = f"{base_name}_{self.timestamp}_{model_name}_{step_number}_{agent_name}_{AGENT_VERSION}_{reasoning_suffix}_"
-        else:
-            prefix = f"{base_name}_{self.timestamp}_{model_name}_{agent_name}_{AGENT_VERSION}_{reasoning_suffix}_"
-        
         # Resolve base output directory (per-agent if provided)
         base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
-        # Save complete response as single JSON file
-        json_file = base_output_dir / f"{prefix}response.json"
+        # Save complete response as single JSON file (simplified)
+        json_file = base_output_dir / "output-response.json"
         
         # Create complete response structure
         complete_response = {
@@ -348,8 +338,10 @@ State Machine:
             "errors": results.get("errors", []),
             "tokens_used": results.get("tokens_used", 0),
             "input_tokens": results.get("input_tokens", 0),
-            "output_tokens": results.get("output_tokens", 0),
-            "reasoning_tokens": results.get("reasoning_tokens", 0)
+            "visible_output_tokens": results.get("visible_output_tokens", 0),
+            "reasoning_tokens": results.get("reasoning_tokens", 0),
+            "total_output_tokens": results.get("total_output_tokens", results.get("output_tokens", 0)),
+            "raw_response": results.get("raw_response")
         }
         
         # Validate response before saving
@@ -357,43 +349,46 @@ State Machine:
         if validation_errors:
             print(f"[WARNING] Validation errors in messir mapper response: {validation_errors}")
         
+        # Verify exact keys before saving
+        expected_keys = expected_keys_for_agent("messir_mapper")
+        ok, missing, extra = verify_exact_keys(complete_response, expected_keys)
+        if not ok:
+            raise ValueError(f"response.json keys mismatch for messir_mapper. Missing: {sorted(missing)} Extra: {sorted(extra)}")
+
         # Save complete response as JSON file
         json_file.write_text(json.dumps(complete_response, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"OK: {base_name} -> {prefix}response.json")
+        print(f"OK: {base_name} -> output-response.json")
         
-        # Save reasoning summary as markdown file
-        reasoning_file = base_output_dir / f"{prefix}reasoning.md"
-        reasoning_content = f"""# Reasoning Summary - {agent_name.title().replace('_', ' ')}
-
-**Base Name:** {base_name}
-**Model:** {self.model}
-**Timestamp:** {self.timestamp}
-**Step Number:** {step_number if step_number else 'N/A'}
-**Reasoning Level:** {self.reasoning_effort}
-**Reasoning Summary:** {self.reasoning_summary}
-
-## Token Usage
-
-- **Total Tokens:** {results.get("tokens_used", 0):,}
-- **Input Tokens:** {results.get("input_tokens", 0):,}
-- **Output Tokens:** {results.get("output_tokens", 0):,}
- - **Reasoning Tokens:** {results.get("reasoning_tokens", 0):,}
-
-## Reasoning Summary
-
-{results.get("reasoning_summary", "No reasoning summary available")}
-
-## Errors
-
-{chr(10).join(f"- {error}" for error in results.get("errors", [])) if results.get("errors") else "No errors"}
-"""
-        reasoning_file.write_text(reasoning_content, encoding="utf-8")
-        print(f"OK: {base_name} -> {prefix}reasoning.md")
+        # Save reasoning payload as markdown file (centralized writer)
+        payload = {
+            "reasoning": results.get("reasoning"),
+            "reasoning_summary": results.get("reasoning_summary"),
+            "tokens_used": results.get("tokens_used"),
+            "input_tokens": results.get("input_tokens"),
+            "output_tokens": results.get("output_tokens"),
+            "reasoning_tokens": results.get("reasoning_tokens"),
+            "usage": results.get("raw_usage"),
+            "errors": results.get("errors"),
+        }
+        write_reasoning_md_from_payload(
+            output_dir=base_output_dir,
+            agent_name=agent_name,
+            base_name=base_name,
+            model=self.model,
+            timestamp=self.timestamp,
+            reasoning_effort=self.reasoning_effort,
+            step_number=step_number,
+            payload=payload,
+        )
+        print(f"OK: {base_name} -> output-reasoning.md")
         
         # Save data field as separate file
-        data_file = base_output_dir / f"{prefix}data.json"
+        data_file = base_output_dir / "output-data.json"
         if results.get("data"):
             data_file.write_text(json.dumps(results["data"], indent=2, ensure_ascii=False), encoding="utf-8")
-            print(f"OK: {base_name} -> {prefix}data.json")
+            print(f"OK: {base_name} -> output-data.json")
         else:
             print(f"WARNING: No data to save for {base_name}")
+
+        # Write minimal artifacts (non-breaking additions)
+        write_minimal_artifacts(base_output_dir, results.get("raw_response"))

@@ -1,5 +1,5 @@
 # Python 3.11+ required for MCP support
-openai>=1.0.0
+openai>=2,<3
 pathlib2>=2.3.7
 typing-extensions>=4.0.0
 google-adk>=1.12.0 

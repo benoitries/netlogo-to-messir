@@ -4,12 +4,12 @@ A sophisticated multi-agent AI system that automatically converts NetLogo agent-
 
 ## 🚀 Overview
 
-This project implements an 8-step orchestration pipeline that transforms NetLogo simulation models into standardized MESSIR PlantUML diagrams. The system uses multiple specialized AI agents working in sequence to parse, analyze, map, and generate compliant MESSIR representations.
+This project implements an 8-step orchestration pipeline that transforms NetLogo simulation models into standardized MESSIR PlantUML diagrams. The system uses multiple specialized AI agents; steps 01 (Syntax) and 02 (Semantics) are always executed in parallel to optimize throughput, and the pipeline continues sequentially from step 03.
 
 ### Key Features
 
 - **Multi-Agent Architecture**: 7 specialized AI agents handling different aspects of the conversion
-- **Automated Orchestration**: Sequential pipeline with error correction and compliance auditing
+- **Automated Orchestration**: Parallel-first for steps 01–02, then sequential with error correction and compliance auditing
 - **MESSIR Compliance**: Ensures generated diagrams follow MESSIR-UCI standards
 - **Multiple AI Model Support**: Compatible with GPT-5, GPT-5-mini, and GPT-5-nano
 - **Comprehensive Logging**: Detailed execution tracking and performance metrics
@@ -67,8 +67,8 @@ netlogo-to-messir/
 │   ├── signaling-game-netlogo-code.md
 │   └── archive-initial-case-studies/
 ├── input-persona/                         # AI agent personas and rules
-│   ├── PSN_1_NetLogoSyntaxParser-v4.md
-│   ├── PSN_2_NetlogoSemanticsParser-v3.md
+│   ├── PSN_1_NetLogoSyntaxParser-v5.md
+│   ├── PSN_2_NetlogoSemanticsParser-v4.md
 │   ├── PSN_3_MessirUCIConceptsMapper-v3.md
 │   ├── PSN_4_MessirUCIScenarioWriter-v2.md
 │   ├── PSN_5_PlantUMLWriter-v2.md
@@ -111,7 +111,7 @@ netlogo-to-messir/
 
 ### Quick Start: Default Nano Model (Parallel)
 
-Run the orchestrator with a single command using the default nano model, the first case study (3d-solids), low reasoning effort, and parallel execution enabled:
+Run the orchestrator with a single command using the default nano model, the first case study (3d-solids), medium reasoning effort and medium text verbosity. Steps 01–02 always run in parallel:
 
 ```bash
 export OPENAI_API_KEY="<YOUR_API_KEY>" && \
@@ -119,6 +119,67 @@ python3 /Users/benoit.ries/Library/CloudStorage/OneDrive-UniversityofLuxembourg/
 ```
 
 This will persist outputs under the canonical structure in `code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>/<case>/`.
+
+### Experimentation parameters
+
+- Reasoning: `reasoning: { effort: "minimal" | "low" | "medium" | "high" }` (default: `medium`)
+- Text: `text: { verbosity: "low" | "medium" | "high" }` (default: `medium`)
+
+These parameters are supported through:
+- Direct programmatic calls: use `orchestrator.update_reasoning_config(effort, summary)` and `orchestrator.update_text_config(verbosity)`
+- Terminal interactive flow: select reasoning effort (now including "minimal") and text verbosity when prompted
+
+### OpenAI API Usage
+
+This project uses the OpenAI Responses API for all model inferences. There are no remaining usages of the legacy Chat Completions API.
+
+- Client: `from openai import OpenAI` with `client.responses.create(...)`
+- Reference: `https://platform.openai.com/docs/guides/latest-model#migrating-from-chat-completions-to-responses-api`
+
+#### Migration to OpenAI 2.x (Notes)
+- The project migrated from legacy Chat Completions to the unified Responses API.
+- Redundant polling/extraction code was centralized into `openai_client_utils.py`.
+- Environment: pinned `openai>=2,<3` in `requirements.txt`. Removed unused `openai-agents` if present.
+
+Before (1.x style):
+```python
+resp = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+text = resp.choices[0].message.content
+```
+
+After (2.x Responses):
+```python
+from openai import OpenAI
+from openai_client_utils import create_and_wait, get_output_text
+
+client = OpenAI()
+response = create_and_wait(client, {
+    "model": "gpt-4o-mini",
+    "instructions": "You are a helpful assistant.",
+    "input": [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}],
+})
+text = get_output_text(response)
+```
+
+Helper functions:
+- `create_and_wait(client, api_config)`: create a response job and poll until completed (raises on failure/timeout).
+- `get_output_text(response)`: best-effort plain text extraction (uses `response.output_text` when available).
+- `get_reasoning_summary(response)`: tolerant extraction of reasoning summary when present.
+
+#### Token usage semantics (logging)
+- The Responses API enforces `max_output_tokens` (cap applies to model output only). All configuration keys and code paths use `max_output_tokens` consistently.
+- Logged metrics per agent:
+  - Input tokens: tokens sent to the model.
+  - Reasoning tokens: subset of output used for chain-of-thought style reasoning (when available from `output_tokens_details`).
+  - Output tokens: model completion tokens; this is the value compared to the cap.
+  - Total tokens: Input + Output. This field is informational and is not capped.
+- Example log lines:
+  - `Input tokens: X, Reasoning tokens: R, Output tokens: Y (cap Z)`
+  - `Output cap usage: P%`
+  - `Total tokens: T (informational; not capped)`
 
 ## 📂 Output Layout
 
@@ -154,6 +215,21 @@ Validation script: `code-netlogo-to-messir/validate_output_layout.py` (simulated
 
 Success Criteria rule validation executed on 2025-09-25 09:45 (local time).
 Validation script: `code-netlogo-to-messir/validate_task_success_criteria.py` (checks checked criteria have end-of-line timestamps and unchecked ones do not).
+
+### Reference: Messir/UCI Rules Path (Consistency Check)
+
+The canonical Messir/UCI compliance rules file is referenced through the `MESSIR_RULES_FILE` constant in `config.py` and must point to:
+
+`code-netlogo-to-messir/input-persona/DSL_Target_MUCIM-full-definition-for-compliance.md`
+
+Quick verification commands:
+
+```bash
+rg -n "MESSIR_RULES_FILE" code-netlogo-to-messir
+rg -n "DSL_Target_MUCIM-full-definition-for-compliance.md" .
+```
+
+If either command shows mismatches, update the references in Python agents and Markdown docs accordingly.
 
 Cursor Rules validation executed on 2025-09-25 10:15 (local time).
 Created rules:
@@ -210,3 +286,8 @@ If you use this work in your research, please cite:
 ---
 
 *This project was vibe-coded with ❤️ using Cursor and Claude-4-Sonnet.*
+
+### Validation — 2025-10-15 00:02 (local time)
+- Removed all output token caps and legacy references across orchestrator and agents.
+- Ran `validate_task_success_criteria.py` — OK.
+- Layout validator points to historical archived runs only; current code paths unaffected.

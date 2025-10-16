@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Validate output layout under output/runs/<YYYY-MM-DD>/<HHMM>/<case>/.
+Validate output layout under output/runs/<YYYY-MM-DD>/<HHMM>/<combination>/.
+Where <combination> is <case>-<model-name>-reason-<reasoning-value>-verb-<verbosity-value>.
+
 - Picks the latest run by date/time unless --run <path> is provided
-- Checks presence of at least one case folder
+- Checks presence of at least one combination folder
 - Checks agent step subfolders match pattern NN-<agent_id>
-- Checks at least one orchestrator log file exists in the case folder
+- Checks at least one orchestrator log file exists in the combination folder root
 Exits with non-zero code on validation failure.
 """
 
@@ -21,18 +23,54 @@ STEP_DIR_REGEX = re.compile(r"^\d{2}-[a-z_]+$")
 def find_latest_run(base_runs_dir: Path) -> Optional[Path]:
     if not base_runs_dir.exists():
         return None
+    # Only consider YYYY-MM-DD folders (ignore archives or other folders)
+    date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}$")
     date_dirs = sorted(
-        [d for d in base_runs_dir.iterdir() if d.is_dir()],
+        [d for d in base_runs_dir.iterdir() if d.is_dir() and date_pattern.match(d.name)],
         reverse=True,
     )
     for date_dir in date_dirs:
+        # Only consider HHMM folders
+        time_pattern = re.compile(r"^\d{4}$")
         time_dirs = sorted(
-            [d for d in date_dir.iterdir() if d.is_dir()],
+            [d for d in date_dir.iterdir() if d.is_dir() and time_pattern.match(d.name)],
             reverse=True,
         )
         if time_dirs:
             return time_dirs[0]
     return None
+
+
+def _reasoning_md_has_non_empty_summary(md_path: Path) -> bool:
+    """Return True if the markdown file has a non-empty section under '## Reasoning Summary'.
+
+    Heuristic: find the line that equals the header, then the first non-empty
+    subsequent line (ignoring whitespace). If none found before next '##' or EOF,
+    consider empty. If the header is missing, consider empty.
+    """
+    try:
+        text = md_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return False
+
+    lines = [l.rstrip("\n") for l in text.splitlines()]
+    header_idx = None
+    for i, line in enumerate(lines):
+        if line.strip() == "## Reasoning Summary":
+            header_idx = i
+            break
+    if header_idx is None:
+        return False
+
+    # scan until next section header or EOF
+    for j in range(header_idx + 1, len(lines)):
+        line = lines[j].strip()
+        if line.startswith("## "):
+            # reached next section without content
+            return False
+        if line != "":
+            return True
+    return False
 
 
 def validate_case_folder(case_dir: Path) -> List[str]:
@@ -48,10 +86,28 @@ def validate_case_folder(case_dir: Path) -> List[str]:
                 f"Found non-conforming step folders in {case_dir.name}: {', '.join(bad)}"
             )
 
-    # Must have at least one orchestrator log file at case root
+    # Must have at least one orchestrator log file at combination root
     logs = list(case_dir.glob("*_orchestrator.log"))
     if not logs:
         errors.append(f"No orchestrator log found in {case_dir}")
+
+    # Ensure Step 5 produced a standalone .puml file
+    step5_dir = case_dir / "05-plantuml_writer"
+    if step5_dir.exists() and step5_dir.is_dir():
+        # Accept legacy filename pattern and new simplified name
+        puml_candidates = list(step5_dir.glob("*_plantuml_writer_diagram.puml"))
+        if not puml_candidates:
+            puml_candidates = list(step5_dir.glob("diagram.puml"))
+        if not puml_candidates:
+            errors.append(f"Missing PlantUML .puml file in {step5_dir} (expected diagram.puml or legacy *_plantuml_writer_diagram.puml)")
+
+    # New check: all *_reasoning.md files should have non-empty Reasoning Summary section
+    for step_dir in case_dir.iterdir():
+        if not step_dir.is_dir():
+            continue
+        for md_file in step_dir.glob("*_reasoning.md"):
+            if not _reasoning_md_has_non_empty_summary(md_file):
+                errors.append(f"Empty Reasoning Summary in {md_file}")
 
     return errors
 

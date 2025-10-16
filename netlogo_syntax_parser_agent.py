@@ -9,15 +9,23 @@ import json
 import datetime
 import pathlib
 import tiktoken
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from google.adk.agents import LlmAgent
 from openai import OpenAI
+from openai_client_utils import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens
+from response_dump_utils import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
+from response_schema_expected import expected_keys_for_agent
+from logging_utils import write_reasoning_md_from_payload
 
 from config import (
     PERSONA_SYNTAX_PARSER, OUTPUT_DIR, 
-    AGENT_VERSION_SYNTAX_PARSER, get_reasoning_config, get_reasoning_suffix,
-    validate_agent_response
+    AGENT_VERSION_SYNTAX_PARSER, get_reasoning_config,
+    validate_agent_response, AGENT_TIMEOUTS, DEFAULT_MODEL
 )
+
+# IL Syntax descriptor files (default absolute paths)
+IL_SYN_MAPPING_DEFAULT = (pathlib.Path(__file__).resolve().parent / "input-persona" / "DSL_IL_SYN-mapping.md").resolve()
+IL_SYN_DESCRIPTION_DEFAULT = (pathlib.Path(__file__).resolve().parent / "input-persona" / "DSL_IL_SYN-description.md").resolve()
 
 # Configuration
 PERSONA_FILE = PERSONA_SYNTAX_PARSER
@@ -34,22 +42,26 @@ def sanitize_model_name(model_name: str) -> str:
     return model_name.replace("-", "_")
 
 class NetLogoSyntaxParserAgent(LlmAgent):
-    model: str = "gpt-5"
+    model: str = DEFAULT_MODEL
     timestamp: str = ""
     name: str = "NetLogo Syntax Parser"
-    max_tokens: int = 16000
-    client: OpenAI = None
-    reasoning_effort: str = "low"
-    reasoning_summary: str = "auto"
     
-    def __init__(self, model_name: str = "gpt-5", external_timestamp: str = None, max_tokens: int = 16000):
+    client: OpenAI = None
+    reasoning_effort: str = "medium"
+    reasoning_summary: str = "auto"
+    text_verbosity: str = "medium"
+    # IL-SYN reference inputs (absolute paths set by orchestrator)
+    il_syn_mapping_path: Optional[str] = None
+    il_syn_description_path: Optional[str] = None
+    
+    def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
         sanitized_name = sanitize_model_name(model_name)
         super().__init__(
             name=f"netlogo_ast_agent_{sanitized_name}",
             description="AST-based agent for parsing NetLogo code structure"
         )
         self.model = model_name
-        # Pydantic will handle max_tokens field assignment automatically
+        
         # Use external timestamp if provided, otherwise generate new one
         if external_timestamp:
             self.timestamp = external_timestamp
@@ -63,6 +75,28 @@ class NetLogoSyntaxParserAgent(LlmAgent):
             raise SystemExit("ERROR: OPENAI_API_KEY environment variable required")
         self.client = OpenAI(api_key=api_key)
     
+    def update_il_syn_inputs(self, mapping_path: Optional[str], description_path: Optional[str]):
+        """Configure IL-SYN external reference file paths.
+
+        Args:
+            mapping_path: Absolute path to DSL_IL_SYN-mapping.md
+            description_path: Absolute path to DSL_IL_SYN-description.md
+        """
+        self.il_syn_mapping_path = mapping_path
+        self.il_syn_description_path = description_path
+        # Lightweight validation/logging
+        try:
+            if mapping_path:
+                mp = pathlib.Path(mapping_path)
+                if not mp.exists():
+                    print(f"[WARNING] IL-SYN mapping file not found: {mapping_path}")
+            if description_path:
+                dp = pathlib.Path(description_path)
+                if not dp.exists():
+                    print(f"[WARNING] IL-SYN description file not found: {description_path}")
+        except Exception as e:
+            print(f"[WARNING] Failed to validate IL-SYN paths: {e}")
+    
     def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
         """
         Update reasoning configuration for this agent.
@@ -73,7 +107,30 @@ class NetLogoSyntaxParserAgent(LlmAgent):
         """
         self.reasoning_effort = reasoning_effort
         self.reasoning_summary = reasoning_summary
+
+    def update_text_config(self, text_verbosity: str):
+        """Update text verbosity configuration for this agent."""
+        self.text_verbosity = text_verbosity
     
+    def apply_config(self, config: Dict[str, Any]) -> None:
+        """Apply a unified configuration bundle to this agent.
+
+        Supported keys (optional): "reasoning_effort", "reasoning_summary", "text_verbosity".
+        Unknown keys are ignored.
+        """
+        if not isinstance(config, dict):
+            return
+        reasoning_effort = config.get("reasoning_effort")
+        reasoning_summary = config.get("reasoning_summary")
+        text_verbosity = config.get("text_verbosity")
+
+        if reasoning_effort is not None or reasoning_summary is not None:
+            # Only update provided parts; keep existing values when None
+            self.reasoning_effort = reasoning_effort or self.reasoning_effort
+            self.reasoning_summary = reasoning_summary or self.reasoning_summary
+        if text_verbosity is not None:
+            self.text_verbosity = text_verbosity
+
     def count_input_tokens(self, instructions: str, input_text: str) -> int:
         """
         Count input tokens exactly using tiktoken for the given model.
@@ -87,10 +144,9 @@ class NetLogoSyntaxParserAgent(LlmAgent):
         """
         try:
             # Get the appropriate encoding for the model
-            if "gpt-4" in self.model or "gpt-3.5" in self.model:
+            try:
                 encoding = tiktoken.encoding_for_model(self.model)
-            else:
-                # For other models, use cl100k_base which is used by GPT-4 and GPT-3.5
+            except Exception:
                 encoding = tiktoken.get_encoding("cl100k_base")
             
             # Combine instructions and input text (this is what gets sent to the model)
@@ -107,8 +163,27 @@ class NetLogoSyntaxParserAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def parse_netlogo_code(self, code: str, filename: str = "input.nlogo") -> Dict[str, Any]:
-        instructions = f"{persona}"
+    def parse_netlogo_code(self, code: str, filename: str = "input.nlogo", output_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
+        # Compose instructions: persona + explicit IL-SYN references as separate context files
+        ilsyn_refs = ""
+        try:
+            # Allow orchestrator to provide absolute paths via instance attributes
+            mapping_path = pathlib.Path(getattr(self, "il_syn_mapping_path", IL_SYN_MAPPING_DEFAULT))
+            description_path = pathlib.Path(getattr(self, "il_syn_description_path", IL_SYN_DESCRIPTION_DEFAULT))
+            mapping_txt = mapping_path.read_text(encoding="utf-8") if mapping_path.exists() else ""
+            description_txt = description_path.read_text(encoding="utf-8") if description_path.exists() else ""
+            ilsyn_refs = f"\n\n[REFERENCE: DSL_IL_SYN-mapping.md]\n{mapping_txt}\n\n[REFERENCE: DSL_IL_SYN-description.md]\n{description_txt}\n"
+            # Log reference ingestion status similarly to semantics agent
+            if mapping_path and not mapping_txt:
+                print(f"[WARNING] IL-SYN mapping file not found: {mapping_path}")
+            if description_path and not description_txt:
+                print(f"[WARNING] IL-SYN description file not found: {description_path}")
+            if mapping_txt or description_txt:
+                print("OK: Ingested IL-SYN reference files for syntax parsing")
+        except Exception as e:
+            print(f"[WARNING] Failed to load IL-SYN references: {e}")
+
+        instructions = f"{persona}{ilsyn_refs}"
         
         input_text = f"""
 Filename: {filename}
@@ -122,9 +197,6 @@ Code:
         exact_input_tokens = self.count_input_tokens(instructions, input_text)
         
         try:
-            # Use the configured max_tokens value
-            max_completion_tokens = self.max_tokens
-            
             # Create response using OpenAI Responses API
             api_config = get_reasoning_config("syntax_parser")
             # Update reasoning configuration with agent's settings
@@ -136,63 +208,24 @@ Code:
                 "input": input_text
             })
             
-            response = self.client.responses.create(**api_config)
+            timeout = AGENT_TIMEOUTS.get("syntax_parser")
+            response = create_and_wait(self.client, api_config, timeout_seconds=timeout)
             
-            # Poll for completion
-            while response.status not in ("completed", "failed", "cancelled"):
-                import time
-                time.sleep(1)
-                response = self.client.responses.retrieve(response.id)
-            
-            if response.status != "completed":
-                return {
-                    "reasoning_summary": f"Response failed with status: {response.status}",
-                    "data": None,
-                    "errors": [f"Response failed with status: {response.status}"],
-                    "tokens_used": 0,
-                    "input_tokens": 0,
-                    "output_tokens": 0
-                }
-            
-            # Extract content from response - use the correct path
-            content = ""
-            reasoning_summary = ""
-            
-            if response.output:
-                if len(response.output) > 1:
-                    # Model supports reasoning: reasoning is in first output item, content in second
-                    reasoning_item = response.output[0]
-                    if hasattr(reasoning_item, 'summary') and reasoning_item.summary:
-                        for summary_item in reasoning_item.summary:
-                            if hasattr(summary_item, 'text'):
-                                reasoning_summary += summary_item.text + "\n"
-                    
-                    # The actual content is in the second output item (index 1)
-                    message_item = response.output[1]
-                    if hasattr(message_item, 'content') and message_item.content:
-                        content_item = message_item.content[0]
-                        if hasattr(content_item, 'text'):
-                            content = content_item.text
-                else:
-                    # Fallback: content is in the first (and only) output item
-                    message_item = response.output[0]
-                    if hasattr(message_item, 'content') and message_item.content:
-                        content_item = message_item.content[0]
-                        if hasattr(content_item, 'text'):
-                            content = content_item.text
-                    
-                    # Set a default reasoning summary for unexpected response structure
-                    reasoning_summary = "Unexpected response structure - no reasoning summary available."
+            # Extract content and reasoning via helpers
+            content = get_output_text(response)
+            reasoning_summary = get_reasoning_summary(response)
+            raw_response_serialized = serialize_response_to_dict(response)
             
             # Check if response is empty
             if not content or content.strip() == "":
                 return {
                     "reasoning_summary": "Received empty response from API",
                     "data": None,
-                    "errors": ["Empty response from API - this may indicate a model issue or token limit problem"],
+                    "errors": ["Empty response from API - this may indicate a model issue or timeout"],
                     "tokens_used": 0,
                     "input_tokens": 0,
-                    "output_tokens": 0
+                    "output_tokens": 0,
+                    "raw_response": raw_response_serialized
                 }
             
             # Parse JSON response
@@ -223,49 +256,17 @@ Code:
                         ast = response_data
                 errors = response_data.get("errors", []) if isinstance(response_data, dict) else []
 
-                # Extract token usage from response
-                tokens_used = 0
-                input_tokens = 0
-                output_tokens = 0
-                reasoning_tokens = 0
-                
-                # Get token usage from OpenAI Responses API
-                usage_dict = None
-                if hasattr(response, 'usage') and response.usage:
-                    tokens_used = getattr(response.usage, 'total_tokens', 0)
-                    api_input_tokens = getattr(response.usage, 'input_tokens', 0)
-                    api_output_tokens = getattr(response.usage, 'output_tokens', 0)
-                    # Try to read reasoning tokens from output_tokens_details if available
-                    reasoning_details = getattr(response.usage, 'output_tokens_details', None)
-                    if reasoning_details is not None:
-                        reasoning_tokens = getattr(reasoning_details, 'reasoning_tokens', 0)
-                    else:
-                        reasoning_tokens = getattr(response.usage, 'reasoning_tokens', 0)
-                    
-                    # Use exact input token count only if API doesn't provide it
-                    if api_input_tokens and api_input_tokens > 0:
-                        input_tokens = api_input_tokens
-                        output_tokens = api_output_tokens
-                    else:
-                        input_tokens = exact_input_tokens
-                        output_tokens = tokens_used - exact_input_tokens if tokens_used > exact_input_tokens else 0
-                    
-                    usage_dict = {
-                        "total_tokens": tokens_used,
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
-                        "reasoning_tokens": reasoning_tokens
-                    }
-                    # Debug: Print usage details
-                    print(f"# Usage details")
-                    print(f"response.usage: {response.usage}")
-                    print(f"Exact input tokens: {exact_input_tokens}")
-                    print(f"API input tokens: {api_input_tokens}")
-                    print(f"Final input tokens: {input_tokens}")
-                    print(f"Output tokens: {output_tokens}")
-                    print(f"Total tokens: {tokens_used}")
-                else:
-                    print(f"[WARNING] No usage data available in response")
+                # Extract token usage from response (centralized helper)
+                usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
+                tokens_used = usage.get("total_tokens", 0)
+                input_tokens = usage.get("input_tokens", 0)
+                api_output_tokens = usage.get("output_tokens", 0)
+                reasoning_tokens = usage.get("reasoning_tokens", 0)
+                # Prefer API-derived total output tokens when possible
+                api_total_output_tokens = max((tokens_used or 0) - (input_tokens or 0), 0)
+                visible_output_tokens = max((api_total_output_tokens or api_output_tokens or 0) - (reasoning_tokens or 0), 0)
+                total_output_tokens = api_total_output_tokens if api_total_output_tokens is not None else (visible_output_tokens + (reasoning_tokens or 0))
+                usage_dict = usage
 
                 return {
                     "reasoning_summary": reasoning_summary,
@@ -273,9 +274,11 @@ Code:
                     "errors": [],
                     "tokens_used": tokens_used,
                     "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
+                    "visible_output_tokens": visible_output_tokens,
                     "raw_usage": usage_dict,
-                    "reasoning_tokens": reasoning_tokens
+                    "reasoning_tokens": reasoning_tokens,
+                    "total_output_tokens": total_output_tokens,
+                    "raw_response": raw_response_serialized
                 }
             except json.JSONDecodeError as e:
                 return {
@@ -284,17 +287,20 @@ Code:
                     "errors": [f"Failed to parse AST JSON: {e}", f"Raw response: {content[:200]}..."],
                     "tokens_used": 0,
                     "input_tokens": 0,
-                    "output_tokens": 0
+                    "visible_output_tokens": 0,
+                    "total_output_tokens": 0,
+                    "raw_response": raw_response_serialized
                 }
                 
         except Exception as e:
             return {
                 "reasoning_summary": f"Error during model inference: {e}",
                 "data": None,
-                "errors": [f"Model inference error: {e}", f"Model used: {self.model}", f"Token limit: {max_completion_tokens}"],
+                "errors": [f"Model inference error: {e}", f"Model used: {self.model}"],
                 "tokens_used": 0,
                 "input_tokens": 0,
-                "output_tokens": 0
+                "visible_output_tokens": 0,
+                "total_output_tokens": 0
             }
     
 
@@ -309,15 +315,10 @@ Code:
         # Use the agent's current reasoning level instead of global config
         reasoning_suffix = f"reasoning-{self.reasoning_effort}-{self.reasoning_summary}"
         
-        if step_number is not None:
-            prefix = f"{base_name}_{self.timestamp}_{model_name}_{step_number}_{agent_name}_{AGENT_VERSION}_{reasoning_suffix}_"
-        else:
-            prefix = f"{base_name}_{self.timestamp}_{model_name}_{agent_name}_{AGENT_VERSION}_{reasoning_suffix}_"
-        
         # Resolve base output directory (per-agent if provided)
         base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
-        # Save complete response as single JSON file
-        json_file = base_output_dir / f"{prefix}response.json"
+        # Save complete response as single JSON file (simplified filename)
+        json_file = base_output_dir / "output-response.json"
         
         # Create complete response structure
         complete_response = {
@@ -331,8 +332,10 @@ Code:
             "errors": results.get("errors", []),
             "tokens_used": results.get("tokens_used", 0),
             "input_tokens": results.get("input_tokens", 0),
-            "output_tokens": results.get("output_tokens", 0),
-            "reasoning_tokens": results.get("reasoning_tokens", 0)
+            "visible_output_tokens": results.get("visible_output_tokens", 0),
+            "reasoning_tokens": results.get("reasoning_tokens", 0),
+            "total_output_tokens": results.get("total_output_tokens", (results.get("visible_output_tokens", 0) or 0) + (results.get("reasoning_tokens", 0) or 0)),
+            "raw_response": results.get("raw_response")
         }
         
         # Validate response before saving
@@ -340,44 +343,62 @@ Code:
         if validation_errors:
             print(f"[WARNING] Validation errors in syntax parser response: {validation_errors}")
         
+        # Verify exact keys before saving
+        expected_keys = expected_keys_for_agent("syntax_parser")
+        ok, missing, extra = verify_exact_keys(complete_response, expected_keys)
+        # Debug logging to diagnose schema/key mismatches and write targets
+        try:
+            print(f"[DEBUG] syntax_parser.save_results WRITE_FILES={WRITE_FILES}")
+            print(f"[DEBUG] syntax_parser.save_results output_dir={base_output_dir}")
+            print(f"[DEBUG] syntax_parser.save_results base_name={base_name} model={self.model} step_number={step_number}")
+            print(f"[DEBUG] syntax_parser emitted keys: {sorted(list(complete_response.keys()))}")
+            print(f"[DEBUG] syntax_parser expected keys: {sorted(list(expected_keys))}")
+            if not ok:
+                print(f"[ERROR] syntax_parser missing keys: {sorted(list(missing))}")
+                print(f"[ERROR] syntax_parser extra keys: {sorted(list(extra))}")
+        except Exception as e:
+            print(f"[WARNING] Failed to print debug schema info (syntax_parser): {e}")
+        if not ok:
+            raise ValueError(f"response.json keys mismatch for syntax_parser. Missing: {sorted(missing)} Extra: {sorted(extra)}")
+
         # Save complete response as JSON file
         json_file.write_text(json.dumps(complete_response, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"OK: {base_name} -> {prefix}response.json")
+        print(f"OK: {base_name} -> output-response.json")
         
-        # Save reasoning summary as markdown file
-        reasoning_file = base_output_dir / f"{prefix}reasoning.md"
-        reasoning_content = f"""# Reasoning Summary - {agent_name.title().replace('_', ' ')}
+        # Streaming artifact generation intentionally disabled to avoid legacy file creation
 
-**Base Name:** {base_name}
-**Model:** {self.model}
-**Timestamp:** {self.timestamp}
-**Step Number:** {step_number if step_number else 'N/A'}
-**Reasoning Level:** {self.reasoning_effort}
-**Reasoning Summary:** {self.reasoning_summary}
-
-## Token Usage
-
-- **Total Tokens:** {results.get("tokens_used", 0):,}
-- **Input Tokens:** {results.get("input_tokens", 0):,}
-- **Output Tokens:** {results.get("output_tokens", 0):,}
- - **Reasoning Tokens:** {results.get("reasoning_tokens", 0):,}
-
-## Reasoning Summary
-
-{results.get("reasoning_summary", "No reasoning summary available")}
-
-## Errors
-
-{chr(10).join(f"- {error}" for error in results.get("errors", [])) if results.get("errors") else "No errors"}
-"""
-        reasoning_file.write_text(reasoning_content, encoding="utf-8")
-        print(f"OK: {base_name} -> {prefix}reasoning.md")
+        # Save reasoning payload as markdown file (centralized writer)
+        payload = {
+            "reasoning": results.get("reasoning"),
+            "reasoning_summary": results.get("reasoning_summary"),
+            "tokens_used": results.get("tokens_used"),
+            "input_tokens": results.get("input_tokens"),
+            "visible_output_tokens": results.get("visible_output_tokens"),
+            "total_output_tokens": results.get("total_output_tokens"),
+            "reasoning_tokens": results.get("reasoning_tokens"),
+            "usage": results.get("raw_usage"),
+            "errors": results.get("errors"),
+        }
+        write_reasoning_md_from_payload(
+            output_dir=base_output_dir,
+            agent_name=agent_name,
+            base_name=base_name,
+            model=self.model,
+            timestamp=self.timestamp,
+            reasoning_effort=self.reasoning_effort,
+            step_number=step_number,
+            payload=payload,
+        )
+        print(f"OK: {base_name} -> reasoning.md")
         
         # Save data field as separate file
-        data_file = base_output_dir / f"{prefix}data.json"
+        data_file = base_output_dir / "output-data.json"
         if results.get("data"):
             data_file.write_text(json.dumps(results["data"], indent=2, ensure_ascii=False), encoding="utf-8")
-            print(f"OK: {base_name} -> {prefix}data.json")
+            print(f"OK: {base_name} -> output-data.json")
         else:
             print(f"WARNING: No data to save for {base_name}")
+
+        # Write minimal artifacts (non-breaking additions)
+        write_minimal_artifacts(base_output_dir, results.get("raw_response"))
 

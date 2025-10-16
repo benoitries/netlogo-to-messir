@@ -49,11 +49,12 @@ from netlogo_plantuml_messir_corrector_agent import NetLogoPlantUMLMessirCorrect
 from netlogo_plantuml_auditor_agent import NetLogoPlantUMLMessirAuditorAgent
 
 from config import (
-    INPUT_NETLOGO_DIR, INPUT_ICRASH_DIR, OUTPUT_DIR, 
-    AGENT_CONFIGS, AVAILABLE_MODELS, ensure_directories,
-    validate_agent_response, ENABLE_PARALLEL_FIRST_STAGE
+    INPUT_NETLOGO_DIR, INPUT_ICRASH_DIR, OUTPUT_DIR, INPUT_PERSONA_DIR,
+    AGENT_CONFIGS, AVAILABLE_MODELS, DEFAULT_MODEL, ensure_directories,
+    validate_agent_response
 )
-from logging_utils import setup_orchestration_logger
+from logging_utils import setup_orchestration_logger, format_parameter_bundle, attach_stdio_to_logger
+from path_utils import get_run_base_dir
 from pathlib import Path
 from config import OUTPUT_DIR
 
@@ -63,15 +64,12 @@ ensure_directories()
 class NetLogoOrchestrator:
     """Orchestrator for processing NetLogo files using both AST and Semantic agents in parallel."""
     
-    def __init__(self, model_name: str = "gpt-5", 
-                 max_tokens_config: Dict[str, int] = None):
+    def __init__(self, model_name: str = DEFAULT_MODEL):
         """
         Initialize the NetLogo Orchestrator.
         
         Args:
             model_name: AI model to use for processing
-            max_tokens_config: Dictionary mapping agent names to max token values
-                              Default values will be used if not provided
         """
         self.model = model_name
         # Format: YYYYMMDD_HHMM for better readability
@@ -94,16 +92,16 @@ class NetLogoOrchestrator:
             "plantuml_messir_final_auditor": 0
         }
         
-        # Enhanced token usage tracking
+        # Token usage tracking (no caps)
         self.token_usage = {
-            "syntax_parser": {"used": 0, "max": 0},
-            "semantics_parser": {"used": 0, "max": 0},
-            "messir_mapper": {"used": 0, "max": 0},
-            "scenario_writer": {"used": 0, "max": 0},
-            "plantuml_writer": {"used": 0, "max": 0},
-            "plantuml_messir_auditor": {"used": 0, "max": 0},
-            "plantuml_messir_corrector": {"used": 0, "max": 0},
-            "plantuml_messir_final_auditor": {"used": 0, "max": 0}
+            "syntax_parser": {"used": 0},
+            "semantics_parser": {"used": 0},
+            "messir_mapper": {"used": 0},
+            "scenario_writer": {"used": 0},
+            "plantuml_writer": {"used": 0},
+            "plantuml_messir_auditor": {"used": 0},
+            "plantuml_messir_corrector": {"used": 0},
+            "plantuml_messir_final_auditor": {"used": 0}
         }
         
         # Detailed timing tracking with start/end timestamps
@@ -118,55 +116,104 @@ class NetLogoOrchestrator:
             "plantuml_messir_final_auditor": {"start": 0, "end": 0, "duration": 0}
         }
         
-        # Use provided config or defaults
-        if max_tokens_config:
-            self.max_tokens_config = max_tokens_config
-        else:
-            # Extract max_completion_tokens from agent configs
-            self.max_tokens_config = {
-                agent: config["max_completion_tokens"] 
-                for agent, config in AGENT_CONFIGS.items()
-            }
+        # Token caps removed entirely
+        
         
         # Store agent configurations for reasoning level updates
         self.agent_configs = AGENT_CONFIGS.copy()
         
-        # Initialize max tokens in token usage tracking
-        for agent_name in self.token_usage:
-            self.token_usage[agent_name]["max"] = self.max_tokens_config.get(agent_name, 0)
-        
-        # Initialize agents with token configuration
-        self.syntax_parser_agent = NetLogoSyntaxParserAgent(model_name, self.timestamp, max_tokens=self.max_tokens_config["syntax_parser"])
-        self.semantics_parser_agent = NetLogoSemanticsParserAgent(model_name, self.timestamp, max_tokens=self.max_tokens_config["semantics_parser"])
-        self.messir_mapper_agent = NetLogoMessirMapperAgent(model_name, self.timestamp, max_tokens=self.max_tokens_config["messir_mapper"])
-        self.scenario_writer_agent = NetLogoScenarioWriterAgent(model_name, self.timestamp, max_tokens=self.max_tokens_config["scenario_writer"])
-        self.plantuml_writer_agent = NetLogoPlantUMLWriterAgent(model_name, self.timestamp, max_tokens=self.max_tokens_config["plantuml_writer"])
-        self.plantuml_messir_auditor_agent = NetLogoPlantUMLMessirAuditorAgent(model_name, self.timestamp, max_tokens=self.max_tokens_config["plantuml_auditor"])
-        self.plantuml_messir_corrector_agent = NetLogoPlantUMLMessirCorrectorAgent(model_name, self.timestamp, max_tokens=self.max_tokens_config["plantuml_corrector"])
-        self.plantuml_messir_final_auditor_agent = NetLogoPlantUMLMessirAuditorAgent(model_name, self.timestamp, max_tokens=self.max_tokens_config["plantuml_auditor"])
-        
-    def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
+        # Initialize agents (no max token caps)
+        self.syntax_parser_agent = NetLogoSyntaxParserAgent(model_name, self.timestamp)
+        # Pass IL-SYN file absolute paths to syntax parser agent (can be overridden externally)
+        try:
+            base_dir = pathlib.Path(__file__).resolve().parent
+            ilsyn_mapping_path = (base_dir / "input-persona" / "DSL_IL_SYN-mapping.md").resolve()
+            ilsyn_description_path = (base_dir / "input-persona" / "DSL_IL_SYN-description.md").resolve()
+            if hasattr(self.syntax_parser_agent, "update_il_syn_inputs"):
+                self.syntax_parser_agent.update_il_syn_inputs(str(ilsyn_mapping_path), str(ilsyn_description_path))
+            else:
+                # Backward compatibility: set attributes directly if method unavailable
+                self.syntax_parser_agent.il_syn_mapping_path = str(ilsyn_mapping_path)
+                self.syntax_parser_agent.il_syn_description_path = str(ilsyn_description_path)
+            print("OK: Configured IL-SYN reference paths for syntax parser")
+        except Exception as e:
+            print(f"[WARNING] Unable to set IL-SYN paths for syntax parser: {e}")
+        self.semantics_parser_agent = NetLogoSemanticsParserAgent(model_name, self.timestamp)
+        # Configure IL-SEM inputs for semantics agent (absolute paths)
+        il_sem_mapping = INPUT_PERSONA_DIR / "DSL_IL_SEM-mapping.md"
+        il_sem_description = INPUT_PERSONA_DIR / "DSL_IL_SEM-description.md"
+        if hasattr(self.semantics_parser_agent, "update_il_sem_inputs"):
+            self.semantics_parser_agent.update_il_sem_inputs(str(il_sem_mapping), str(il_sem_description))
+        self.messir_mapper_agent = NetLogoMessirMapperAgent(model_name, self.timestamp)
+        self.scenario_writer_agent = NetLogoScenarioWriterAgent(model_name, self.timestamp)
+        self.plantuml_writer_agent = NetLogoPlantUMLWriterAgent(model_name, self.timestamp)
+        self.plantuml_messir_auditor_agent = NetLogoPlantUMLMessirAuditorAgent(model_name, self.timestamp)
+        self.plantuml_messir_corrector_agent = NetLogoPlantUMLMessirCorrectorAgent(model_name, self.timestamp)
+        self.plantuml_messir_final_auditor_agent = NetLogoPlantUMLMessirAuditorAgent(model_name, self.timestamp)
+
+    def update_agent_configs(self, reasoning_effort: str = None, reasoning_summary: str = None, text_verbosity: str = None):
         """
-        Update reasoning configuration for all agents.
+        Update configuration for all agents.
         
         Args:
-            reasoning_effort: "low", "medium", or "high"
+            reasoning_effort: "minimal", "low", "medium", or "high"
             reasoning_summary: "auto" or "manual"
+            text_verbosity: "low", "medium", or "high"
         """
-        # Update agent configurations
+        # Update agent configuration dictionaries
         for agent_name in self.agent_configs:
-            self.agent_configs[agent_name]["reasoning_effort"] = reasoning_effort
-            self.agent_configs[agent_name]["reasoning_summary"] = reasoning_summary
-        
-        # Update individual agents
-        self.syntax_parser_agent.update_reasoning_config(reasoning_effort, reasoning_summary)
-        self.semantics_parser_agent.update_reasoning_config(reasoning_effort, reasoning_summary)
-        self.messir_mapper_agent.update_reasoning_config(reasoning_effort, reasoning_summary)
-        self.scenario_writer_agent.update_reasoning_config(reasoning_effort, reasoning_summary)
-        self.plantuml_writer_agent.update_reasoning_config(reasoning_effort, reasoning_summary)
-        self.plantuml_messir_auditor_agent.update_reasoning_config(reasoning_effort, reasoning_summary)
-        self.plantuml_messir_corrector_agent.update_reasoning_config(reasoning_effort, reasoning_summary)
-        self.plantuml_messir_final_auditor_agent.update_reasoning_config(reasoning_effort, reasoning_summary)
+            if reasoning_effort is not None:
+                self.agent_configs[agent_name]["reasoning_effort"] = reasoning_effort
+            if reasoning_summary is not None:
+                self.agent_configs[agent_name]["reasoning_summary"] = reasoning_summary
+            if text_verbosity is not None:
+                self.agent_configs[agent_name]["text_verbosity"] = text_verbosity
+
+        # List of (agent attr, text_support_flag)
+        agent_list = [
+            ("syntax_parser_agent", True),
+            ("semantics_parser_agent", True),
+            ("messir_mapper_agent", True),
+            ("scenario_writer_agent", True),
+            ("plantuml_writer_agent", True),
+            ("plantuml_messir_auditor_agent", True),
+            ("plantuml_messir_corrector_agent", True),
+            ("plantuml_messir_final_auditor_agent", True),
+        ]
+
+        for agent_attr, supports_text in agent_list:
+            agent = getattr(self, agent_attr, None)
+            if agent is not None:
+                # Prefer unified apply_config if available
+                bundle = {}
+                if reasoning_effort is not None:
+                    bundle["reasoning_effort"] = reasoning_effort
+                if reasoning_summary is not None:
+                    bundle["reasoning_summary"] = reasoning_summary
+                if text_verbosity is not None:
+                    bundle["text_verbosity"] = text_verbosity
+
+                if hasattr(agent, "apply_config") and bundle:
+                    try:
+                        agent.apply_config(bundle)
+                        continue
+                    except Exception as e:
+                        print(f"[WARNING] apply_config failed on {agent_attr}: {e}; falling back to legacy setters")
+
+                # Fallback to legacy setters
+                if reasoning_effort is not None and reasoning_summary is not None and hasattr(agent, "update_reasoning_config"):
+                    agent.update_reasoning_config(reasoning_effort, reasoning_summary)
+                if text_verbosity is not None and hasattr(agent, "update_text_config"):
+                    agent.update_text_config(text_verbosity)
+
+    def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
+        """Backward-compatible wrapper to update reasoning across agents."""
+        self.update_agent_configs(reasoning_effort=reasoning_effort, reasoning_summary=reasoning_summary)
+
+    def update_text_config(self, text_verbosity: str):
+        """Backward-compatible wrapper to update text verbosity across agents."""
+        self.update_agent_configs(text_verbosity=text_verbosity)
+
     
     def find_netlogo_files(self, base_name: str) -> List[Dict[str, Any]]:
         """
@@ -241,7 +288,7 @@ class NetLogoOrchestrator:
         self.detailed_timing[agent_name]["start"] = start_time
         
         self.logger.info(f"🚀 Starting {agent_name} agent execution...")
-        self.logger.info(f"   Max tokens configured: {self.token_usage[agent_name]['max']:,}")
+        # No max tokens configured
         
         try:
             # Execute the agent
@@ -262,14 +309,46 @@ class NetLogoOrchestrator:
                 tokens_used = result.get("tokens_used", 0)
                 input_tokens = result.get("input_tokens", 0)
                 output_tokens = result.get("output_tokens", 0)
+                reasoning_tokens = result.get("reasoning_tokens", 0)
                 self.token_usage[agent_name]["used"] = tokens_used
                 
                 self.logger.info(f"✅ {agent_name} completed in {format_duration(duration)}")
-                self.logger.info(f"   Tokens used: {tokens_used:,} / {self.token_usage[agent_name]['max']:,}")
-                self.logger.info(f"   Input tokens: {input_tokens:,}, Output tokens: {output_tokens:,}")
-                if self.token_usage[agent_name]['max'] > 0:
-                    efficiency = (tokens_used/self.token_usage[agent_name]['max']*100)
-                    self.logger.info(f"   Token efficiency: {efficiency:.1f}%")
+                # Clarified logging: no token caps, just report numbers
+                # Explicitly separate visible vs reasoning output tokens, and their sum
+                # Prefer explicit fields if present in result
+                explicit_visible = result.get("visible_output_tokens") if isinstance(result, dict) else None
+                # Prefer API output_tokens (completion channel, reasoning+visible) for total output
+                # Treat 0 or negative as unavailable to avoid inconsistent zeros when visible/reasoning are present
+                explicit_total_out = None
+                try:
+                    if output_tokens is not None and int(output_tokens) > 0:
+                        explicit_total_out = int(output_tokens)
+                except Exception:
+                    explicit_total_out = None
+                reasoning_output_tokens = (reasoning_tokens or 0)
+                # Derive visible: prefer explicit; else from total_output - reasoning; else output - reasoning; clamp >= 0
+                derived_visible = None
+                if explicit_visible is not None:
+                    derived_visible = int(explicit_visible)
+                elif explicit_total_out is not None:
+                    derived_visible = int(explicit_total_out) - reasoning_output_tokens
+                else:
+                    derived_visible = (output_tokens or 0) - reasoning_output_tokens
+                visible_output_tokens = max(int(derived_visible), 0)
+                # Derive total output: prefer explicit (when positive); else visible + reasoning
+                total_output_tokens = (
+                    int(explicit_total_out)
+                    if explicit_total_out is not None
+                    else (visible_output_tokens + reasoning_output_tokens)
+                )
+
+                self.logger.info(f"   Input Tokens = {input_tokens:,}")
+                self.logger.info(
+                    f"   Output Tokens = {total_output_tokens:,} ( reasoning = {reasoning_output_tokens:,}, visibleOutput={visible_output_tokens:,})"
+                )
+                self.logger.info(
+                    f"   Total Tokens = {tokens_used:,}"
+                )
             else:
                 self.logger.info(f"✅ {agent_name} completed in {format_duration(duration)}")
                 self.logger.info(f"   Token usage: Not available")
@@ -304,7 +383,7 @@ class NetLogoOrchestrator:
         # Calculate totals
         total_time = sum(self.detailed_timing[agent]["duration"] for agent in self.detailed_timing)
         total_tokens_used = sum(self.token_usage[agent]["used"] for agent in self.token_usage)
-        total_tokens_max = sum(self.token_usage[agent]["max"] for agent in self.token_usage)
+        # No token caps summary
         
         # Calculate input/output token totals from processed results
         agent_to_result_key = {
@@ -319,45 +398,60 @@ class NetLogoOrchestrator:
         }
         total_input_tokens = 0
         total_output_tokens = 0
+        total_reasoning_tokens = 0
         for agent in agent_names:
             result_key = agent_to_result_key.get(agent, agent)
             if processed_results.get(result_key, {}).get("data"):
                 total_input_tokens += processed_results[result_key].get("input_tokens", 0)
                 total_output_tokens += processed_results[result_key].get("output_tokens", 0)
+                total_reasoning_tokens += processed_results[result_key].get("reasoning_tokens", 0)
         
         # Agent execution summary table
         self.logger.info(f"\n📊 AGENT EXECUTION DETAILS:")
-        self.logger.info(f"{'Agent':<25} {'Status':<10} {'Time':<15} {'Total Tokens':<15} {'Input':<10} {'Output':<10} {'Max':<10} {'Efficiency':<12}")
-        self.logger.info(f"{'-'*100}")
+        self.logger.info(f"{'Agent':<25} {'Status':<10} {'Time':<15} {'Total Tokens':<15} {'Input':<10} {'VisibleOut':<12} {'Reasoning':<10} {'Output Tokens':<14}")
+        self.logger.info(f"{'-'*120}")
         
         for agent in agent_names:
             duration = self.detailed_timing[agent]["duration"]
             tokens_used = self.token_usage[agent]["used"]
-            max_tokens = self.token_usage[agent]["max"]
             result_key = agent_to_result_key.get(agent, agent)
-            input_tokens = processed_results.get(result_key, {}).get("input_tokens", 0)
-            output_tokens = processed_results.get(result_key, {}).get("output_tokens", 0)
+            line_data = processed_results.get(result_key, {})
+            input_tokens = line_data.get("input_tokens", 0)
+            reasoning_tokens = line_data.get("reasoning_tokens", 0)
+            explicit_visible = line_data.get("visible_output_tokens")
+            explicit_total_out = line_data.get("total_output_tokens")
+            # Robust derivation for summary row
+            if explicit_visible is not None:
+                visible_output_tokens = int(explicit_visible)
+            elif explicit_total_out is not None:
+                visible_output_tokens = int(explicit_total_out) - (reasoning_tokens or 0)
+            else:
+                visible_output_tokens = (line_data.get("output_tokens", 0) or 0) - (reasoning_tokens or 0)
+            visible_output_tokens = max(int(visible_output_tokens), 0)
+            total_output_tokens = int(explicit_total_out) if explicit_total_out is not None else (visible_output_tokens + (reasoning_tokens or 0))
             
-            # Determine status using mapped result key
-            if duration > 0:
-                if processed_results.get(result_key, {}).get("data"):
-                    status = "✓ SUCCESS"
-                else:
-                    status = "✗ FAILED"
+            # Determine status prioritizing presence of data (loaded vs executed)
+            data_present = bool(processed_results.get(result_key, {}).get("data"))
+            if data_present and duration == 0:
+                status = "✓ SUCCESS (loaded)"
+            elif duration > 0 and data_present:
+                status = "✓ SUCCESS"
+            elif duration > 0 and not data_present:
+                status = "✗ FAILED"
             else:
                 status = "⏭️ SKIPPED"
                 duration = 0
                 tokens_used = 0
                 input_tokens = 0
-                output_tokens = 0
-            
-            # Calculate efficiency
-            if max_tokens > 0:
-                efficiency = f"{(tokens_used/max_tokens*100):.1f}%"
-            else:
-                efficiency = "N/A"
-            
-            self.logger.info(f"{agent:<25} {status:<10} {format_duration(duration):<15} {tokens_used:<15,} {input_tokens:<10,} {output_tokens:<10,} {max_tokens:<10,} {efficiency:<12}")
+                visible_output_tokens = 0
+                reasoning_tokens = 0
+                total_output_tokens = 0
+        
+            # Log visible vs reasoning output tokens and their sum
+            self.logger.info(
+                f"{agent:<25} {status:<10} {format_duration(duration):<15} {tokens_used:<15,} "
+                f"{input_tokens:<10,} {visible_output_tokens:<12,} {reasoning_tokens:<10,} {total_output_tokens:<10,}"
+            )
         
         # Overall summary
         self.logger.info(f"\n📈 OVERALL SUMMARY:")
@@ -365,9 +459,8 @@ class NetLogoOrchestrator:
         self.logger.info(f"   Total Tokens Used: {total_tokens_used:,}")
         self.logger.info(f"   Total Input Tokens: {total_input_tokens:,}")
         self.logger.info(f"   Total Output Tokens: {total_output_tokens:,}")
-        self.logger.info(f"   Total Max Tokens: {total_tokens_max:,}")
-        if total_tokens_max > 0:
-            self.logger.info(f"   Overall Token Efficiency: {(total_tokens_used/total_tokens_max*100):.1f}%")
+        self.logger.info(f"   Total Reasoning Tokens: {total_reasoning_tokens:,}")
+        # No Total Max Tokens or Efficiency (caps removed)
         
         # Performance metrics
         successful_agents = sum(1 for agent in agent_names if processed_results.get(agent, {}).get("data"))
@@ -470,6 +563,7 @@ class NetLogoOrchestrator:
         # Overall statistics
         # Aggregate tokens used across all orchestrations from their inner results
         total_tokens_used = 0
+        total_reasoning_tokens_all = 0
         for result in all_results.values():
             inner_results = None
             if isinstance(result.get("results"), dict) and result["results"]:
@@ -480,11 +574,20 @@ class NetLogoOrchestrator:
                     for agent in ["syntax_parser", "semantics_parser", "messir_mapper", "scenario_writer", 
                                  "plantuml_writer", "plantuml_messir_auditor", "plantuml_messir_corrector", "plantuml_messir_final_auditor"]
                 )
+                # Sum reasoning tokens across agents if present
+                agent_keys = [
+                    "ast", "semantics", "messir_mapper", "scenario_writer",
+                    "plantuml_writer", "plantuml_messir_auditor", "plantuml_messir_corrector", "plantuml_messir_final_auditor"
+                ]
+                for key in agent_keys:
+                    if key in inner_results and isinstance(inner_results.get(key), dict):
+                        total_reasoning_tokens_all += inner_results[key].get("reasoning_tokens", 0)
         
         self.logger.info(f"\n📊 OVERALL STATISTICS:")
         self.logger.info(f"   Total Orchestrations: {total_orchestrations}")
         self.logger.info(f"   Total Execution Time: {format_duration(total_execution_time)}")
         self.logger.info(f"   Total Tokens Used: {total_tokens_used:,}")
+        self.logger.info(f"   Total Reasoning Tokens: {total_reasoning_tokens_all:,}")
         self.logger.info(f"   Average Time per Orchestration: {format_duration(total_execution_time/total_orchestrations)}")
         self.logger.info(f"   Average Tokens per Orchestration: {total_tokens_used/total_orchestrations:,.0f}")
         # New: Average input/output/reasoning tokens per orchestration
@@ -508,41 +611,56 @@ class NetLogoOrchestrator:
         """
         import json
         import glob
+        from path_utils import get_run_base_dir
         
-        # Define step patterns - updated to match actual file naming convention
-        step_patterns = {
-            1: f"{base_name}_*_{model}_1_syntax_parser_*_response.json",
-            2: f"{base_name}_*_{model}_2_semantics_parser_*_response.json",
-            3: f"{base_name}_*_{model}_3_messir_mapper_*_response.json",
-            4: f"{base_name}_*_{model}_4_scenario_writer_*_response.json",
-            5: f"{base_name}_*_{model}_5_plantuml_writer_*_response.json",
-            6: f"{base_name}_*_{model}_6_plantuml_messir_auditor_*_response.json",
-            7: f"{base_name}_*_{model}_7_plantuml_messir_corrector_*_response.json",
-            8: f"{base_name}_*_{model}_8_plantuml_messir_final_auditor_*_response.json"
-        }
-        
-        if step not in step_patterns:
-            return None
-        
-        pattern = step_patterns[step]
-        # Search recursively under OUTPUT_DIR to include run-specific subdirectories (e.g., 01-syntax_parser)
-        recursive_pattern = str(OUTPUT_DIR / "**" / pattern)
-        files = glob.glob(recursive_pattern, recursive=True)
-        if not files:
-            # Fallback: non-recursive search at the root of OUTPUT_DIR (legacy layout)
-            legacy_files = glob.glob(str(OUTPUT_DIR / pattern))
-            files = legacy_files
-        # Log discovery details for troubleshooting
+        # 1) Try new per-run/per-combination layout first
+        # Determine reasoning/text verbosity from agent configs (same combo used across steps)
+        tv = None
+        reff = None
         try:
-            self.logger.debug(f"Artifact discovery (step {step}) using pattern: {pattern} | recursive matches: {len(files)}")
+            if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
+                tv = self.agent_configs["syntax_parser"].get("text_verbosity")
+                reff = self.agent_configs["syntax_parser"].get("reasoning_effort")
         except Exception:
             pass
+        try:
+            run_dir = get_run_base_dir(self.timestamp, base_name, model, reff or "medium", tv or "medium")
+            step_to_agent = {
+                1: "syntax_parser",
+                2: "semantics_parser",
+                3: "messir_mapper",
+                4: "scenario_writer",
+                5: "plantuml_writer",
+                6: "plantuml_messir_auditor",
+                7: "plantuml_messir_corrector",
+                8: "plantuml_messir_final_auditor"
+            }
+            agent_name = step_to_agent.get(step)
+            if agent_name:
+                agent_dir = run_dir / f"{int(step):02d}-{agent_name}"
+                json_path = agent_dir / "output-response.json"
+                if json_path.exists():
+                    try:
+                        with open(json_path, 'r', encoding='utf-8') as f:
+                            result = json.load(f)
+                            self.logger.info(f"Loaded existing results for step {step} from {json_path.name}")
+                            # Update token usage tracking from loaded results
+                            if result and isinstance(result, dict) and agent_name in self.token_usage:
+                                self.token_usage[agent_name]["used"] = result.get("tokens_used", 0)
+                                result["input_tokens"] = result.get("input_tokens", 0)
+                                result["output_tokens"] = result.get("output_tokens", 0)
+                                result["reasoning_tokens"] = result.get("reasoning_tokens", 0)
+                                if self.detailed_timing[agent_name]["duration"] == 0:
+                                    self.execution_times.setdefault(agent_name, 0)
+                            return result
+                    except Exception as e:
+                        self.logger.warning(f"Warning: Could not load results from new layout for step {step}: {e}")
+        except Exception:
+            # If any issue computing run_dir, fall back to legacy search
+            pass
         
-        if not files:
-            return None
-        
-        # Get the most recent file
-        latest_file = max(files, key=lambda x: pathlib.Path(x).stat().st_mtime)
+        # No legacy fallback: enforce new layout only
+        return None
         
         try:
             with open(latest_file, 'r', encoding='utf-8') as f:
@@ -554,6 +672,7 @@ class NetLogoOrchestrator:
                     tokens_used = result.get("tokens_used", 0)
                     input_tokens = result.get("input_tokens", 0)
                     output_tokens = result.get("output_tokens", 0)
+                    reasoning_tokens = result.get("reasoning_tokens", 0)
                     
                     # Map step number to agent name
                     step_to_agent = {
@@ -573,11 +692,12 @@ class NetLogoOrchestrator:
                         # Store input/output tokens in the result for later use
                         result["input_tokens"] = input_tokens
                         result["output_tokens"] = output_tokens
+                        result["reasoning_tokens"] = reasoning_tokens
                         
-                        # Update timing tracking (we don't have actual timing, so we'll set it to 0)
-                        # This ensures the agent shows as executed but with 0 time
-                        self.detailed_timing[agent_name]["duration"] = 0
-                        self.execution_times[agent_name] = 0
+                        # Do not overwrite actual timing captured during the current run.
+                        # If no timing exists yet (default 0), keep it; otherwise preserve real durations.
+                        if self.detailed_timing[agent_name]["duration"] == 0:
+                            self.execution_times.setdefault(agent_name, 0)
                 
                 # The response files contain the data directly in fields like 'messir_concepts', 'ast', etc.
                 # We need to return them in the expected format for the orchestrator
@@ -613,24 +733,28 @@ class NetLogoOrchestrator:
             }
         
         # Use the AST agent to parse the code
+        # Prepare per-run/per-combination directory and step output dir before invoking agent
+        step_str = f"{int(self.step_counter):02d}"
+        agent_id = "syntax_parser"
+        tv = None
+        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
+            tv = self.agent_configs["syntax_parser"].get("text_verbosity")
+        reff = None
+        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
+            reff = self.agent_configs["syntax_parser"].get("reasoning_effort")
+        run_dir = get_run_base_dir(self.timestamp, base_name, self.model, reff or "medium", tv or "medium")
+        agent_output_dir = run_dir / f"{step_str}-{agent_id}"
+        agent_output_dir.mkdir(parents=True, exist_ok=True)
         result = self.syntax_parser_agent.parse_netlogo_code(
-            code_content, 
-            f"{base_name}-netlogo-code.md"
+            code_content,
+            f"{base_name}-netlogo-code.md",
+            output_dir=agent_output_dir
         )
         
         # Add agent type identifier
         result["agent_type"] = "syntax_parser"
         
         # Save results using the AST agent's save method
-        step_str = f"{int(self.step_counter):02d}"
-        agent_id = "syntax_parser"
-        # New per-run/per-case directory: output/runs/<YYYY-MM-DD>/<HHMM>/<case-name>
-        ts = self.timestamp  # YYYYMMDD_HHMM
-        day_folder = f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}"
-        time_folder = ts.split("_")[1]
-        run_dir = OUTPUT_DIR / "runs" / day_folder / time_folder / base_name
-        agent_output_dir = run_dir / f"{step_str}-{agent_id}"
-        agent_output_dir.mkdir(parents=True, exist_ok=True)
         self.syntax_parser_agent.save_results(result, base_name, self.model, self.step_counter, output_dir=agent_output_dir)
         self.step_counter += 1
         
@@ -652,23 +776,10 @@ class NetLogoOrchestrator:
         
         self.logger.info(f"Processing {base_name} with Semantics Parser agent...")
         
-        # Read the NetLogo code
-        try:
-            code_content = code_file.read_text(encoding="utf-8")
-        except Exception as e:
-            return {
-                "agent_type": "semantics_parser",
-                "reasoning_summary": f"Error reading code file: {e}",
-                "data": None,
-                "errors": [f"File reading error: {e}"]
-            }
-        
-        # Use the Semantic agent to parse the AST and interfaces
-        # Note: This method is used for standalone processing, not in the sequential flow
-        # For sequential flow, AST should be passed from Step 1
-        result = self.semantics_parser_agent.parse_ast_to_state_machine(
-            code_content,  # This should be AST data in sequential flow
-            f"{base_name}-netlogo-code.md"
+        # Use the Semantics agent with Stage 2 inputs only (no AST, no raw code)
+        result = self.semantics_parser_agent.parse_from_ilsem_and_ui(
+            interface_images,
+            base_name
         )
         
         # Add agent type identifier
@@ -677,13 +788,17 @@ class NetLogoOrchestrator:
         # Save results using the Semantics Parser agent's save method
         step_str = f"{int(self.step_counter):02d}"
         agent_id = "semantics_parser"
-        # New per-run/per-case directory: output/runs/<YYYY-MM-DD>/<HHMM>/<case-name>
-        ts = self.timestamp  # YYYYMMDD_HHMM
-        day_folder = f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}"
-        time_folder = ts.split("_")[1]
-        run_dir = OUTPUT_DIR / "runs" / day_folder / time_folder / base_name
+        # New per-run/per-combination directory using centralized path builder
+        tv = None
+        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
+            tv = self.agent_configs["syntax_parser"].get("text_verbosity")
+        reff = None
+        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
+            reff = self.agent_configs["syntax_parser"].get("reasoning_effort")
+        run_dir = get_run_base_dir(self.timestamp, base_name, self.model, reff or "medium", tv or "medium")
         agent_output_dir = run_dir / f"{step_str}-{agent_id}"
         agent_output_dir.mkdir(parents=True, exist_ok=True)
+        # Validation must occur post-enrichment; save_results constructs the complete_response and validates internally
         self.semantics_parser_agent.save_results(result, base_name, self.model, self.step_counter, output_dir=agent_output_dir)
         self.step_counter += 1
         
@@ -702,23 +817,27 @@ class NetLogoOrchestrator:
         """
         base_name = file_info["base_name"]
         # Prepare per-run/per-case directories
-        # New structure: output/runs/<YYYY-MM-DD>/<HHMM>/<case-name>
-        ts = self.timestamp  # format YYYYMMDD_HHMM
-        day_folder = f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}"
-        time_folder = ts.split("_")[1]
-        run_dir = OUTPUT_DIR / "runs" / day_folder / time_folder / base_name
+        # New structure: output/runs/<YYYY-MM-DD>/<HHMM>/<case>-<model>-reason-<effort>-verb-<verbosity>
+        tv = None
+        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
+            tv = self.agent_configs["syntax_parser"].get("text_verbosity")
+        reff = None
+        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
+            reff = self.agent_configs["syntax_parser"].get("reasoning_effort")
+        run_dir = get_run_base_dir(self.timestamp, base_name, self.model, reff or "medium", tv or "medium")
         run_dir.mkdir(parents=True, exist_ok=True)
         
         # Start timing the total orchestration
         total_orchestration_start_time = time.time()
         
         self.logger.info(f"Starting sequential processing for {base_name}...")
-        self.logger.info(f"Resume mode: Starting from step {start_step}")
+        self.logger.info(f"Continuing single-pass after parallel stage: starting from step {start_step}")
         
         # Prepare input data
         code_file = file_info["code_file"]
         interface_images = file_info["interface_images"]
         
+        # Read code for Step 1 (Syntax Parser) only; Stage 2 does not use raw code
         try:
             code_content = code_file.read_text(encoding="utf-8")
         except Exception as e:
@@ -726,7 +845,7 @@ class NetLogoOrchestrator:
                 "error": f"Error reading code file: {e}",
                 "results": {}
             }
-        
+
         processed_results = {}
         
         # Load existing results for steps before start_step
@@ -831,26 +950,18 @@ class NetLogoOrchestrator:
                 self.logger.error(f"✗ Step 1: Syntax Parser agent failed for {base_name}: {str(e)}")
                 processed_results["ast"] = error_result
         else:
-            self.logger.info(f"Step 1: Skipping Syntax Parser agent for {base_name} (resume from step {start_step})")
+            self.logger.info(f"Step 1: Skipping Syntax Parser agent for {base_name} (continue after parallel stage from step {start_step})")
         
-        # Step 2: Semantics Parser Agent (using AST output from Step 1)
-        if start_step <= 2 and processed_results.get("ast", {}).get("data"):
+        # Step 2: Semantics Parser Agent (independent of Step 1)
+        if start_step <= 2:
             self.logger.info(f"Step 2: Running Semantics Parser agent for {base_name}...")
             
             try:
-                # Get AST data from Step 1 result
-                ast_data = processed_results.get("ast", {}).get("data", "No AST available")
-                
-                # Convert AST data to JSON string if it's a dict/object
-                if isinstance(ast_data, dict):
-                    import json
-                    ast_data = json.dumps(ast_data, indent=2, ensure_ascii=False)
-                
                 semantics_parser_result = self._execute_agent_with_tracking(
                     "semantics_parser",
-                    self.semantics_parser_agent.parse_ast_to_state_machine,
-                    ast_data,
-                    f"{base_name}-netlogo-code.md"
+                    self.semantics_parser_agent.parse_from_ilsem_and_ui,
+                    interface_images,
+                    base_name
                 )
                 
                 # Add agent type identifier
@@ -874,9 +985,7 @@ class NetLogoOrchestrator:
                 self.logger.error(f"✗ Step 2: Semantics Parser agent failed for {base_name}: {str(e)}")
                 processed_results["semantics"] = error_result
         elif start_step > 2:
-            self.logger.info(f"Step 2: Skipping Semantics Parser agent for {base_name} (resume from step {start_step})")
-        else:
-            self.logger.info(f"Skipping Step 2: Semantics Parser agent for {base_name} (Syntax Parser failed)")
+            self.logger.info(f"Step 2: Skipping Semantics Parser agent for {base_name} (continue after parallel stage from step {start_step})")
         
         # Step 3: Messir Mapper Agent (using AST and State Machine from previous steps)
         if start_step <= 3 and (processed_results.get("ast", {}).get("data") and 
@@ -923,7 +1032,7 @@ class NetLogoOrchestrator:
                 self.logger.error(f"✗ Step 3: Messir Mapper agent failed for {base_name}: {str(e)}")
                 processed_results["messir_mapper"] = error_result
         elif start_step > 3:
-            self.logger.info(f"Step 3: Skipping Messir Mapper agent for {base_name} (resume from step {start_step})")
+            self.logger.info(f"Step 3: Skipping Messir Mapper agent for {base_name} (continue after parallel stage from step {start_step})")
         else:
             self.logger.info(f"Skipping Step 3: Messir Mapper agent for {base_name} (AST or State Machine failed)")
         
@@ -963,7 +1072,7 @@ class NetLogoOrchestrator:
                 self.logger.error(f"✗ Step 4: Scenario Writer agent failed for {base_name}: {str(e)}")
                 processed_results["scenario_writer"] = error_result
         elif start_step > 4:
-            self.logger.info(f"Step 4: Skipping Scenario Writer agent for {base_name} (resume from step {start_step})")
+            self.logger.info(f"Step 4: Skipping Scenario Writer agent for {base_name} (continue after parallel stage from step {start_step})")
         else:
             self.logger.info(f"Skipping Step 4: Scenario Writer agent for {base_name} (AST, MessirConcepts, or State Machine failed)")
         
@@ -990,6 +1099,15 @@ class NetLogoOrchestrator:
                 self.step_counter = 6  # Set step counter for next sequential agent
                 
                 processed_results["plantuml_writer"] = plantuml_writer_result
+
+                # If a standalone .puml file was written, log its path for traceability
+                try:
+                    puml_path = plantuml_writer_result.get("puml_file")
+                    if puml_path:
+                        self.logger.info(f"Step 5: PlantUML .puml saved: {puml_path}")
+                except Exception:
+                    # Non-fatal: continue even if logging fails
+                    pass
                 
             except Exception as e:
                 error_result = {
@@ -1001,7 +1119,7 @@ class NetLogoOrchestrator:
                 self.logger.error(f"✗ Step 5: PlantUML Writer agent failed for {base_name}: {str(e)}")
                 processed_results["plantuml_writer"] = error_result
         elif start_step > 5:
-            self.logger.info(f"Step 5: Skipping PlantUML Writer agent for {base_name} (resume from step {start_step})")
+            self.logger.info(f"Step 5: Skipping PlantUML Writer agent for {base_name} (continue after parallel stage from step {start_step})")
         else:
             self.logger.info(f"Skipping Step 5: PlantUML Writer agent for {base_name} (Scenarios failed)")
         
@@ -1061,7 +1179,7 @@ class NetLogoOrchestrator:
                 self.logger.error(f"✗ Step 6: PlantUML Messir Auditor agent failed for {base_name}: {str(e)}")
                 processed_results["plantuml_messir_auditor"] = error_result
         elif start_step > 6:
-            self.logger.info(f"Step 6: Skipping PlantUML Messir Auditor agent for {base_name} (resume from step {start_step})")
+            self.logger.info(f"Step 6: Skipping PlantUML Messir Auditor agent for {base_name} (continue after parallel stage from step {start_step})")
         else:
             self.logger.info(f"Skipping Step 6: PlantUML Messir Auditor agent for {base_name} (PlantUML diagrams failed)")
         
@@ -1160,11 +1278,11 @@ class NetLogoOrchestrator:
                 plantuml_messir_corrector_executed = False
                 plantuml_messir_corrector_success = False
         else:
-            self.logger.info(f"Step 7: Skipping PlantUML Messir Corrector agent for {base_name} (resume from step {start_step})")
+            self.logger.info(f"Step 7: Skipping PlantUML Messir Corrector agent for {base_name} (continue after parallel stage from step {start_step})")
             # Add a placeholder entry to indicate the corrector was skipped due to resume
             processed_results["plantuml_messir_corrector"] = {
                 "agent_type": "plantuml_messir_corrector",
-                "reasoning_summary": f"Corrector skipped - resume from step {start_step}",
+                "reasoning_summary": f"Corrector skipped - continue after parallel stage from step {start_step}",
                 "data": None,
                 "errors": [],
                 "skipped": True
@@ -1229,11 +1347,11 @@ class NetLogoOrchestrator:
                 self.logger.error(f"✗ Step 8: PlantUML Messir Final Auditor agent failed for {base_name}: {str(e)}")
                 processed_results["plantuml_messir_final_auditor"] = error_result
         else:
-            self.logger.info(f"Step 8: Skipping PlantUML Messir Final Auditor agent for {base_name} (resume from step {start_step})")
+            self.logger.info(f"Step 8: Skipping PlantUML Messir Final Auditor agent for {base_name} (continue after parallel stage from step {start_step})")
             # Add a placeholder entry to indicate the final auditor was skipped due to resume
             processed_results["plantuml_messir_final_auditor"] = {
                 "agent_type": "plantuml_messir_final_auditor",
-                "reasoning_summary": f"Final auditor skipped - resume from step {start_step}",
+                "reasoning_summary": f"Final auditor skipped - continue after parallel stage from step {start_step}",
                 "data": None,
                 "errors": [],
                 "skipped": True
@@ -1258,16 +1376,19 @@ class NetLogoOrchestrator:
 
     async def process_netlogo_file_parallel_first_stage(self, file_info: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Run Step 1 (syntax) and an independent semantics derivation in parallel,
-        then reconcile by re-running semantics with AST if AST succeeded.
+        Run Step 1 (syntax) and an independent semantics derivation in parallel.
+        (No AST-based re-run; Stage 2 uses only IL-SEM + UI images.)
         Mirrors the OpenAI Cookbook fan-out/fan-in pattern via asyncio.gather.
         """
         base_name = file_info["base_name"]
-        # New per-run/per-case directory: output/runs/<YYYY-MM-DD>/<HHMM>/<case-name>
-        ts = self.timestamp  # YYYYMMDD_HHMM
-        day_folder = f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}"
-        time_folder = ts.split("_")[1]
-        run_dir = OUTPUT_DIR / "runs" / day_folder / time_folder / base_name
+        # New per-run/per-combination directory using centralized path builder
+        tv = None
+        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
+            tv = self.agent_configs["syntax_parser"].get("text_verbosity")
+        reff = None
+        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
+            reff = self.agent_configs["syntax_parser"].get("reasoning_effort")
+        run_dir = get_run_base_dir(self.timestamp, base_name, self.model, reff or "medium", tv or "medium")
         run_dir.mkdir(parents=True, exist_ok=True)
 
         total_orchestration_start_time = time.time()
@@ -1294,17 +1415,53 @@ class NetLogoOrchestrator:
             return await asyncio.to_thread(
                 self._execute_agent_with_tracking,
                 "semantics_parser",
-                self.semantics_parser_agent.parse_netlogo_code_direct,
-                code_content,
-                f"{base_name}-netlogo-code.md"
+                self.semantics_parser_agent.parse_from_ilsem_and_ui,
+                file_info["interface_images"],
+                base_name
             )
 
-        # Fan-out: run both concurrently
-        syntax_result, semantics_result_direct = await asyncio.gather(
-            run_syntax(),
-            run_semantics_direct(),
-            return_exceptions=True
-        )
+        # Fan-out: run both concurrently with an optional watchdog and heartbeat
+        from config import HEARTBEAT_SECONDS
+        import config as cfg
+        async def heartbeat_task():
+            try:
+                while True:
+                    await asyncio.sleep(HEARTBEAT_SECONDS)
+                    self.logger.info(f"[heartbeat] Parallel first stage still running for {base_name}...")
+            except asyncio.CancelledError:
+                return
+
+        hb = asyncio.create_task(heartbeat_task())
+        try:
+            syntax_coro = run_syntax()
+            sem_coro = run_semantics_direct()
+            syntax_task = asyncio.create_task(syntax_coro)
+            sem_task = asyncio.create_task(sem_coro)
+            # If orchestrator parallel timeout is configured (not None), wrap with wait_for
+            orchestrator_timeout = getattr(cfg, "ORCHESTRATOR_PARALLEL_TIMEOUT", None)
+            if orchestrator_timeout is not None:
+                await asyncio.wait_for(
+                    asyncio.gather(syntax_task, sem_task, return_exceptions=True),
+                    timeout=orchestrator_timeout
+                )
+            else:
+                # No watchdog timeout: wait indefinitely for both tasks
+                await asyncio.gather(syntax_task, sem_task, return_exceptions=True)
+            syntax_result = await syntax_task
+            semantics_result_direct = await sem_task
+        except asyncio.TimeoutError:
+            self.logger.error(f"Parallel first stage timed out after {getattr(cfg, 'ORCHESTRATOR_PARALLEL_TIMEOUT', 'N/A')}s for {base_name}")
+            # Cancel any still-running task
+            for t in [locals().get('syntax_task'), locals().get('sem_task')]:
+                try:
+                    if t and not t.done():
+                        t.cancel()
+                except Exception:
+                    pass
+            syntax_result = syntax_result if 'syntax_result' in locals() else RuntimeError("syntax_parser timed out")
+            semantics_result_direct = semantics_result_direct if 'semantics_result_direct' in locals() else RuntimeError("semantics_parser (direct) timed out")
+        finally:
+            hb.cancel()
 
         processed_results: Dict[str, Any] = {}
 
@@ -1335,45 +1492,7 @@ class NetLogoOrchestrator:
                 "errors": [f"Semantics Parser direct error: {semantics_result_direct}"]
             }
         else:
-            # Prefer the direct semantics result; only re-run with AST if
-            # - AST exists, and
-            # - direct result is missing or invalid per validation
-            should_rerun_with_ast = False
-            if processed_results.get("ast", {}).get("data"):
-                if not semantics_result_direct.get("data"):
-                    should_rerun_with_ast = True
-                else:
-                    try:
-                        # Validate direct semantics result if validator is available
-                        is_valid = validate_agent_response(semantics_result_direct)
-                        should_rerun_with_ast = not is_valid
-                    except Exception:
-                        # If validation fails unexpectedly, keep direct result
-                        should_rerun_with_ast = False
-
-            if should_rerun_with_ast:
-                try:
-                    ast_data = processed_results["ast"]["data"]
-                    if isinstance(ast_data, dict):
-                        import json
-                        ast_str = json.dumps(ast_data, indent=2, ensure_ascii=False)
-                    else:
-                        ast_str = ast_data
-                    semantics_result = self._execute_agent_with_tracking(
-                        "semantics_parser",
-                        self.semantics_parser_agent.parse_ast_to_state_machine,
-                        ast_str,
-                        f"{base_name}-netlogo-code.md"
-                    )
-                except Exception as e:
-                    semantics_result = {
-                        "agent_type": "semantics_parser",
-                        "reasoning_summary": f"Semantics Parser (AST) failed post-parallel: {e}",
-                        "data": None,
-                        "errors": [f"Semantics Parser (AST) error: {e}"]
-                    }
-            else:
-                semantics_result = semantics_result_direct
+            semantics_result = semantics_result_direct
 
             semantics_result["agent_type"] = "semantics_parser"
             agent_output_dir = run_dir / "02-semantics_parser"
@@ -1387,8 +1506,7 @@ class NetLogoOrchestrator:
         self.execution_times["total_orchestration"] = total_orchestration_time
         self.logger.info(f"Parallel first stage completed in {format_duration(total_orchestration_time)}")
 
-        # Summary and bookkeeping
-        self._generate_detailed_summary(base_name, processed_results)
+        # Bookkeeping only (no intermediate detailed summary in single-pass mode)
         processed_results["execution_times"] = self.execution_times.copy()
         processed_results["token_usage"] = self.token_usage.copy()
         processed_results["detailed_timing"] = self.detailed_timing.copy()
@@ -1405,13 +1523,35 @@ class NetLogoOrchestrator:
         Returns:
             Dictionary containing all processing results
         """
-        # Set up logging for this orchestration run
-        self.logger = setup_orchestration_logger(base_name, self.model, self.timestamp)
+        # Set up logging for this orchestration run, including reasoning and text verbosity
+        tv = None
+        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
+            tv = self.agent_configs["syntax_parser"].get("text_verbosity")
+        reff = None
+        rsum = None
+        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
+            reff = self.agent_configs["syntax_parser"].get("reasoning_effort")
+            rsum = self.agent_configs["syntax_parser"].get("reasoning_summary")
+
+        self.logger = setup_orchestration_logger(
+            base_name,
+            self.model,
+            self.timestamp,
+            reasoning_effort=reff or "medium",
+            text_verbosity=tv or "medium",
+        )
+        # Also mirror stdout/stderr into the orchestrator log file
+        attach_stdio_to_logger(self.logger)
         
-        # Log token configuration
-        self.logger.info("Token configuration:")
-        for agent, tokens in self.max_tokens_config.items():
-            self.logger.info(f"  - {agent}: {tokens:,} tokens")
+        # Single parameter bundle line including text verbosity (only here)
+        bundle_line = format_parameter_bundle(
+            model=self.model,
+            base_name=base_name,
+            reasoning_effort=reff,
+            reasoning_summary=rsum,
+            text_verbosity=tv
+        )
+        self.logger.info(bundle_line)
         
         self.logger.info(f"Starting sequential processing for base name: {base_name}")
         self.logger.info(f"Starting from step {start_step}")
@@ -1430,7 +1570,7 @@ class NetLogoOrchestrator:
         # Process each file with sequential or parallel-first-stage
         for file_info in files:
             base_name = file_info["base_name"]
-            if ENABLE_PARALLEL_FIRST_STAGE and start_step <= 2:
+            if start_step <= 2:
                 result = await self.process_netlogo_file_parallel_first_stage(file_info)
                 # After parallel first stage, continue sequentially from step 3
                 if isinstance(result, dict):
@@ -1675,23 +1815,40 @@ class NetLogoOrchestrator:
             self.logger.info(f"   ❌ PIPELINE FAILED: Only {successful_agents}/{total_agents} agents completed")
             self.logger.info(f"   📋 Limited outputs available")
         
-        # Add compliance status information
+        # Compute canonical final compliance from auditor/corrector results (single source of truth)
+        final_compliance = {
+            "status": "UNKNOWN",  # VERIFIED | NON-COMPLIANT | UNKNOWN
+            "source": "none",
+            "details": {}
+        }
+
+        # Prefer Step 8 (final auditor) if available
+        final_audit_data = result.get("plantuml_messir_final_auditor", {}).get("data") if plantuml_messir_final_auditor_success else None
+        initial_audit_data = result.get("plantuml_messir_auditor", {}).get("data") if plantuml_messir_auditor_success else None
+
+        if isinstance(final_audit_data, dict) and final_audit_data.get("verdict") in ("compliant", "non-compliant"):
+            final_compliance["source"] = "final_auditor_step8"
+            final_compliance["details"] = {"verdict": final_audit_data.get("verdict")}
+            final_compliance["status"] = "VERIFIED" if final_audit_data.get("verdict") == "compliant" else "NON-COMPLIANT"
+        elif isinstance(initial_audit_data, dict) and initial_audit_data.get("verdict") in ("compliant", "non-compliant"):
+            # If no final auditor verdict, fallback to initial auditor
+            final_compliance["source"] = "auditor_step6"
+            final_compliance["details"] = {"verdict": initial_audit_data.get("verdict")}
+            final_compliance["status"] = "VERIFIED" if initial_audit_data.get("verdict") == "compliant" else "NON-COMPLIANT"
+        else:
+            final_compliance["source"] = "unknown"
+
+        # Log using the canonical field only
         self.logger.info(f"\n🔍 COMPLIANCE STATUS:")
-        if plantuml_messir_final_auditor_success:
+        if final_compliance["status"] == "VERIFIED":
             self.logger.info(f"   ✅ FINAL COMPLIANCE: VERIFIED")
             self.logger.info(f"   🎯 Result: Final audit confirms Messir compliance")
-        elif plantuml_messir_corrector_success:
-            self.logger.info(f"   ⚠️  COMPLIANCE STATUS: CORRECTED")
-            self.logger.info(f"   📊 Result: Diagrams corrected, final verification pending")
-        elif plantuml_messir_auditor_success and not plantuml_messir_corrector_executed:
-            self.logger.info(f"   ✅ FINAL COMPLIANCE: ACHIEVED")
-            self.logger.info(f"   🎯 Result: All PlantUML diagrams were already Messir-compliant")
-        elif plantuml_messir_auditor_success:
-            self.logger.info(f"   ⚠️  COMPLIANCE STATUS: AUDITED")
-            self.logger.info(f"   📊 Result: Diagrams audited, correction may be needed")
+        elif final_compliance["status"] == "NON-COMPLIANT":
+            self.logger.info(f"   ❌ FINAL COMPLIANCE: NON-COMPLIANT")
+            self.logger.info(f"   📊 Result: One or more MESSIR rules were violated")
         else:
             self.logger.info(f"   ❓ COMPLIANCE STATUS: UNKNOWN")
-            self.logger.info(f"   ⚠️  Result: PlantUML Messir Auditor failed - no compliance data available")
+            self.logger.info(f"   ⚠️  Result: No authoritative compliance verdict available")
         
         self.logger.info(f"{'='*60}")
         
@@ -1702,7 +1859,8 @@ class NetLogoOrchestrator:
             "successful_agents": successful_agents,
             "failed_agents": failed_agents,
             "success_rate": (successful_agents/total_agents)*100 if total_agents > 0 else 0,
-            "results": results
+            "results": results,
+            "final_compliance": final_compliance
         }
 
     def read_icrash_file_content(self, icrash_file: pathlib.Path) -> Dict[str, str]:
@@ -1792,7 +1950,7 @@ async def main():
         print(f"{i}. {model}")
     
     print("\nEnter the number of the AI model to use")
-    print(" - Press Enter once to immediately start the default run: gpt-5-nano, 3d-solids, low effort, step 0 (parallel first stage)")
+    print(f" - Press Enter once to immediately start the default run: {DEFAULT_MODEL or 'default-model'}, 3d-solids, low effort (parallel steps 1+2)")
     print(" - Or type a number (or 'q' to quit):")
     
     while True:
@@ -1806,25 +1964,26 @@ async def main():
             # Short-circuit: single Enter triggers immediate default run
             if model_input == "":
                 print("\nStarting default run (single Enter detected):")
-                print(" - AI model: gpt-5-nano")
-                print(" - NetLogo model: 3d-solids (first case)")
-                print(" - Reasoning effort: low (summary: auto)")
-                print(" - Start from step 0 (parallel first stage)")
+                print(" - Steps 1+2 will run in parallel, then continue from step 3")
 
-                # Token configuration derived from AGENT_CONFIGS
-                token_config = {
-                    agent: config["max_completion_tokens"]
-                    for agent, config in AGENT_CONFIGS.items()
-                }
-
-                # Prepare orchestrator and apply reasoning config
-                model = "gpt-5-nano"
+                # Prepare orchestrator and apply reasoning config (token caps removed)
+                model = DEFAULT_MODEL
                 base_name = "3d-solids"
-                orchestrator = NetLogoOrchestrator(model_name=model, max_tokens_config=token_config)
+                orchestrator = NetLogoOrchestrator(model_name=model)
                 orchestrator.update_reasoning_config("low", "auto")
+                orchestrator.update_text_config("medium")
+                # Single parameter bundle line (includes text verbosity)
+                default_bundle = format_parameter_bundle(
+                    model=model,
+                    base_name=base_name,
+                    reasoning_effort="low",
+                    reasoning_summary="auto",
+                    text_verbosity="medium"
+                )
+                print(default_bundle)
 
-                # Execute with step 0 (parallel first stage)
-                results = await orchestrator.run(base_name, start_step=0)
+                # Execute from step 1 (steps 1+2 are parallel internally)
+                results = await orchestrator.run(base_name, start_step=1)
 
                 # Summarize and exit main()
                 ok = bool(results)
@@ -1852,11 +2011,11 @@ async def main():
     # Base name selection
     print("\nNetLogo Orchestrator - Available Models")
     print("="*40)
-    print("0. All models")
+    print("0. All cases (excluding: my-ecosys)")
     for i, base_name in enumerate(base_names, 1):
         print(f"{i:2d}. {base_name}")
     
-    print("\nEnter the number of the NetLogo model to process (or press Enter for default model 1, or 'q' to quit):")
+    print("\nEnter the number of the NetLogo model to process (or press Enter for default 'my-ecosys', or 'q' to quit):")
     
     while True:
         try:
@@ -1866,16 +2025,18 @@ async def main():
                 print("Exiting...")
                 return
             
-            # Default to model 1 if no input provided
+            # Default to 'my-ecosys' if no input provided (fallback to first if missing)
             if user_input == "":
-                number = 1
-                selected_base_names = [base_names[0]]
-                print(f"Using default: {base_names[0]}")
+                default_base_name = "my-ecosys"
+                chosen_base_name = default_base_name if default_base_name in base_names else base_names[0]
+                selected_base_names = [chosen_base_name]
+                print(f"Using default: {chosen_base_name}")
                 break
             
             number = int(user_input)
             if number == 0:
-                selected_base_names = base_names
+                # Run all cases except explicitly excluded ones
+                selected_base_names = [bn for bn in base_names if bn != "my-ecosys"]
                 break
             elif 1 <= number <= len(base_names):
                 selected_base_names = [base_names[number - 1]]
@@ -1895,7 +2056,6 @@ async def main():
     print("\nNetLogo Orchestrator - Step Selection")
     print("="*40)
     print("Available Steps:")
-    print("0. Parallel first stage (Steps 1+2 together)")
     print("1. Syntax Parser (AST generation)")
     print("2. Semantics Parser (State Machine generation)")
     print("3. Messir Mapper (Messir concepts mapping)")
@@ -1905,8 +2065,8 @@ async def main():
     print("7. PlantUML Messir Corrector (Compliance correction)")
     print("8. PlantUML Messir Final Auditor (Final compliance verification)")
     
-    print("\nEnter the step number to start from (0-8, or press Enter for default step 1, or 'q' to quit):")
-    print("Note: Step 0 runs steps 1+2 in parallel, then continues from step 3.")
+    print("\nEnter the step number to start from (1-8, or press Enter for default step 1, or 'q' to quit):")
+    print("Note: Steps 1+2 are always executed in parallel, then continues from step 3.")
     print("Note: Starting from step N (N>=1) will skip steps 1 to N-1 and use existing results if available.")
     
     while True:
@@ -1924,42 +2084,77 @@ async def main():
                 break
             
             start_step = int(step_input)
-            if 0 <= start_step <= 8:
+            if 1 <= start_step <= 8:
                 break
             else:
-                print(f"Error: Invalid step number {start_step}. Available options: 0-8")
+                print(f"Error: Invalid step number {start_step}. Available options: 1-8")
                 print("Please enter a valid step number, press Enter for default, or 'q' to quit:")
         except ValueError:
             print("Error: Please enter a valid number, press Enter for default, or 'q' to quit:")
     
-    if start_step == 0:
-        print("\nStarting workflow from step 0 (Parallel first stage: steps 1+2)")
+    print(f"\nStarting workflow from step {start_step}")
+
+    # Timeout preset selection (applies to all agents and orchestrator watchdog)
+    print(f"\n{'='*60}")
+    print("TIMEOUT PRESET SELECTION")
+    print(f"{'='*60}")
+    import config as cfg
+    # Determine display of current defaults from config.py
+    current_orch_default = getattr(cfg, "ORCHESTRATOR_PARALLEL_TIMEOUT", None)
+    if current_orch_default is None:
+        default_label = "No timeout"
     else:
-        print(f"\nStarting workflow from step {start_step}")
+        default_label = f"{current_orch_default}s"
+    print("Choose timeout preset (applies to agents polling and orchestrator watchdog):")
+    print("0. No timeout (agents and orchestrator)")
+    print("1. Medium timeout (900s)")
+    print("2. Long timeout (1800s)")
+    print(f"Press Enter for default from config.py ({default_label})")
+    print("Note: default config.py now sets NO TIMEOUT for both agents and orchestrator.")
+
+    preset_map = {0: None, 1: 900, 2: 1800}
+    while True:
+        timeout_input = input("Timeout preset > ").strip()
+        if timeout_input == "":
+            # Keep config.py defaults as-is
+            chosen_seconds = current_orch_default
+            chosen_preset = "default"
+            print(f"Using default from config.py: {default_label}")
+            break
+        try:
+            timeout_choice = int(timeout_input)
+            if timeout_choice in preset_map:
+                chosen_seconds = preset_map[timeout_choice]
+                chosen_preset = timeout_choice
+                # Apply to orchestrator watchdog
+                setattr(cfg, "ORCHESTRATOR_PARALLEL_TIMEOUT", chosen_seconds)
+                # Apply to all agent timeouts (None -> unlimited)
+                if hasattr(cfg, "AGENT_TIMEOUTS") and isinstance(cfg.AGENT_TIMEOUTS, dict):
+                    for k in list(cfg.AGENT_TIMEOUTS.keys()):
+                        cfg.AGENT_TIMEOUTS[k] = chosen_seconds
+                label = "No timeout" if chosen_seconds is None else f"{chosen_seconds}s"
+                print(f"Applied timeout preset {timeout_choice} → {label}")
+                break
+            else:
+                print("Error: Invalid choice. Available options: 0,1,2 or Enter for default")
+        except ValueError:
+            print("Error: Please enter 0, 1, 2 or press Enter for default")
     
-    # Use default token configuration
-    token_config = {
-        agent: config["max_completion_tokens"] 
-        for agent, config in AGENT_CONFIGS.items()
-    }
-    
-    print(f"\nToken configuration:")
-    for agent, tokens in token_config.items():
-        print(f"  - {agent}: {tokens:,} tokens")
+    # Token caps removed: no token configuration to display
     
     # Reasoning effort selection
     print(f"\n{'='*60}")
     print("REASONING EFFORT SELECTION")
     print(f"{'='*60}")
     print("Available reasoning effort levels:")
-    print("0. ALL effort levels (sequential execution)")
-    print("1. Low effort (fastest)")
-    print("2. Medium effort (balanced) - DEFAULT")
-    print("3. High effort (highest quality)")
+    print("1. Minimal effort (fastest)")
+    print("2. Low effort")
+    print("3. Medium effort - DEFAULT")
+    print("4. High effort (highest quality)")
     print("   - Option 0 will run each effort level sequentially for comparison")
     print("   - Takes 3x longer but provides comprehensive analysis")
     
-    print("\nEnter your choice (0-3, or press Enter for default medium, or 'q' to quit):")
+    print("\nEnter your choice (0-4, or press Enter for default medium, or 'q' to quit):")
     
     while True:
         try:
@@ -1969,17 +2164,17 @@ async def main():
                 print("Exiting...")
                 return
             
-            # Default to medium (2) if no input provided
+            # Default to medium (3) if no input provided
             if reasoning_input == "":
-                reasoning_choice = 2
+                reasoning_choice = 3
                 print("Using default: Medium effort")
                 break
             
             reasoning_choice = int(reasoning_input)
-            if 0 <= reasoning_choice <= 3:
+            if 0 <= reasoning_choice <= 4:
                 break
             else:
-                print(f"Error: Invalid choice {reasoning_choice}. Available options: 0-3")
+                print(f"Error: Invalid choice {reasoning_choice}. Available options: 0-4")
                 print("Please enter a valid choice, press Enter for default, or 'q' to quit:")
         except ValueError:
             print("Error: Please enter a valid number, press Enter for default, or 'q' to quit:")
@@ -1987,17 +2182,19 @@ async def main():
     # Define reasoning effort configurations
     reasoning_configs = {
         0: "all",  # Special case for all effort levels
-        1: {"effort": "low", "summary": "auto"},
-        2: {"effort": "medium", "summary": "auto"},
-        3: {"effort": "high", "summary": "auto"}
+        1: {"effort": "minimal", "summary": "auto"},
+        2: {"effort": "low", "summary": "auto"},
+        3: {"effort": "medium", "summary": "auto"},
+        4: {"effort": "high", "summary": "auto"}
     }
     
     selected_reasoning = reasoning_configs[reasoning_choice]
     
     if selected_reasoning == "all":
-        print(f"\nSelected: ALL reasoning effort levels (sequential execution)")
+        print(f"\nSelected: ALL reasoning effort levels (runs efforts sequentially for comparison)")
         print("This will run each effort level sequentially for comprehensive analysis.")
         reasoning_levels = [
+            {"effort": "minimal", "summary": "auto"},
             {"effort": "low", "summary": "auto"},
             {"effort": "medium", "summary": "auto"},
             {"effort": "high", "summary": "auto"}
@@ -2006,9 +2203,43 @@ async def main():
         print(f"\nSelected: {selected_reasoning['effort'].title()} effort")
         reasoning_levels = [selected_reasoning]
     
+    # Prompt for text verbosity (single choice applied to all) BEFORE computing combinations
+    print("\nTEXT VERBOSITY SELECTION")
+    print("0. All verbosities (low, medium, high)")
+    print("1. Low verbosity")
+    print("2. Medium verbosity - DEFAULT")
+    print("3. High verbosity")
+    print("Enter your choice (0-3, or press Enter for default medium):")
+    while True:
+        text_input = input("Text verbosity > ").strip()
+        if text_input == "":
+            text_choice = 2
+            print("Using default: Medium verbosity")
+            break
+        try:
+            text_choice = int(text_input)
+            if 0 <= text_choice <= 3:
+                break
+            else:
+                print("Error: Invalid choice. Available options: 0-3")
+        except ValueError:
+            print("Error: Please enter a valid number or press Enter for default")
+    text_map = {1: "low", 2: "medium", 3: "high"}
+
+    # Determine which verbosity levels to run
+    if text_choice == 0:
+        selected_verbosity_levels = ["low", "medium", "high"]
+    else:
+        selected_verbosity_levels = [text_map[text_choice]]
+
     # Process all combinations
     all_results = {}
-    total_combinations = len(selected_models) * len(selected_base_names) * len(reasoning_levels)
+    total_combinations = (
+        len(selected_models)
+        * len(selected_base_names)
+        * len(reasoning_levels)
+        * len(selected_verbosity_levels)
+    )
     current_combination = 0
     
     # Start timing the total execution
@@ -2017,28 +2248,40 @@ async def main():
     for model in selected_models:
         for base_name in selected_base_names:
             for reasoning_config in reasoning_levels:
-                current_combination += 1
-                print(f"\n{'='*60}")
-                print(f"PROCESSING COMBINATION {current_combination}/{total_combinations}")
-                print(f"Model: {base_name} with AI model: {model}")
-                print(f"Reasoning effort: {reasoning_config['effort'].title()}")
-                print(f"{'='*60}")
-                
-                # Create token config with reasoning settings
-                reasoning_token_config = token_config.copy()
+                # Token caps removed: no token config
                 
                 # Create orchestrator with reasoning configuration
-                orchestrator = NetLogoOrchestrator(model_name=model, max_tokens_config=reasoning_token_config)
+                orchestrator = NetLogoOrchestrator(model_name=model)
                 
                 # Update reasoning configuration for all agents
                 orchestrator.update_reasoning_config(reasoning_config["effort"], reasoning_config["summary"])
-                
-                results = await orchestrator.run(base_name, start_step=start_step)
-                
-                # Create unique key for results
-                reasoning_suffix = f"{reasoning_config['effort']}-{reasoning_config['summary']}"
-                result_key = f"{base_name}_{model}_{reasoning_suffix}"
-                all_results[result_key] = results
+
+                # Run for each selected verbosity level
+                for verbosity in selected_verbosity_levels:
+                    current_combination += 1
+                    print(f"\n{'='*60}")
+                    print(f"PROCESSING COMBINATION {current_combination}/{total_combinations}")
+                    # Single parameter bundle line including text verbosity
+                    print(f"{'='*60}")
+
+                    orchestrator.update_text_config(verbosity)
+                    # Print a single parameter bundle line including text verbosity
+                    bundle_line = format_parameter_bundle(
+                        model=model,
+                        base_name=base_name,
+                        reasoning_effort=reasoning_config["effort"],
+                        reasoning_summary=reasoning_config["summary"],
+                        text_verbosity=verbosity,
+                        # No max_tokens
+                    )
+                    print(bundle_line)
+                    
+                    results = await orchestrator.run(base_name, start_step=start_step)
+                    
+                    # Create unique key for results including verbosity
+                    reasoning_suffix = f"{reasoning_config['effort']}-{reasoning_config['summary']}"
+                    result_key = f"{base_name}_{model}_{reasoning_suffix}_{verbosity}"
+                    all_results[result_key] = results
     
     # Calculate total execution time
     total_execution_time = time.time() - total_execution_start_time
@@ -2086,8 +2329,9 @@ async def main():
     # Generate comprehensive orchestration summary
     if all_results:
         # Create a temporary orchestrator instance to call the summary method
-        temp_orchestrator = NetLogoOrchestrator(model_name="gpt-5")
-        temp_orchestrator.logger = setup_orchestration_logger("overall", "gpt-5", datetime.datetime.now().strftime("%Y%m%d_%H%M"))
+        temp_orchestrator = NetLogoOrchestrator(model_name=DEFAULT_MODEL)
+        temp_orchestrator.logger = setup_orchestration_logger("overall", DEFAULT_MODEL, datetime.datetime.now().strftime("%Y%m%d_%H%M"))
+        attach_stdio_to_logger(temp_orchestrator.logger)
         temp_orchestrator._generate_orchestration_summary(all_results)
     
 
