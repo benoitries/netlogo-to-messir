@@ -423,11 +423,10 @@ Non-compliant Rules to Fix:
         try:
             diagram_text = self._extract_plantuml_text(results.get("data")) if results.get("data") else None
             if diagram_text and "@startuml" in diagram_text and "@enduml" in diagram_text:
-                agent_id = "plantuml_corrector"
-                puml_filename = f"{base_name}_{self.timestamp}_{model_name}_{agent_id}_diagram.puml"
-                puml_file = base_output_dir / puml_filename
+                # Enforce canonical filename for Stage 07 corrected diagram
+                puml_file = base_output_dir / "diagram.puml"
                 puml_file.write_text(diagram_text, encoding="utf-8")
-                print(f"OK: {base_name} -> {puml_filename}")
+                print(f"OK: {base_name} -> diagram.puml")
                 results["puml_file"] = str(puml_file)
             else:
                 print("WARNING: Could not extract valid PlantUML diagram text to write corrected .puml file")
