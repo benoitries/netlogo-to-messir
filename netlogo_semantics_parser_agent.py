@@ -316,20 +316,6 @@ Filename: {base_name}
             full_input = f"{instructions}\n\n{input_text}"
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
-        
-    def parse_netlogo_ast(self, ast: Dict[str, Any], filename: str = "input.nlogo") -> Dict[str, Any]:
-        """Deprecated. Stage 2 no longer accepts AST. Use parse_from_ilsem_and_ui()."""
-        raise NotImplementedError("Semantics Parser no longer accepts AST input. Use parse_from_ilsem_and_ui(ui_images, base_name).")
-    
-    def parse_ast_to_state_machine(self, ast_json_str: Any, filename: str = "input.nlogo") -> Dict[str, Any]:
-        """Deprecated. Stage 2 no longer accepts AST. Use parse_from_ilsem_and_ui()."""
-        raise NotImplementedError("Semantics Parser no longer accepts AST input. Use parse_from_ilsem_and_ui(ui_images, base_name).")
-
-    def parse_netlogo_code_direct(self, code: str, filename: str = "input.nlogo") -> Dict[str, Any]:
-        """Deprecated. Stage 2 no longer accepts raw code. Use parse_from_ilsem_and_ui()."""
-        raise NotImplementedError("Semantics Parser no longer accepts raw code input. Use parse_from_ilsem_and_ui(ui_images, base_name).")
-    
-
     
     def save_results(self, results: Dict[str, Any], base_name: str, model_name: str, step_number = None, output_dir = None):
         """Save parsing results to a single JSON file."""
