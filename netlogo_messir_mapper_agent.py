@@ -12,7 +12,7 @@ import tiktoken
 from typing import Dict, Any, List
 from google.adk.agents import LlmAgent
 from openai import OpenAI
-from openai_client_utils import create_and_wait, get_output_text, get_reasoning_summary
+from openai_client_utils import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens
 from response_dump_utils import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
 from response_schema_expected import expected_keys_for_agent
 from logging_utils import write_reasoning_md_from_payload
@@ -230,51 +230,15 @@ State Machine:
                         messir_concepts = response_data
                 errors = response_data.get("errors", []) if isinstance(response_data, dict) else []
 
-                # Extract token usage from response
-                tokens_used = 0
-                input_tokens = 0
-                output_tokens = 0
-                reasoning_tokens = 0
-                
-                # Get token usage from OpenAI Responses API
-                usage_dict = None
-                if hasattr(response, 'usage') and response.usage:
-                    tokens_used = getattr(response.usage, 'total_tokens', 0)
-                    api_input_tokens = getattr(response.usage, 'input_tokens', 0)
-                    api_output_tokens = getattr(response.usage, 'output_tokens', 0)
-                    reasoning_details = getattr(response.usage, 'output_tokens_details', None)
-                    if reasoning_details is not None:
-                        reasoning_tokens = getattr(reasoning_details, 'reasoning_tokens', 0)
-                    else:
-                        reasoning_tokens = getattr(response.usage, 'reasoning_tokens', 0)
-                    
-                    if api_input_tokens and api_input_tokens > 0:
-                        input_tokens = api_input_tokens
-                        output_tokens = api_output_tokens
-                    else:
-                        input_tokens = exact_input_tokens
-                        output_tokens = tokens_used - exact_input_tokens if tokens_used > exact_input_tokens else 0
-                    
-                    usage_dict = {
-                        "total_tokens": tokens_used,
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
-                        "reasoning_tokens": reasoning_tokens
-                    }
-                    # Prefer API fields directly: output_tokens is (visible + reasoning) according to our policy here
-                    # Thus: visible = output_tokens - reasoning_tokens, total_out = output_tokens
-                    visible_output_tokens = max((output_tokens or 0) - (reasoning_tokens or 0), 0)
-                    total_output_tokens = (output_tokens or 0)
-                    # Debug: Print usage details
-                    print(f"# Usage details")
-                    print(f"response.usage: {response.usage}")
-                    print(f"Exact input tokens: {exact_input_tokens}")
-                    print(f"API input tokens: {api_input_tokens}")
-                    print(f"Final input tokens: {input_tokens}")
-                    print(f"Output tokens: {output_tokens}")
-                    print(f"Total tokens: {tokens_used}")
-                else:
-                    print(f"[WARNING] No usage data available in response")
+                # Extract token usage from response (centralized helper)
+                usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
+                tokens_used = usage.get("total_tokens", 0)
+                input_tokens = usage.get("input_tokens", 0)
+                output_tokens = usage.get("output_tokens", 0)
+                reasoning_tokens = usage.get("reasoning_tokens", 0)
+                visible_output_tokens = max((output_tokens or 0) - (reasoning_tokens or 0), 0)
+                total_output_tokens = visible_output_tokens + (reasoning_tokens or 0)
+                usage_dict = usage
 
                 return {
                     "reasoning_summary": reasoning_summary,
