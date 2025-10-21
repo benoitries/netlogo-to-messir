@@ -30,7 +30,7 @@ _PROJECT_ROOT = _THIS_DIR.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from config import OUTPUT_DIR
+from utils_config_constants import OUTPUT_DIR
 
 # Regexes reused from time parser logic
 COMP_LINE = re.compile(r"^.*completed in\s+([0-9]+\.[0-9]+|[0-9]+)s")

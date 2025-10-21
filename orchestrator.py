@@ -13,49 +13,24 @@ import time
 import logging
 from typing import Dict, Any, List
 
-def format_duration(seconds: float) -> str:
-    """
-    Format duration in seconds to human-readable format.
-    
-    Args:
-        seconds: Duration in seconds
-        
-    Returns:
-        Formatted string with seconds and human-readable format if > 60 seconds
-    """
-    if seconds < 60:
-        return f"{seconds:.2f}s"
-    else:
-        minutes = int(seconds // 60)
-        remaining_seconds = seconds % 60
-        
-        if minutes == 1:
-            if remaining_seconds == 0:
-                return f"{seconds:.2f}s (1 minute)"
-            else:
-                return f"{seconds:.2f}s (1 minute and {remaining_seconds:.0f} seconds)"
-        else:
-            if remaining_seconds == 0:
-                return f"{seconds:.2f}s ({minutes} minutes)"
-            else:
-                return f"{seconds:.2f}s ({minutes} minutes and {remaining_seconds:.0f} seconds)"
-from netlogo_syntax_parser_agent import NetLogoSyntaxParserAgent
-from netlogo_semantics_parser_agent import NetLogoSemanticsParserAgent
-from netlogo_messir_mapper_agent import NetLogoMessirMapperAgent
-from netlogo_scenario_writer_agent import NetLogoScenarioWriterAgent
-from netlogo_plantuml_writer_agent import NetLogoPlantUMLWriterAgent
-from netlogo_plantuml_auditor_agent import NetLogoPlantUMLMessirAuditorAgent
-from netlogo_plantuml_messir_corrector_agent import NetLogoPlantUMLMessirCorrectorAgent
+from agent_1_syntax_parser import NetLogoSyntaxParserAgent
+from agent_2_semantics_parser import NetLogoSemanticsParserAgent
+from agent_3_messir_concepts_mapper import NetLogoMessirMapperAgent
+from agent_4_scenario_writer import NetLogoScenarioWriterAgent
+from agent_5_plantuml_writer import NetLogoPlantUMLWriterAgent
+from agent_6_plantuml_auditor import NetLogoPlantUMLMessirAuditorAgent
+from utils_format import FormatUtils
+from agent_7_plantuml_corrector import NetLogoPlantUMLMessirCorrectorAgent
 
-from config import (
+from utils_config_constants import (
     INPUT_NETLOGO_DIR, INPUT_ICRASH_DIR, OUTPUT_DIR, INPUT_PERSONA_DIR,
     AGENT_CONFIGS, AVAILABLE_MODELS, DEFAULT_MODEL, ensure_directories,
-    validate_agent_response
+    validate_agent_response, MESSIR_RULES_FILE
 )
-from logging_utils import setup_orchestration_logger, format_parameter_bundle, attach_stdio_to_logger
-from path_utils import get_run_base_dir
+from utils_logging import setup_orchestration_logger, format_parameter_bundle, attach_stdio_to_logger
+from utils_path import get_run_base_dir
 from pathlib import Path
-from config import OUTPUT_DIR
+from utils_config_constants import OUTPUT_DIR
 
 # Ensure all directories exist
 ensure_directories()
@@ -311,7 +286,7 @@ class NetLogoOrchestrator:
                 reasoning_tokens = result.get("reasoning_tokens", 0)
                 self.token_usage[agent_name]["used"] = tokens_used
                 
-                self.logger.info(f"✅ {agent_name} completed in {format_duration(duration)}")
+                self.logger.info(f"✅ {agent_name} completed in {FormatUtils.format_duration(duration)}")
                 # Clarified logging: no token caps, just report numbers
                 # Explicitly separate visible vs reasoning output tokens, and their sum
                 # Prefer explicit fields if present in result
@@ -349,7 +324,7 @@ class NetLogoOrchestrator:
                     f"   Total Tokens = {tokens_used:,}"
                 )
             else:
-                self.logger.info(f"✅ {agent_name} completed in {format_duration(duration)}")
+                self.logger.info(f"✅ {agent_name} completed in {FormatUtils.format_duration(duration)}")
                 self.logger.info(f"   Token usage: Not available")
             
             return result
@@ -362,7 +337,7 @@ class NetLogoOrchestrator:
             self.detailed_timing[agent_name]["duration"] = duration
             self.execution_times[agent_name] = duration
             
-            self.logger.error(f"❌ {agent_name} failed after {format_duration(duration)}: {str(e)}")
+            self.logger.error(f"❌ {agent_name} failed after {FormatUtils.format_duration(duration)}: {str(e)}")
             raise
     
     def _generate_detailed_summary(self, base_name: str, processed_results: Dict[str, Any]):
@@ -448,13 +423,13 @@ class NetLogoOrchestrator:
         
             # Log visible vs reasoning output tokens and their sum
             self.logger.info(
-                f"{agent:<25} {status:<10} {format_duration(duration):<15} {tokens_used:<15,} "
+                f"{agent:<25} {status:<10} {FormatUtils.format_duration(duration):<15} {tokens_used:<15,} "
                 f"{input_tokens:<10,} {visible_output_tokens:<12,} {reasoning_tokens:<10,} {total_output_tokens:<10,}"
             )
         
         # Overall summary
         self.logger.info(f"\n📈 OVERALL SUMMARY:")
-        self.logger.info(f"   Total Execution Time: {format_duration(total_time)}")
+        self.logger.info(f"   Total Execution Time: {FormatUtils.format_duration(total_time)}")
         self.logger.info(f"   Total Tokens Used: {total_tokens_used:,}")
         self.logger.info(f"   Total Input Tokens: {total_input_tokens:,}")
         self.logger.info(f"   Total Output Tokens: {total_output_tokens:,}")
@@ -557,7 +532,7 @@ class NetLogoOrchestrator:
 
             status = "✓ SUCCESS" if success_rate >= 80 else "⚠️ PARTIAL" if success_rate >= 50 else "✗ FAILED"
 
-            self.logger.info(f"{orchestration_key:<30} {status:<10} {format_duration(total_time):<20} {total_tokens:<15,} {success_rate:<12.1f}%")
+            self.logger.info(f"{orchestration_key:<30} {status:<10} {FormatUtils.format_duration(total_time):<20} {total_tokens:<15,} {success_rate:<12.1f}%")
         
         # Overall statistics
         # Aggregate tokens used across all orchestrations from their inner results
@@ -584,10 +559,10 @@ class NetLogoOrchestrator:
         
         self.logger.info(f"\n📊 OVERALL STATISTICS:")
         self.logger.info(f"   Total Orchestrations: {total_orchestrations}")
-        self.logger.info(f"   Total Execution Time: {format_duration(total_execution_time)}")
+        self.logger.info(f"   Total Execution Time: {FormatUtils.format_duration(total_execution_time)}")
         self.logger.info(f"   Total Tokens Used: {total_tokens_used:,}")
         self.logger.info(f"   Total Reasoning Tokens: {total_reasoning_tokens_all:,}")
-        self.logger.info(f"   Average Time per Orchestration: {format_duration(total_execution_time/total_orchestrations)}")
+        self.logger.info(f"   Average Time per Orchestration: {FormatUtils.format_duration(total_execution_time/total_orchestrations)}")
         self.logger.info(f"   Average Tokens per Orchestration: {total_tokens_used/total_orchestrations:,.0f}")
         # New: Average input/output/reasoning tokens per orchestration
         self.logger.info(f"   Average Input Tokens per Orchestration: {total_input_tokens_all/total_orchestrations:,.0f}")
@@ -610,7 +585,7 @@ class NetLogoOrchestrator:
         """
         import json
         import glob
-        from path_utils import get_run_base_dir
+        from utils_path import get_run_base_dir
         
         # 1) Try new per-run/per-combination layout first
         # Determine reasoning/text verbosity from agent configs (same combo used across steps)
@@ -1001,12 +976,32 @@ class NetLogoOrchestrator:
                 icrash_contents.append(icrash_content)
                 self.logger.info(f"Found icrash file: {icrash_file.name}")
             
+            # Load MUCIM DSL content
+            messir_dsl_content = ""
+            try:
+                messir_dsl_content = MESSIR_RULES_FILE.read_text(encoding="utf-8")
+                self.logger.info(f"Loaded MUCIM DSL content from {MESSIR_RULES_FILE}")
+            except FileNotFoundError:
+                self.logger.error(f"MANDATORY INPUT MISSING: MUCIM DSL file not found: {MESSIR_RULES_FILE}")
+                messir_result = {
+                    "reasoning_summary": "MISSING MANDATORY INPUT: MUCIM DSL file not found",
+                    "data": None,
+                    "errors": [f"MANDATORY INPUT MISSING: MUCIM DSL file not found: {MESSIR_RULES_FILE}"],
+                    "tokens_used": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0
+                }
+                processed_results["messir_mapper"] = messir_result
+                return processed_results
+            
             try:
                 messir_result = self._execute_agent_with_tracking(
                     "messir_mapper",
                     self.messir_mapper_agent.map_to_messir_concepts,
                     processed_results["semantics"]["data"],
                     base_name,
+                    processed_results["ast"]["data"],  # Step 01 AST data (MANDATORY)
+                    messir_dsl_content,  # MUCIM DSL content (MANDATORY)
                     icrash_contents
                 )
                 
@@ -1035,7 +1030,7 @@ class NetLogoOrchestrator:
         else:
             self.logger.info(f"Skipping Step 3: Messir Mapper agent for {base_name} (AST or State Machine failed)")
         
-        # Step 4: Scenario Writer Agent (using AST, Messir Concepts, and State Machine from previous steps)
+        # Step 4: Scenario Writer Agent (using mandatory inputs: Step 02 state machine, Step 03 Messir concepts, MUCIM DSL, iCrash refs)
         if start_step <= 4 and (processed_results.get("ast", {}).get("data") and 
             processed_results.get("messir_mapper", {}).get("data") and
             processed_results.get("semantics", {}).get("data")):
@@ -1043,10 +1038,37 @@ class NetLogoOrchestrator:
             self.logger.info(f"Step 4: Running Scenario Writer agent for {base_name}...")
             
             try:
+                # Load mandatory inputs for Scenario Writer
+                state_machine = processed_results["semantics"]["data"]
+                messir_concepts = processed_results["messir_mapper"]["data"]
+                
+                # Load MUCIM DSL full definition
+                messir_rules_content = ""
+                try:
+                    messir_rules_content = MESSIR_RULES_FILE.read_text(encoding="utf-8")
+                except FileNotFoundError:
+                    self.logger.error(f"ERROR: MUCIM DSL file not found: {MESSIR_RULES_FILE}")
+                    raise SystemExit(f"ERROR: MUCIM DSL file not found: {MESSIR_RULES_FILE}")
+                
+                # Load iCrash references
+                icrash_refs_content = ""
+                icrash_files = self.find_icrash_files()
+                if icrash_files:
+                    # For now, we'll include a note about iCrash files being available
+                    # In a full implementation, you might want to extract text from PDFs
+                    icrash_refs_content = f"iCrash reference files available: {[f.name for f in icrash_files]}"
+                    self.logger.info(f"Found {len(icrash_files)} iCrash reference files")
+                else:
+                    icrash_refs_content = "No iCrash reference files found"
+                    self.logger.warning("No iCrash reference files found")
+                
                 scenario_result = self._execute_agent_with_tracking(
                     "scenario_writer",
                     self.scenario_writer_agent.write_scenarios,
-                    processed_results["messir_mapper"]["data"],
+                    state_machine,
+                    messir_concepts,
+                    messir_rules_content,
+                    icrash_refs_content,
                     base_name
                 )
                 
@@ -1131,11 +1153,44 @@ class NetLogoOrchestrator:
                 # Get scenarios data for context
                 scenarios_data = processed_results.get("scenario_writer", {}).get("data", {})
                 
+                # Load MUCIM DSL content (MANDATORY)
+                messir_dsl_content = ""
+                try:
+                    messir_dsl_content = MESSIR_RULES_FILE.read_text(encoding="utf-8")
+                    self.logger.info(f"Loaded MUCIM DSL content for PlantUML Auditor")
+                except FileNotFoundError:
+                    self.logger.error(f"MANDATORY INPUT MISSING: MUCIM DSL file not found: {MESSIR_RULES_FILE}")
+                    plantuml_messir_auditor_result = {
+                        "reasoning_summary": "MISSING MANDATORY INPUT: MUCIM DSL file not found",
+                        "data": None,
+                        "errors": [f"MANDATORY INPUT MISSING: MUCIM DSL file not found: {MESSIR_RULES_FILE}"],
+                        "tokens_used": 0,
+                        "input_tokens": 0,
+                        "output_tokens": 0
+                    }
+                    processed_results["plantuml_messir_auditor"] = plantuml_messir_auditor_result
+                    return processed_results
+                
+                # Get PlantUML file path (MANDATORY)
+                plantuml_file_path = processed_results["plantuml_writer"].get("puml_file", "")
+                if not plantuml_file_path:
+                    self.logger.error(f"MANDATORY INPUT MISSING: .puml file path not found in PlantUML Writer results")
+                    plantuml_messir_auditor_result = {
+                        "reasoning_summary": "MISSING MANDATORY INPUT: .puml file path not found",
+                        "data": None,
+                        "errors": [f"MANDATORY INPUT MISSING: .puml file path not found in PlantUML Writer results"],
+                        "tokens_used": 0,
+                        "input_tokens": 0,
+                        "output_tokens": 0
+                    }
+                    processed_results["plantuml_messir_auditor"] = plantuml_messir_auditor_result
+                    return processed_results
+                
                 plantuml_messir_auditor_result = self._execute_agent_with_tracking(
                     "plantuml_messir_auditor",
                     self.plantuml_messir_auditor_agent.audit_plantuml_diagrams,
-                    processed_results["plantuml_writer"]["data"],
-                    scenarios_data,
+                    plantuml_file_path,
+                    str(MESSIR_RULES_FILE),
                     base_name
                 )
                 
@@ -1158,7 +1213,7 @@ class NetLogoOrchestrator:
                         # Calculate total orchestration time
                         total_orchestration_time = time.time() - total_orchestration_start_time
                         self.execution_times["total_orchestration"] = total_orchestration_time
-                        self.logger.info(f"Total orchestration time: {format_duration(total_orchestration_time)}")
+                        self.logger.info(f"Total orchestration time: {FormatUtils.format_duration(total_orchestration_time)}")
                         # Generate summary and finalize
                         self._generate_detailed_summary(base_name, processed_results)
                         processed_results["execution_times"] = self.execution_times.copy()
@@ -1196,25 +1251,44 @@ class NetLogoOrchestrator:
             # Check if Step 6 (PlantUML Messir Auditor) succeeded and provided expected input
             plantuml_data = processed_results.get("plantuml_writer", {}).get("data")
             audit_data = processed_results.get("plantuml_messir_auditor", {}).get("data")
-            audit_has_errors = bool(processed_results.get("plantuml_messir_auditor", {}).get("errors", []))
+            # Check for errors in both top-level errors and data.errors fields
+            audit_top_level_errors = processed_results.get("plantuml_messir_auditor", {}).get("errors", [])
+            audit_data_errors = audit_data.get("errors", []) if audit_data else []
+            audit_has_errors = bool(audit_top_level_errors) or bool(audit_data_errors)
             
             # Extract non-compliant rules from audit data
             non_compliant_rules = audit_data.get("non-compliant-rules", []) if audit_data else []
             
-            # Run corrector ONLY if we have non-compliant rules to fix
-            if plantuml_data and audit_data and non_compliant_rules:
-                self.logger.info(f"Step 7: Running PlantUML Messir Corrector agent for {base_name}...")
+            # Run corrector if we have non-compliant rules OR syntax errors to fix
+            has_issues_to_fix = bool(non_compliant_rules) or bool(audit_data_errors)
+            if plantuml_data and audit_data and has_issues_to_fix:
+                self.logger.info(f"Step 7: Running PlantUML Messir Corrector agent for {base_name} (found {len(non_compliant_rules)} non-compliant rules, {len(audit_data_errors)} syntax errors)...")
                 
                 try:
-                    # Get scenarios data for context
-                    scenarios_data = processed_results.get("scenario_writer", {}).get("data", {})
+                    # Load MUCIM DSL content (MANDATORY)
+                    messir_dsl_content = ""
+                    try:
+                        messir_dsl_content = MESSIR_RULES_FILE.read_text(encoding="utf-8")
+                        self.logger.info(f"Loaded MUCIM DSL content for PlantUML Corrector")
+                    except FileNotFoundError:
+                        self.logger.error(f"MANDATORY INPUT MISSING: MUCIM DSL file not found: {MESSIR_RULES_FILE}")
+                        plantuml_messir_corrector_result = {
+                            "reasoning_summary": "MISSING MANDATORY INPUT: MUCIM DSL file not found",
+                            "data": None,
+                            "errors": [f"MANDATORY INPUT MISSING: MUCIM DSL file not found: {MESSIR_RULES_FILE}"],
+                            "tokens_used": 0,
+                            "input_tokens": 0,
+                            "output_tokens": 0
+                        }
+                        processed_results["plantuml_messir_corrector"] = plantuml_messir_corrector_result
+                        return processed_results
                     
                     plantuml_messir_corrector_result = self._execute_agent_with_tracking(
                         "plantuml_messir_corrector",
                         self.plantuml_messir_corrector_agent.correct_plantuml_diagrams,
                         plantuml_data,
-                        scenarios_data,
                         non_compliant_rules,
+                        messir_dsl_content,
                         base_name
                     )
                     
@@ -1243,12 +1317,12 @@ class NetLogoOrchestrator:
                     plantuml_messir_corrector_executed = True
                     plantuml_messir_corrector_success = False
                     
-            elif plantuml_data and audit_data and not audit_has_errors:
-                # Skip corrector if there are no non-compliant rules to fix
-                self.logger.info(f"Step 7: Skipping PlantUML Messir Corrector agent for {base_name} (no non-compliant rules to fix)")
+            elif plantuml_data and audit_data and not has_issues_to_fix:
+                # Skip corrector if there are no issues to fix (no non-compliant rules and no syntax errors)
+                self.logger.info(f"Step 7: Skipping PlantUML Messir Corrector agent for {base_name} (no issues to fix)")
                 processed_results["plantuml_messir_corrector"] = {
                     "agent_type": "plantuml_messir_corrector",
-                    "reasoning_summary": "Corrector skipped - no non-compliant rules to fix",
+                    "reasoning_summary": "Corrector skipped - no issues to fix",
                     "data": plantuml_data,  # Pass through original data
                     "errors": [],
                     "skipped": True
@@ -1317,13 +1391,62 @@ class NetLogoOrchestrator:
                 # Get scenarios data for context
                 scenarios_data = processed_results.get("scenario_writer", {}).get("data", {})
                 
-                plantuml_messir_final_auditor_result = self._execute_agent_with_tracking(
-                    "plantuml_messir_final_auditor",
-                    self.plantuml_messir_final_auditor_agent.audit_plantuml_diagrams,
-                    plantuml_data_to_audit,
-                    scenarios_data,
-                    base_name
-                )
+                # Determine the .puml file path for the corrected diagrams
+                puml_file_path = ""
+                if corrector_has_data and not corrector_has_errors:
+                    # Use corrected .puml file from Step 7
+                    corrector_output_dir = run_dir / "07-plantuml_messir_corrector"
+                    puml_files = list(corrector_output_dir.glob("*.puml"))
+                    if puml_files:
+                        puml_file_path = str(puml_files[0])
+                        self.logger.info(f"Step 8: Using corrected .puml file: {puml_file_path}")
+                    else:
+                        self.logger.warning(f"Step 8: No .puml file found in corrector output, using data only")
+                else:
+                    # Use original .puml file from Step 5
+                    plantuml_writer_output_dir = run_dir / "05-plantuml_writer"
+                    puml_files = list(plantuml_writer_output_dir.glob("*.puml"))
+                    if puml_files:
+                        puml_file_path = str(puml_files[0])
+                        self.logger.info(f"Step 8: Using original .puml file: {puml_file_path}")
+                    else:
+                        self.logger.warning(f"Step 8: No .puml file found in writer output, using data only")
+                
+                # MUCIM DSL file path (mandatory)
+                mucim_dsl_file_path = str(MESSIR_RULES_FILE)
+                self.logger.info(f"Step 8: Using MUCIM DSL file: {mucim_dsl_file_path}")
+                
+                # Enforce mandatory inputs for final audit: require existing .puml and MUCIM DSL
+                from pathlib import Path as _Path
+                missing_reasons = []
+                if not puml_file_path:
+                    missing_reasons.append(".puml file path is empty")
+                elif not _Path(puml_file_path).exists():
+                    missing_reasons.append(f".puml file does not exist: {puml_file_path}")
+                if not _Path(mucim_dsl_file_path).exists():
+                    missing_reasons.append(f"MUCIM DSL file not found: {mucim_dsl_file_path}")
+
+                plantuml_messir_final_auditor_result = None
+                if missing_reasons:
+                    reason = "; ".join(missing_reasons)
+                    plantuml_messir_final_auditor_result = {
+                        "reasoning_summary": f"MISSING MANDATORY INPUT: {reason}",
+                        "data": None,
+                        "errors": [f"MISSING MANDATORY INPUT: {reason}"],
+                        "tokens_used": 0,
+                        "input_tokens": 0,
+                        "output_tokens": 0
+                    }
+                    self.logger.error(f"MANDATORY INPUTS MISSING for Step 8: {reason}")
+                else:
+                    # Use the strict auditor API: (puml_file_path, mucim_dsl_file_path, base_name)
+                    plantuml_messir_final_auditor_result = self._execute_agent_with_tracking(
+                        "plantuml_messir_final_auditor",
+                        self.plantuml_messir_final_auditor_agent.audit_plantuml_diagrams,
+                        puml_file_path,
+                        mucim_dsl_file_path,
+                        base_name
+                    )
                 
                 # Add agent type identifier
                 plantuml_messir_final_auditor_result["agent_type"] = "plantuml_messir_final_auditor"
@@ -1361,7 +1484,7 @@ class NetLogoOrchestrator:
         self.execution_times["total_orchestration"] = total_orchestration_time
         
         self.logger.info(f"Completed processing for {base_name}")
-        self.logger.info(f"Total orchestration time: {format_duration(total_orchestration_time)}")
+        self.logger.info(f"Total orchestration time: {FormatUtils.format_duration(total_orchestration_time)}")
         
         # Generate enhanced detailed summary with timing and token usage
         self._generate_detailed_summary(base_name, processed_results)
@@ -1420,8 +1543,8 @@ class NetLogoOrchestrator:
             )
 
         # Fan-out: run both concurrently with an optional watchdog and heartbeat
-        from config import HEARTBEAT_SECONDS
-        import config as cfg
+        from utils_config_constants import HEARTBEAT_SECONDS
+        import utils_config_constants as cfg
         async def heartbeat_task():
             try:
                 while True:
@@ -1503,7 +1626,7 @@ class NetLogoOrchestrator:
         # Total timing
         total_orchestration_time = time.time() - total_orchestration_start_time
         self.execution_times["total_orchestration"] = total_orchestration_time
-        self.logger.info(f"Parallel first stage completed in {format_duration(total_orchestration_time)}")
+        self.logger.info(f"Parallel first stage completed in {FormatUtils.format_duration(total_orchestration_time)}")
 
         # Bookkeeping only (no intermediate detailed summary in single-pass mode)
         processed_results["execution_times"] = self.execution_times.copy()
@@ -1685,7 +1808,7 @@ class NetLogoOrchestrator:
         self.logger.info(f"   Success Rate: {(successful_agents/total_agents)*100:.1f}%")
         
         print(f"\n⏱️  EXECUTION TIMING:")
-        self.logger.info(f"   Total Orchestration Time: {format_duration(self.execution_times['total_orchestration'])}")
+        self.logger.info(f"   Total Orchestration Time: {FormatUtils.format_duration(self.execution_times['total_orchestration'])}")
         
         # Calculate and display individual agent times
         total_agent_time = 0
@@ -1726,14 +1849,14 @@ class NetLogoOrchestrator:
         # Sort agents by execution time (descending)
         agent_times.sort(key=lambda x: x[1], reverse=True)
         
-        self.logger.info(f"   Total Agent Execution Time: {format_duration(total_agent_time)}")
-        self.logger.info(f"   Overhead Time: {format_duration(self.execution_times['total_orchestration'] - total_agent_time)}")
+        self.logger.info(f"   Total Agent Execution Time: {FormatUtils.format_duration(total_agent_time)}")
+        self.logger.info(f"   Overhead Time: {FormatUtils.format_duration(self.execution_times['total_orchestration'] - total_agent_time)}")
         
         if agent_times:
             self.logger.info(f"   \n   📈 AGENT TIMING BREAKDOWN:")
             for agent_name, agent_time in agent_times:
                 percentage = (agent_time / total_agent_time * 100) if total_agent_time > 0 else 0
-                self.logger.info(f"      {agent_name}: {format_duration(agent_time)} ({percentage:.1f}%)")
+                self.logger.info(f"      {agent_name}: {FormatUtils.format_duration(agent_time)} ({percentage:.1f}%)")
         
         print(f"\n🔍 DETAILED AGENT STATUS:")
         self.logger.info(f"   Step 1 - Syntax Parser Agent: {'✓ SUCCESS' if syntax_parser_success else '✗ FAILED'}")
@@ -1914,6 +2037,12 @@ class NetLogoOrchestrator:
 async def main():
     """Main execution function."""
     
+    # Validate OpenAI API key before any user interaction
+    from utils_openai_client import validate_openai_key
+    print("Validating OpenAI API key...")
+    if not validate_openai_key():
+        print("Exiting due to invalid OpenAI API key")
+        return
     
     # Available AI models
     available_models = AVAILABLE_MODELS
@@ -2097,8 +2226,8 @@ async def main():
     print(f"\n{'='*60}")
     print("TIMEOUT PRESET SELECTION")
     print(f"{'='*60}")
-    import config as cfg
-    # Determine display of current defaults from config.py
+    import utils_config_constants as cfg
+    # Determine display of current defaults from utils_config_constants.py
     current_orch_default = getattr(cfg, "ORCHESTRATOR_PARALLEL_TIMEOUT", None)
     if current_orch_default is None:
         default_label = "No timeout"
@@ -2108,17 +2237,17 @@ async def main():
     print("0. No timeout (agents and orchestrator)")
     print("1. Medium timeout (900s)")
     print("2. Long timeout (1800s)")
-    print(f"Press Enter for default from config.py ({default_label})")
-    print("Note: default config.py now sets NO TIMEOUT for both agents and orchestrator.")
+    print(f"Press Enter for default from utils_config_constants.py ({default_label})")
+    print("Note: default utils_config_constants.py now sets NO TIMEOUT for both agents and orchestrator.")
 
     preset_map = {0: None, 1: 900, 2: 1800}
     while True:
         timeout_input = input("Timeout preset > ").strip()
         if timeout_input == "":
-            # Keep config.py defaults as-is
+            # Keep utils_config_constants.py defaults as-is
             chosen_seconds = current_orch_default
             chosen_preset = "default"
-            print(f"Using default from config.py: {default_label}")
+            print(f"Using default from utils_config_constants.py: {default_label}")
             break
         try:
             timeout_choice = int(timeout_input)
@@ -2314,7 +2443,7 @@ async def main():
     overall_success_rate = (total_successful_agents / total_agents * 100) if total_agents > 0 else 0
     
     print(f"\n⏱️  TOTAL EXECUTION TIME:")
-    print(f"   Total time: {format_duration(total_execution_time)}")
+    print(f"   Total time: {FormatUtils.format_duration(total_execution_time)}")
     
     print(f"\n{'='*80}")
     print("OVERALL SUMMARY")

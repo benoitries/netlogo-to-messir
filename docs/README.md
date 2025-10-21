@@ -48,17 +48,17 @@ For a concise overview of the orchestration flow, per-agent inputs/outputs, and 
 
 ```
 netlogo-to-messir/
-├── config.py                              # Configuration and paths
-├── netlogo_orchestrator.py                # Main orchestration engine
-├── netlogo_syntax_parser_agent.py         # Syntax parsing agent
-├── netlogo_semantics_parser_agent.py      # Semantics analysis agent
-├── netlogo_messir_mapper_agent.py         # MESSIR mapping agent
-├── netlogo_scenario_writer_agent.py       # Scenario writing agent
-├── netlogo_plantuml_writer_agent.py       # PlantUML generation agent
-├── netlogo_plantuml_auditor_agent.py      # Compliance auditing agent
-├── netlogo_plantuml_messir_corrector_agent.py # Error correction agent
-├── logging_utils.py                       # Logging utilities
-├── parse_orchestrator_times.py            # Performance analysis
+├── orchestrator.py                         # Main orchestration engine
+├── agent_1_syntax_parser.py               # Syntax parsing agent
+├── agent_2_semantics_parser.py            # Semantics analysis agent
+├── agent_3_messir_concepts_mapper.py      # MESSIR mapping agent
+├── agent_4_scenario_writer.py             # Scenario writing agent
+├── agent_5_plantuml_writer.py             # PlantUML generation agent
+├── agent_6_plantuml_auditor.py             # Compliance auditing agent
+├── agent_7_plantuml_corrector.py          # Error correction agent
+├── utils_config_constants.py              # Configuration and paths
+├── utils_logging.py                       # Logging utilities
+├── utils_parse_orchestrator_times.py      # Performance analysis
 ├── requirements.txt                       # Python dependencies
 ├── input-netlogo/                         # NetLogo case studies
 │   ├── 3d-solids-netlogo-code.md
@@ -144,7 +144,7 @@ This project uses the OpenAI Responses API for all model inferences. There are n
 
 #### Migration to OpenAI 2.x (Notes)
 - The project migrated from legacy Chat Completions to the unified Responses API.
-- Redundant polling/extraction code was centralized into `openai_client_utils.py`.
+- Redundant polling/extraction code was centralized into `utils_openai_client.py`.
 - Environment: pinned `openai>=2,<3` in `requirements.txt`. Removed unused `openai-agents` if present.
 
 Before (1.x style):
@@ -159,7 +159,7 @@ text = resp.choices[0].message.content
 After (2.x Responses):
 ```python
 from openai import OpenAI
-from openai_client_utils import create_and_wait, get_output_text
+from utils_openai_client import create_and_wait, get_output_text
 
 client = OpenAI()
 response = create_and_wait(client, {
@@ -186,6 +186,25 @@ Helper functions:
   - `Input tokens: X, Reasoning tokens: R, Output tokens: Y (cap Z)`
   - `Output cap usage: P%`
   - `Total tokens: T (informational; not capped)`
+
+#### Standardized token usage fields (single source of truth)
+
+All agents now extract token usage through the centralized helper and emit harmonized fields in their results and artifacts:
+
+- `visible_output_tokens`: output tokens excluding reasoning tokens
+- `reasoning_tokens`: output tokens reported under `response.usage.output_tokens_details.reasoning_tokens` (0 if missing)
+- `total_output_tokens`: output tokens reported under `response.usage.output_tokens` (0 if missing)
+
+Single source of truth for extraction:
+
+- Function: `utils_openai_client.get_usage_tokens(response, exact_input_tokens=None)`
+  - Returns: `{ total_tokens, input_tokens, output_tokens, reasoning_tokens }`
+  - Agents must derive `visible_output_tokens = max(output_tokens - reasoning_tokens, 0)`; `total_output_tokens` equals API `output_tokens` when available, otherwise fallback to `visible + reasoning`.
+
+Compatibility notes:
+
+- Historical artifacts may contain `output_tokens`; tooling derives `visible_output_tokens` when needed.
+- Validators check consistency of `total_output_tokens == visible_output_tokens + reasoning_tokens`.
 
 ## 📂 Output Layout
 
@@ -224,7 +243,7 @@ Validation script: `code-netlogo-to-messir/validate_task_success_criteria.py` (c
 
 ### Reference: Messir/UCI Rules Path (Consistency Check)
 
-The canonical Messir/UCI compliance rules file is referenced through the `MESSIR_RULES_FILE` constant in `config.py` and must point to:
+The canonical Messir/UCI compliance rules file is referenced through the `MESSIR_RULES_FILE` constant in `utils_config_constants.py` and must point to:
 
 `code-netlogo-to-messir/input-persona/DSL_Target_MUCIM-full-definition-for-compliance.md`
 

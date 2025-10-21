@@ -5,11 +5,12 @@ This module centralizes common, repeated logic across agents:
 - Creating responses and polling until completion
 - Extracting plain text output safely
 - Extracting optional reasoning summaries when available
+- Validating OpenAI API keys before orchestration starts
 
 Usage pattern in agents (example):
 
 from openai import OpenAI
-from .openai_client_utils import create_and_wait, get_output_text, get_reasoning_summary
+from .utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, validate_openai_key
 
 client = OpenAI()
 response = create_and_wait(client, api_config)
@@ -21,14 +22,59 @@ reasoning_summary = get_reasoning_summary(response)
 from __future__ import annotations
 
 import time
+import os
 from typing import Any, Dict, Optional, Iterable, Tuple
-from openai_error_utils import with_retries
+from utils_openai_error import with_retries
 
 try:
     # Typed import for editors; at runtime we only rely on attributes used.
     from openai import OpenAI  # type: ignore
 except Exception:  # pragma: no cover - allow module import even if SDK missing at analysis time
     OpenAI = object  # type: ignore
+
+
+def validate_openai_key() -> bool:
+    """Validate OpenAI API key by making a simple test call.
+    
+    This function should be called at the very beginning of orchestration
+    before any user interaction to ensure the API key is valid.
+    
+    Returns:
+        bool: True if key is valid and API is accessible, False otherwise
+        
+    Raises:
+        SystemExit: If OPENAI_API_KEY environment variable is not set
+    """
+    # Import centralized key from config
+    from utils_config_constants import OPENAI_API_KEY
+    
+    # Check if API key is set
+    if not OPENAI_API_KEY:
+        print("ERROR: OPENAI_API_KEY environment variable is not set")
+        print("Please set your OpenAI API key:")
+        print("  export OPENAI_API_KEY='your-api-key-here'")
+        raise SystemExit(1)
+    
+    # Test the key with a simple API call
+    try:
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        
+        # Make a minimal test call to validate the key
+        # Using a simple completion request that should work with any valid key
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": "test"}],
+            max_tokens=1
+        )
+        
+        # If we get here, the key is valid
+        print("✓ OpenAI API key validation successful")
+        return True
+        
+    except Exception as e:
+        print(f"ERROR: OpenAI API key validation failed: {e}")
+        print("Please check your API key and try again")
+        return False
 
 
 def create_and_wait(
@@ -213,14 +259,14 @@ def get_reasoning_summary(response: Any) -> str:
 def get_usage_tokens(response: Any, exact_input_tokens: Optional[int] = None) -> Dict[str, int]:
     """Return usage tokens as a dict using the canonical OpenAI 2.x schema.
 
-    The function adheres to the official documentation:
-    - input_tokens: response.usage.input_tokens (if available)
-    - output_tokens: response.usage.output_tokens (if available)
-    - total_tokens: response.usage.total_tokens (if available)
-    - reasoning_tokens: response.usage.output_tokens_details.reasoning_tokens (if available)
+    Canonical fields (prefer exact API fields when present):
+    - input_tokens: response.usage.input_tokens
+    - output_tokens: response.usage.output_tokens  ← standardized source of truth
+    - total_tokens: response.usage.total_tokens
+    - reasoning_tokens: response.usage.output_tokens_details.reasoning_tokens
 
     Fallbacks (conservative):
-    - If input_tokens is not provided by the API but an exact_input_tokens value is provided by caller,
+    - If input_tokens is missing but an exact_input_tokens value is provided by caller,
       use exact_input_tokens and infer output_tokens = max(total_tokens - input_tokens, 0).
     - reasoning_tokens defaults to 0 when output_tokens_details is missing.
     """

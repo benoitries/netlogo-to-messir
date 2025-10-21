@@ -14,7 +14,7 @@ for output folder computation across modules.
 from pathlib import Path
 from typing import Optional
 
-from config import OUTPUT_DIR
+from utils_config_constants import OUTPUT_DIR
 
 
 def build_combination_folder_name(

@@ -258,8 +258,8 @@ Note: Activation bars appear only on actor lifelines; see SS2_AB_PLACEMENT_ORDER
 **NAM — Actors (ACT)**
 
 NAM1_ACT_INSTANCE_FORMAT.
-All actor instance names must be human-readable, in camelCase and prefixed with "act".
-Example: actAdministrator
+All actor instance names must be human-readable, in camelCase.
+Example: actAdministrator, chris, joe, theClock, anEcologist.
 
 NAM2_ACT_TYPE_FORMAT.
 Actor type name must be human-readable, in FirstCapitalLetterFormat and prefixed by "Act".
@@ -268,7 +268,7 @@ Example 2 : ActEcologist
 
 NAM3_ACT_DECLARATION_SYNTAX.
 Each actor must be modelled using this PlantUML syntax:
-participant "theParticipantName:ActParticipantType" as theParticipantName
+participant "anActorName:ActActorType" as anActorName
 Example 1: participant "theCreator:ActMsrCreator" as theCreator
 Example 2: participant "chris:ActEcologist" as chris
 

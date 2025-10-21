@@ -10,18 +10,19 @@ import datetime
 import pathlib
 import tiktoken
 from typing import Dict, Any
-from config import (
+from utils_config_constants import (
     PERSONA_PLANTUML_WRITER, OUTPUT_DIR, MESSIR_RULES_FILE,
     AGENT_VERSION_PLANTUML_WRITER, get_reasoning_config,
     validate_agent_response, DEFAULT_MODEL)
 
 from google.adk.agents import LlmAgent
 from openai import OpenAI
-from openai_client_utils import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens
-from response_dump_utils import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
-from schema_loader import get_template_for_agent, validate_data_against_template
-from response_schema_expected import expected_keys_for_agent
-from logging_utils import write_reasoning_md_from_payload
+from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens
+from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
+from utils_schema_loader import get_template_for_agent, validate_data_against_template
+from utils_config_constants import expected_keys_for_agent
+from utils_logging import write_reasoning_md_from_payload
+from utils_plantuml import process_plantuml_file
 
 # Configuration
 PERSONA_FILE = PERSONA_PLANTUML_WRITER
@@ -37,7 +38,7 @@ messir_rules = ""
 try:
     messir_rules = MESSIR_RULES_FILE.read_text(encoding="utf-8")
 except FileNotFoundError:
-    print(f"[WARNING] Compliance rules file not found: {MESSIR_RULES_FILE}")
+    raise SystemExit(f"ERROR: Compliance rules file not found: {MESSIR_RULES_FILE}")
 
 # Concatenate persona and rules
 combined_persona = f"{persona}\n\n{messir_rules}"
@@ -73,11 +74,9 @@ class NetLogoPlantUMLWriterAgent(LlmAgent):
             # Format: YYYYMMDD_HHMM for better readability
             self.timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
         
-        # Configure OpenAI client
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise SystemExit("ERROR: OPENAI_API_KEY environment variable required")
-        self.client = OpenAI(api_key=api_key)
+        # Configure OpenAI client (assumes key already validated by orchestrator)
+        from utils_config_constants import OPENAI_API_KEY
+        self.client = OpenAI(api_key=OPENAI_API_KEY)
     
     def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
         """
@@ -183,7 +182,7 @@ Scenarios Data:
                 "input": input_text
             })
             
-            from config import AGENT_TIMEOUTS
+            from utils_config_constants import AGENT_TIMEOUTS
             timeout = AGENT_TIMEOUTS.get("plantuml_writer")
             response = create_and_wait(self.client, api_config, timeout_seconds=timeout)
             
@@ -279,9 +278,8 @@ Scenarios Data:
                 input_tokens = usage.get("input_tokens", 0)
                 api_output_tokens = usage.get("output_tokens", 0)
                 reasoning_tokens = usage.get("reasoning_tokens", 0)
-                api_total_output_tokens = max((tokens_used or 0) - (input_tokens or 0), 0)
-                visible_output_tokens = max((api_total_output_tokens or api_output_tokens or 0) - (reasoning_tokens or 0), 0)
-                total_output_tokens = api_total_output_tokens if api_total_output_tokens is not None else (visible_output_tokens + (reasoning_tokens or 0))
+                total_output_tokens = api_output_tokens if api_output_tokens is not None else max((tokens_used or 0) - (input_tokens or 0), 0)
+                visible_output_tokens = max((total_output_tokens or 0) - (reasoning_tokens or 0), 0)
                 usage_dict = usage
 
                 return {
@@ -420,6 +418,17 @@ Scenarios Data:
                 puml_file = base_output_dir / "diagram.puml"
                 puml_file.write_text(diagram_text, encoding="utf-8")
                 print(f"OK: {base_name} -> diagram.puml")
+                
+                # Post-process the PlantUML file to clean escape characters
+                try:
+                    success = process_plantuml_file(puml_file)
+                    if success:
+                        print(f"✅ Post-processed PlantUML file: {puml_file.name}")
+                    else:
+                        print(f"⚠️  Post-processing had issues for: {puml_file.name}")
+                except Exception as e:
+                    print(f"[WARNING] Post-processing failed for {puml_file.name}: {e}")
+                
                 # Surface the path for orchestrator logging/downstream use
                 results["puml_file"] = str(puml_file)
             else:

@@ -15,7 +15,7 @@ import re
 from pathlib import Path
 from typing import Optional, List
 
-from config import OUTPUT_DIR
+from utils_config_constants import OUTPUT_DIR
 
 STEP_DIR_REGEX = re.compile(r"^\d{2}-[a-z_]+$")
 

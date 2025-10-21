@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-NetLogo PlantUML Auditor Agent using OpenAI models
-Audits PlantUML sequence diagrams for Messir UCI compliance using OpenAI models.
+NetLogo Messir Mapper Agent using OpenAI models
+Maps NetLogo state machine to Messir UCI concepts using OpenAI models.
 """
 
 import os
@@ -9,23 +9,24 @@ import json
 import datetime
 import pathlib
 import tiktoken
-from typing import Dict, Any
+from typing import Dict, Any, List
 from google.adk.agents import LlmAgent
 from openai import OpenAI
-from response_dump_utils import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
-from openai_client_utils import create_and_wait, get_output_text, get_reasoning_summary
-from response_schema_expected import expected_keys_for_agent
+from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens
+from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
+from utils_config_constants import expected_keys_for_agent
+from utils_logging import write_reasoning_md_from_payload
 
-from config import (
-    PERSONA_PLANTUML_AUDITOR, OUTPUT_DIR, MESSIR_RULES_FILE,
-    AGENT_VERSION_PLANTUML_AUDITOR, get_reasoning_config,
-    validate_agent_response, DEFAULT_MODEL, AGENT_TIMEOUTS)
+from utils_config_constants import (
+    PERSONA_MESSIR_MAPPER, OUTPUT_DIR, MESSIR_RULES_FILE,
+    AGENT_VERSION_MESSIR_MAPPER, get_reasoning_config,
+    validate_agent_response, DEFAULT_MODEL)
 
 # Configuration
-PERSONA_FILE = PERSONA_PLANTUML_AUDITOR
+PERSONA_FILE = PERSONA_MESSIR_MAPPER
 WRITE_FILES = True
 
-# Load persona and Messir rules
+# Load persona and (optionally) compliance rules reference
 persona = PERSONA_FILE.read_text(encoding="utf-8")
 messir_rules = ""
 try:
@@ -33,33 +34,34 @@ try:
 except FileNotFoundError:
     print(f"[WARNING] Compliance rules file not found: {MESSIR_RULES_FILE}")
 
-# Concatenate persona and rules
-combined_persona = f"{persona}\n\n{messir_rules}"
+# Combine persona with compliance rules reference (as guidance context)
+combined_persona = f"{persona}\n\n{messir_rules}" if messir_rules else persona
 
-AGENT_VERSION = AGENT_VERSION_PLANTUML_AUDITOR
+# Get agent version from config
+AGENT_VERSION = AGENT_VERSION_MESSIR_MAPPER
 
 def sanitize_model_name(model_name: str) -> str:
     """Sanitize model name by replacing hyphens with underscores for valid identifier."""
     return model_name.replace("-", "_")
 
-class NetLogoPlantUMLMessirAuditorAgent(LlmAgent):
+class NetLogoMessirMapperAgent(LlmAgent):
     model: str = DEFAULT_MODEL
     timestamp: str = ""
-    name: str = "NetLogo PlantUML Auditor"
+    name: str = "NetLogo Messir Mapper"
     
     client: OpenAI = None
     reasoning_effort: str = "medium"
-    reasoning_summary: str = "auto"
+    reasoning_summary: str = "auto"  # Add client field
     text_verbosity: str = "medium"
     
     def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
         sanitized_name = sanitize_model_name(model_name)
         super().__init__(
-            name=f"netlogo_plantuml_auditor_agent_{sanitized_name}",
-            description="PlantUML auditor agent for Messir UCI compliance checking"
+            name=f"netlogo_messir_mapper_agent_{sanitized_name}",
+            description="Messir UCI concepts mapper agent for NetLogo state machines"
         )
         self.model = model_name
-        
+        # Pydantic will handle max_tokens field assignment automatically
         # Use external timestamp if provided, otherwise generate new one
         if external_timestamp:
             self.timestamp = external_timestamp
@@ -67,11 +69,9 @@ class NetLogoPlantUMLMessirAuditorAgent(LlmAgent):
             # Format: YYYYMMDD_HHMM for better readability
             self.timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
         
-        # Configure OpenAI client
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise SystemExit("ERROR: OPENAI_API_KEY environment variable required")
-        self.client = OpenAI(api_key=api_key)
+        # Configure OpenAI client (assumes key already validated by orchestrator)
+        from utils_config_constants import OPENAI_API_KEY
+        self.client = OpenAI(api_key=OPENAI_API_KEY)
     
     def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
         """
@@ -83,7 +83,7 @@ class NetLogoPlantUMLMessirAuditorAgent(LlmAgent):
         """
         self.reasoning_effort = reasoning_effort
         self.reasoning_summary = reasoning_summary
-
+    
     def update_text_config(self, text_verbosity: str):
         """Update text verbosity configuration for this agent."""
         self.text_verbosity = text_verbosity
@@ -133,34 +133,67 @@ class NetLogoPlantUMLMessirAuditorAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def audit_plantuml_diagrams(self, plantuml_diagrams: Dict[str, Any], scenarios_data: Dict[str, Any], filename: str = "input") -> Dict[str, Any]:
+    def map_to_messir_concepts(self, state_machine: Dict[str, Any], filename: str, ast_data: Dict[str, Any] = None, messir_dsl_content: str = None, icrash_contents: List[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Audit PlantUML sequence diagrams for Messir UCI compliance using the PlantUML Auditor persona.
+        Map NetLogo state machine to Messir UCI concepts using the Messir UCI Concepts Mapper persona.
         
         Args:
-            plantuml_diagrams: PlantUML diagrams to audit
-            scenarios_data: Original scenarios data for context
-            filename: Optional filename for reference
+            state_machine: NetLogo state machine as dictionary (from Step 02)
+            filename: Filename for reference (required)
+            ast_data: Step 01 AST data (MANDATORY)
+            messir_dsl_content: MUCIM DSL full definition content (MANDATORY)
+            icrash_contents: Optional list of iCrash case study files for reference
             
         Returns:
-            Dictionary containing reasoning, non-compliant rules, and any errors
+            Dictionary containing reasoning, Messir concepts, and any errors
         """
-        instructions = f"{combined_persona}"
+        # Validate mandatory inputs
+        if ast_data is None:
+            return {
+                "reasoning_summary": "MISSING MANDATORY INPUT: Step 01 AST data is required",
+                "data": None,
+                "errors": ["MANDATORY INPUT MISSING: Step 01 AST data must be provided"],
+                "tokens_used": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+            }
+        
+        if messir_dsl_content is None or messir_dsl_content.strip() == "":
+            return {
+                "reasoning_summary": "MISSING MANDATORY INPUT: MUCIM DSL full definition content is required",
+                "data": None,
+                "errors": ["MANDATORY INPUT MISSING: MUCIM DSL full definition content must be provided"],
+                "tokens_used": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+            }
+        instructions = combined_persona
+        
+        # Prepare icrash reference text
+        icrash_reference = ""
+        if icrash_contents:
+            icrash_reference = "\n\niCrash Case Study Reference Files:\n"
+            for icrash_file in icrash_contents:
+                icrash_reference += f"- {icrash_file['filename']}: {icrash_file['content']}\n"
         
         input_text = f"""
-Please audit the following PlantUML sequence diagrams for Messir UCI compliance:
 
 Filename: {filename}
 
-Original Scenarios Data (for context):
+Step 01 AST Data:
 ```json
-{json.dumps(scenarios_data, indent=2)}
+{json.dumps(ast_data, indent=2)}
 ```
 
-PlantUML Diagrams to Audit:
+Step 02 State Machine:
 ```json
-{json.dumps(plantuml_diagrams, indent=2)}
+{json.dumps(state_machine, indent=2)}
 ```
+
+MUCIM DSL Full Definition:
+```
+{messir_dsl_content}
+```{icrash_reference}
 """
         
         # Count input tokens exactly
@@ -168,7 +201,7 @@ PlantUML Diagrams to Audit:
         
         try:
             # Create response using OpenAI Responses API
-            api_config = get_reasoning_config("plantuml_auditor")
+            api_config = get_reasoning_config("messir_mapper")
             # Update reasoning configuration with agent's settings
             if "reasoning" in api_config:
                 api_config["reasoning"]["effort"] = self.reasoning_effort
@@ -178,8 +211,8 @@ PlantUML Diagrams to Audit:
                 "input": input_text
             })
             
-            # Use unified helper with configured timeout
-            timeout = AGENT_TIMEOUTS.get("plantuml_auditor") if 'AGENT_TIMEOUTS' in globals() or 'AGENT_TIMEOUTS' in locals() else None
+            from utils_config_constants import AGENT_TIMEOUTS
+            timeout = AGENT_TIMEOUTS.get("messir_mapper")
             response = create_and_wait(self.client, api_config, timeout_seconds=timeout)
             
             # Extract content and reasoning via helpers
@@ -219,32 +252,31 @@ PlantUML Diagrams to Audit:
                 
                 # Extract and normalize fields from JSON response.
                 # Always save under 'data': if no 'data' key present, wrap top-level object.
-                audit_results = {}
+                messir_concepts = {}
                 if isinstance(response_data, dict):
                     if "data" in response_data and isinstance(response_data["data"], dict):
-                        audit_results = response_data["data"]
+                        messir_concepts = response_data["data"]
                     else:
-                        audit_results = response_data
+                        messir_concepts = response_data
                 errors = response_data.get("errors", []) if isinstance(response_data, dict) else []
 
                 # Extract token usage from response (centralized helper)
-                from openai_client_utils import get_usage_tokens
                 usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
                 tokens_used = usage.get("total_tokens", 0)
                 input_tokens = usage.get("input_tokens", 0)
-                api_output_tokens = usage.get("output_tokens", 0)
+                output_tokens = usage.get("output_tokens", 0)
                 reasoning_tokens = usage.get("reasoning_tokens", 0)
-                visible_output_tokens = max((api_output_tokens or 0) - (reasoning_tokens or 0), 0)
+                visible_output_tokens = max((output_tokens or 0) - (reasoning_tokens or 0), 0)
                 total_output_tokens = visible_output_tokens + (reasoning_tokens or 0)
                 usage_dict = usage
 
                 return {
                     "reasoning_summary": reasoning_summary,
-                    "data": audit_results,
+                    "data": messir_concepts,
                     "errors": [],
                     "tokens_used": tokens_used,
                     "input_tokens": input_tokens,
-                    "visible_output_tokens": visible_output_tokens,
+                    "visible_output_tokens": max((output_tokens or 0) - (reasoning_tokens or 0), 0),
                     "raw_usage": usage_dict,
                     "reasoning_tokens": reasoning_tokens,
                     "total_output_tokens": total_output_tokens,
@@ -254,7 +286,7 @@ PlantUML Diagrams to Audit:
                 return {
                     "reasoning_summary": reasoning_summary,
                     "data": None,
-                    "errors": [f"Failed to parse audit results JSON: {e}", f"Raw response: {content[:200]}..."],
+                    "errors": [f"Failed to parse Messir concepts JSON: {e}", f"Raw response: {content[:200]}..."],
                     "tokens_used": 0,
                     "input_tokens": 0,
                     "output_tokens": 0,
@@ -279,7 +311,7 @@ PlantUML Diagrams to Audit:
             return
             
         # New format: base-name_timestamp_AI-model_step_agent-name_version_reasoning-suffix_rest
-        agent_name = "plantuml_auditor"
+        agent_name = "messir_mapper"
         # Use the agent's current reasoning level instead of global config
         reasoning_suffix = f"reasoning-{self.reasoning_effort}-{self.reasoning_summary}"
         
@@ -290,7 +322,7 @@ PlantUML Diagrams to Audit:
         
         # Create complete response structure
         complete_response = {
-            "agent_type": "plantuml_auditor",
+            "agent_type": "messir_mapper",
             "model": self.model,
             "timestamp": self.timestamp,
             "base_name": base_name,
@@ -302,53 +334,46 @@ PlantUML Diagrams to Audit:
             "input_tokens": results.get("input_tokens", 0),
             "visible_output_tokens": results.get("visible_output_tokens", 0),
             "reasoning_tokens": results.get("reasoning_tokens", 0),
-            "total_output_tokens": results.get("total_output_tokens", (results.get("visible_output_tokens", 0) or 0) + (results.get("reasoning_tokens", 0) or 0)),
+            "total_output_tokens": results.get("total_output_tokens", results.get("output_tokens", 0)),
             "raw_response": results.get("raw_response")
         }
         
         # Validate response before saving
-        validation_errors = validate_agent_response("plantuml_auditor", complete_response)
+        validation_errors = validate_agent_response("messir_mapper", complete_response)
         if validation_errors:
-            print(f"[WARNING] Validation errors in plantuml auditor response: {validation_errors}")
+            print(f"[WARNING] Validation errors in messir mapper response: {validation_errors}")
         
         # Verify exact keys before saving
-        expected_keys = expected_keys_for_agent("plantuml_auditor")
+        expected_keys = expected_keys_for_agent("messir_mapper")
         ok, missing, extra = verify_exact_keys(complete_response, expected_keys)
         if not ok:
-            raise ValueError(f"response.json keys mismatch for plantuml_auditor. Missing: {sorted(missing)} Extra: {sorted(extra)}")
+            raise ValueError(f"response.json keys mismatch for messir_mapper. Missing: {sorted(missing)} Extra: {sorted(extra)}")
 
         # Save complete response as JSON file
         json_file.write_text(json.dumps(complete_response, indent=2, ensure_ascii=False), encoding="utf-8")
         print(f"OK: {base_name} -> output-response.json")
         
-        # Save reasoning summary as markdown file
-        reasoning_file = base_output_dir / "output-reasoning.md"
-        reasoning_content = f"""# Reasoning Summary - {agent_name.title().replace('_', ' ')}
-
-**Base Name:** {base_name}
-**Model:** {self.model}
-**Timestamp:** {self.timestamp}
-**Step Number:** {step_number if step_number else 'N/A'}
-**Reasoning Level:** {self.reasoning_effort}
-**Reasoning Summary:** {results.get("reasoning_summary") or "No explicit reasoning summary available."}
-
-## Token Usage
-
-- **Total Tokens:** {results.get("tokens_used", 0):,}
-- **Input Tokens:** {results.get("input_tokens", 0):,}
-- **Visible Output Tokens:** {results.get("output_tokens", 0):,}
-- **Reasoning Tokens:** {results.get("reasoning_tokens", 0):,}
-- **Total Output Tokens (reasoning + visible):** {(results.get('output_tokens', 0) or 0) + (results.get('reasoning_tokens', 0) or 0):,}
-
-## Reasoning Summary
-
-{results.get("reasoning_summary") or "No explicit reasoning summary available."}
-
-## Errors
-
-{chr(10).join(f"- {error}" for error in results.get("errors", [])) if results.get("errors") else "No errors"}
-"""
-        reasoning_file.write_text(reasoning_content, encoding="utf-8")
+        # Save reasoning payload as markdown file (centralized writer)
+        payload = {
+            "reasoning": results.get("reasoning"),
+            "reasoning_summary": results.get("reasoning_summary"),
+            "tokens_used": results.get("tokens_used"),
+            "input_tokens": results.get("input_tokens"),
+            "output_tokens": results.get("output_tokens"),
+            "reasoning_tokens": results.get("reasoning_tokens"),
+            "usage": results.get("raw_usage"),
+            "errors": results.get("errors"),
+        }
+        write_reasoning_md_from_payload(
+            output_dir=base_output_dir,
+            agent_name=agent_name,
+            base_name=base_name,
+            model=self.model,
+            timestamp=self.timestamp,
+            reasoning_effort=self.reasoning_effort,
+            step_number=step_number,
+            payload=payload,
+        )
         print(f"OK: {base_name} -> output-reasoning.md")
         
         # Save data field as separate file
@@ -358,6 +383,6 @@ PlantUML Diagrams to Audit:
             print(f"OK: {base_name} -> output-data.json")
         else:
             print(f"WARNING: No data to save for {base_name}")
-        
+
         # Write minimal artifacts (non-breaking additions)
         write_minimal_artifacts(base_output_dir, results.get("raw_response"))

@@ -13,50 +13,51 @@ This document summarizes the current orchestration flow and highlights ambiguiti
 
 ## Per-Agent I/O
 
-### 01 — Syntax Parser (`netlogo_syntax_parser_agent.py`)
+### 01 — Syntax Parser (`agent_1_syntax_parser.py`)
 - Agent-specific Input: NetLogo code (string); IL-SYN refs via `update_il_syn_inputs()` or defaults under `input-persona/DSL_IL_SYN-*.md`.
 - Agent-specific Output: `output-data.json` (AST).
 - Common Input: Persona instructions; configuration (model, reasoning, text verbosity).
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
 
-### 02 — Semantics Parser (`netlogo_semantics_parser_agent.py`)
-- Agent-specific Input: IL-SEM mapping/description (absolute paths); two UI images (preferred). No AST/raw code accepted.
+### 02 — Semantics Parser (`agent_2_semantics_parser.py`)
+- Agent-specific Input: IL-SEM mapping/description (absolute paths); two UI images (preferred).
 - Agent-specific Output: `output-data.json` (state machine).
 - Common Input: Persona instructions; configuration (model, reasoning, text verbosity).
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
 
-### 03 — Messir Mapper (`netlogo_messir_mapper_agent.py`)
+### 03 — Messir Mapper (`agent_3_messir_concepts_mapper.py`)
 - Agent-specific Input: State machine (from Step 02); optional iCrash PDF extracts; Messir/UCI rules.
 - Agent-specific Output: `output-data.json` (Messir concepts).
 - Common Input: Persona instructions; configuration.
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
 
-### 04 — Scenario Writer (`netlogo_scenario_writer_agent.py`)
-- Agent-specific Input: Messir concepts (from Step 03).
+### 04 — Scenario Writer (`agent_4_scenario_writer.py`)
+- Agent-specific Input: Step 02 state machine + Step 03 Messir concepts + MUCIM DSL full definition + iCrash references (all MANDATORY).
 - Agent-specific Output: `output-data.json` (scenarios).
 - Common Input: Persona instructions; configuration.
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
 
-### 05 — PlantUML Writer (`netlogo_plantuml_writer_agent.py`)
-- Agent-specific Input: Scenarios (from Step 04); optionally non-compliant rules list.
+### 05 — PlantUML Writer (`agent_5_plantuml_writer.py`)
+- Agent-specific Input: Scenarios (from Step 04).
 - Agent-specific Output: `diagram.puml` (standalone); `output-data.json` (diagram payload incl. PlantUML text).
 - Common Input: Persona instructions; Messir/UCI rules; configuration.
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
 
-### 06 — PlantUML Messir Auditor (`netlogo_plantuml_auditor_agent.py`)
-- Agent-specific Input: PlantUML diagrams and scenarios.
+### 06 — PlantUML Messir Auditor (`agent_6_plantuml_auditor.py`)
+- Agent-specific Input: standalone .puml file (from Step 05) and MUCIM DSL full definition (both mandatory).
 - Agent-specific Output: `output-data.json` (audit with non-compliant rules and verdict).
-- Common Input: Persona instructions; Messir/UCI rules; configuration.
+- Common Input: Persona instructions; configuration.
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
 
-### 07 — PlantUML Messir Corrector (`netlogo_plantuml_messir_corrector_agent.py`)
-- Agent-specific Input: Diagrams, scenarios, non-compliant rules (required to change output; empty list returns original).
+### 07 — PlantUML Messir Corrector (`agent_7_plantuml_corrector.py`)
+- Agent-specific Input: PlantUML diagrams (from Step 05), non-compliant rules (from Step 06), MUCIM DSL full definition. 
 - Agent-specific Output: `diagram.puml` (corrected standalone diagram); `output-data.json` (corrected diagram payload).
 - Common Input: Persona instructions; Messir/UCI rules; configuration.
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
 
 ### 08 — Final Auditor
 - Agent-specific Input: Corrected diagrams (from Step 07) and prior artifacts as context.
+- Mandatory Inputs: Corrected PlantUML (.puml file) from Step 7; MUCIM DSL full definition file.
 - Agent-specific Output: `output-data.json` (final verdict).
 - Common Input: Persona instructions; Messir/UCI rules; configuration.
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.

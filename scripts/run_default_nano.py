@@ -18,9 +18,9 @@ import subprocess
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from netlogo_orchestrator import NetLogoOrchestrator  # noqa: E402
-from config import AGENT_CONFIGS, DEFAULT_MODEL, AGENT_TIMEOUTS, ORCHESTRATOR_PARALLEL_TIMEOUT  # noqa: E402
-from logging_utils import format_parameter_bundle  # noqa: E402
+from orchestrator import NetLogoOrchestrator  # noqa: E402
+from utils_config_constants import AGENT_CONFIGS, DEFAULT_MODEL, AGENT_TIMEOUTS, ORCHESTRATOR_PARALLEL_TIMEOUT  # noqa: E402
+from utils_logging import format_parameter_bundle  # noqa: E402
 
 
 async def run_default(args: argparse.Namespace) -> None:
@@ -28,6 +28,13 @@ async def run_default(args: argparse.Namespace) -> None:
 
     Defaults: reasoning=medium, summary=auto, text_verbosity=low.
     """
+    # Validate OpenAI API key before any processing
+    from utils_openai_client import validate_openai_key
+    print("Validating OpenAI API key...")
+    if not validate_openai_key():
+        print("Exiting due to invalid OpenAI API key")
+        return
+    
     model_name = DEFAULT_MODEL
     base_name = args.base
 

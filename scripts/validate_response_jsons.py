@@ -15,7 +15,7 @@ _REPO_ROOT = _SCRIPT_DIR.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from response_schema_expected import expected_keys_for_agent
+from utils_config_constants import expected_keys_for_agent
 
 
 def validate_response_file(response_path: pathlib.Path) -> str:

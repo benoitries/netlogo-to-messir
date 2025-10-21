@@ -12,14 +12,14 @@ import tiktoken
 from typing import Dict, Any
 from google.adk.agents import LlmAgent
 from openai import OpenAI
-from openai_client_utils import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens
-from response_dump_utils import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
-from schema_loader import get_template_for_agent, validate_data_against_template
-from response_schema_expected import expected_keys_for_agent
-from logging_utils import write_reasoning_md_from_payload
+from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens
+from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
+from utils_schema_loader import get_template_for_agent, validate_data_against_template
+from utils_config_constants import expected_keys_for_agent
+from utils_logging import write_reasoning_md_from_payload
 
-from config import (
-    PERSONA_SCENARIO_WRITER, OUTPUT_DIR, 
+from utils_config_constants import (
+    PERSONA_SCENARIO_WRITER, OUTPUT_DIR, MESSIR_RULES_FILE,
     AGENT_VERSION_SCENARIO_WRITER, get_reasoning_config,
     validate_agent_response, DEFAULT_MODEL)
 
@@ -27,8 +27,16 @@ from config import (
 PERSONA_FILE = PERSONA_SCENARIO_WRITER
 WRITE_FILES = True
 
-# Load persona
+# Load persona and Messir rules
 persona = PERSONA_FILE.read_text(encoding="utf-8")
+messir_rules = ""
+try:
+    messir_rules = MESSIR_RULES_FILE.read_text(encoding="utf-8")
+except FileNotFoundError:
+    raise SystemExit(f"ERROR: Compliance rules file not found: {MESSIR_RULES_FILE}")
+
+# Concatenate persona and rules
+combined_persona = f"{persona}\n\n{messir_rules}"
 
 # Get agent version from config
 AGENT_VERSION = AGENT_VERSION_SCENARIO_WRITER
@@ -62,11 +70,9 @@ class NetLogoScenarioWriterAgent(LlmAgent):
             # Format: YYYYMMDD_HHMM for better readability
             self.timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
         
-        # Configure OpenAI client
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise SystemExit("ERROR: OPENAI_API_KEY environment variable required")
-        self.client = OpenAI(api_key=api_key)
+        # Configure OpenAI client (assumes key already validated by orchestrator)
+        from utils_config_constants import OPENAI_API_KEY
+        self.client = OpenAI(api_key=OPENAI_API_KEY)
     
     def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
         """
@@ -128,27 +134,82 @@ class NetLogoScenarioWriterAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def write_scenarios(self, messir_concepts: Dict[str, Any], filename: str = "input.nlogo") -> Dict[str, Any]:
+    def write_scenarios(self, state_machine: Dict[str, Any], messir_concepts: Dict[str, Any], messir_rules: str, icrash_refs: str, filename: str) -> Dict[str, Any]:
         """
-        Write Messir UCI scenarios from Messir concepts using the Messir UCI Scenario Writer persona.
+        Write Messir UCI scenarios from mandatory inputs using the Messir UCI Scenario Writer persona.
         
         Args:
-            messir_concepts: Messir UCI concepts as dictionary
-            filename: Optional filename for reference
+            state_machine: Step 02 state machine data (required)
+            messir_concepts: Step 03 Messir UCI concepts (required)
+            messir_rules: MUCIM DSL full definition (required)
+            icrash_refs: iCrash references content (required)
+            filename: Filename for reference (required)
             
         Returns:
             Dictionary containing reasoning, scenarios, and any errors
         """
-        instructions = f"{persona}"
+        # Validate mandatory inputs
+        if not state_machine:
+            return {
+                "reasoning_summary": "Missing mandatory input: Step 02 state machine",
+                "data": None,
+                "errors": ["Step 02 state machine is required but not provided"],
+                "tokens_used": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+            }
+        
+        if not messir_concepts:
+            return {
+                "reasoning_summary": "Missing mandatory input: Step 03 Messir concepts",
+                "data": None,
+                "errors": ["Step 03 Messir concepts are required but not provided"],
+                "tokens_used": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+            }
+        
+        if not messir_rules or messir_rules.strip() == "":
+            return {
+                "reasoning_summary": "Missing mandatory input: MUCIM DSL full definition",
+                "data": None,
+                "errors": ["MUCIM DSL full definition is required but not provided"],
+                "tokens_used": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+            }
+        
+        if not icrash_refs or icrash_refs.strip() == "":
+            return {
+                "reasoning_summary": "Missing mandatory input: iCrash references",
+                "data": None,
+                "errors": ["iCrash references are required but not provided"],
+                "tokens_used": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+            }
+        
+        instructions = f"{combined_persona}"
         
         input_text = f"""
-Please write Messir UCI scenarios from the following Messir concepts:
 
 Filename: {filename}
-Messir Concepts:
+
+Step 02 State Machine:
+```json
+{json.dumps(state_machine, indent=2)}
+```
+
+Step 03 Messir Concepts:
 ```json
 {json.dumps(messir_concepts, indent=2)}
 ```
+
+MUCIM DSL Full Definition:
+{messir_rules}
+
+iCrash References:
+{icrash_refs}
 """
         
         # Count input tokens exactly
@@ -166,7 +227,7 @@ Messir Concepts:
                 "input": input_text
             })
             
-            from config import AGENT_TIMEOUTS
+            from utils_config_constants import AGENT_TIMEOUTS
             timeout = AGENT_TIMEOUTS.get("scenario_writer")
             response = create_and_wait(self.client, api_config, timeout_seconds=timeout)
             
@@ -221,9 +282,8 @@ Messir Concepts:
                 input_tokens = usage.get("input_tokens", 0)
                 api_output_tokens = usage.get("output_tokens", 0)
                 reasoning_tokens = usage.get("reasoning_tokens", 0)
-                api_total_output_tokens = max((tokens_used or 0) - (input_tokens or 0), 0)
-                visible_output_tokens = max((api_total_output_tokens or api_output_tokens or 0) - (reasoning_tokens or 0), 0)
-                total_output_tokens = api_total_output_tokens if api_total_output_tokens is not None else (visible_output_tokens + (reasoning_tokens or 0))
+                total_output_tokens = api_output_tokens if api_output_tokens is not None else max((tokens_used or 0) - (input_tokens or 0), 0)
+                visible_output_tokens = max((total_output_tokens or 0) - (reasoning_tokens or 0), 0)
                 usage_dict = usage
 
                 return {

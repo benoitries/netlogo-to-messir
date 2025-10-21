@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Validate that no AI model names are hard-coded outside config.py.
+Validate that no AI model names are hard-coded outside utils_config_constants.py.
 
 Rules:
-- Allowed: model names only in config.py (AVAILABLE_MODELS, MODEL_CONFIG docs/examples allowed).
+- Allowed: model names only in utils_config_constants.py (AVAILABLE_MODELS, MODEL_CONFIG docs/examples allowed).
 - Forbidden: occurrences in other .py files within this package.
 
 Exit code:
@@ -43,16 +43,16 @@ def main() -> int:
             if not fname.endswith(".py"):
                 continue
             path = os.path.join(root, fname)
-            # Allow config.py to contain model names only at this single entry point
+            # Allow utils_config_constants.py to contain model names only at this single entry point
             base = os.path.basename(path)
-            if base in ("config.py", "validate_no_hardcoded_models.py"):
+            if base in ("utils_config_constants.py", "validate_no_hardcoded_models.py"):
                 continue
             hits = scan_file(path)
             if hits:
                 violations.append((path, hits))
 
     if not violations:
-        print("OK: No hard-coded AI model names found outside config.py")
+        print("OK: No hard-coded AI model names found outside utils_config_constants.py")
         return 0
 
     print("Forbidden hard-coded AI model names found:")

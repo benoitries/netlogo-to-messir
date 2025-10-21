@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from typing import Dict, Any, Optional
 
-from config import (
+from utils_config_constants import (
     PERSONA_SYNTAX_PARSER,
     PERSONA_SEMANTICS_PARSER,
     PERSONA_MESSIR_MAPPER,

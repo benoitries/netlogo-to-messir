@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-NetLogo PlantUML Corrector Agent using OpenAI models
-Corrects PlantUML sequence diagrams based on audit results using OpenAI models.
+NetLogo AST Agent using OpenAI models
+Parses NetLogo source code into structured AST using OpenAI models.
 """
 
 import os
@@ -9,54 +9,56 @@ import json
 import datetime
 import pathlib
 import tiktoken
-from typing import Dict, Any, List
+from typing import Dict, Any, Optional
 from google.adk.agents import LlmAgent
 from openai import OpenAI
-from response_dump_utils import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
-from openai_client_utils import get_usage_tokens, create_and_wait, get_output_text, get_reasoning_summary
-from response_schema_expected import expected_keys_for_agent
+from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens
+from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
+from utils_config_constants import expected_keys_for_agent
+from utils_logging import write_reasoning_md_from_payload
 
-from config import (
-    PERSONA_PLANTUML_CORRECTOR, OUTPUT_DIR, MESSIR_RULES_FILE,
-    AGENT_VERSION_PLANTUML_CORRECTOR, get_reasoning_config,
-    validate_agent_response, DEFAULT_MODEL, AGENT_TIMEOUTS)
+from utils_config_constants import (
+    PERSONA_SYNTAX_PARSER, OUTPUT_DIR, 
+    AGENT_VERSION_SYNTAX_PARSER, get_reasoning_config,
+    validate_agent_response, AGENT_TIMEOUTS, DEFAULT_MODEL
+)
+
+# IL Syntax descriptor files (default absolute paths)
+IL_SYN_MAPPING_DEFAULT = (pathlib.Path(__file__).resolve().parent / "input-persona" / "DSL_IL_SYN-mapping.md").resolve()
+IL_SYN_DESCRIPTION_DEFAULT = (pathlib.Path(__file__).resolve().parent / "input-persona" / "DSL_IL_SYN-description.md").resolve()
 
 # Configuration
-PERSONA_FILE = PERSONA_PLANTUML_CORRECTOR
+PERSONA_FILE = PERSONA_SYNTAX_PARSER
 WRITE_FILES = True
 
-# Load persona and Messir rules
+# Load persona
 persona = PERSONA_FILE.read_text(encoding="utf-8")
-messir_rules = ""
-try:
-    messir_rules = MESSIR_RULES_FILE.read_text(encoding="utf-8")
-except FileNotFoundError:
-    print(f"[WARNING] Compliance rules file not found: {MESSIR_RULES_FILE}")
 
-# Concatenate persona and rules
-combined_persona = f"{persona}\n\n{messir_rules}"
-
-AGENT_VERSION = AGENT_VERSION_PLANTUML_CORRECTOR
+# Get agent version from config
+AGENT_VERSION = AGENT_VERSION_SYNTAX_PARSER
 
 def sanitize_model_name(model_name: str) -> str:
     """Sanitize model name by replacing hyphens with underscores for valid identifier."""
     return model_name.replace("-", "_")
 
-class NetLogoPlantUMLMessirCorrectorAgent(LlmAgent):
+class NetLogoSyntaxParserAgent(LlmAgent):
     model: str = DEFAULT_MODEL
     timestamp: str = ""
-    name: str = "NetLogo PlantUML Corrector"
+    name: str = "NetLogo Syntax Parser"
     
     client: OpenAI = None
     reasoning_effort: str = "medium"
     reasoning_summary: str = "auto"
     text_verbosity: str = "medium"
+    # IL-SYN reference inputs (absolute paths set by orchestrator)
+    il_syn_mapping_path: Optional[str] = None
+    il_syn_description_path: Optional[str] = None
     
     def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
         sanitized_name = sanitize_model_name(model_name)
         super().__init__(
-            name=f"netlogo_plantuml_corrector_agent_{sanitized_name}",
-            description="PlantUML corrector agent for fixing Messir UCI compliance issues"
+            name=f"netlogo_ast_agent_{sanitized_name}",
+            description="AST-based agent for parsing NetLogo code structure"
         )
         self.model = model_name
         
@@ -67,11 +69,31 @@ class NetLogoPlantUMLMessirCorrectorAgent(LlmAgent):
             # Format: YYYYMMDD_HHMM for better readability
             self.timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
         
-        # Configure OpenAI client
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise SystemExit("ERROR: OPENAI_API_KEY environment variable required")
-        self.client = OpenAI(api_key=api_key)
+        # Configure OpenAI client (assumes key already validated by orchestrator)
+        from utils_config_constants import OPENAI_API_KEY
+        self.client = OpenAI(api_key=OPENAI_API_KEY)
+    
+    def update_il_syn_inputs(self, mapping_path: Optional[str], description_path: Optional[str]):
+        """Configure IL-SYN external reference file paths.
+
+        Args:
+            mapping_path: Absolute path to DSL_IL_SYN-mapping.md
+            description_path: Absolute path to DSL_IL_SYN-description.md
+        """
+        self.il_syn_mapping_path = mapping_path
+        self.il_syn_description_path = description_path
+        # Lightweight validation/logging
+        try:
+            if mapping_path:
+                mp = pathlib.Path(mapping_path)
+                if not mp.exists():
+                    print(f"[WARNING] IL-SYN mapping file not found: {mapping_path}")
+            if description_path:
+                dp = pathlib.Path(description_path)
+                if not dp.exists():
+                    print(f"[WARNING] IL-SYN description file not found: {description_path}")
+        except Exception as e:
+            print(f"[WARNING] Failed to validate IL-SYN paths: {e}")
     
     def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
         """
@@ -96,11 +118,17 @@ class NetLogoPlantUMLMessirCorrectorAgent(LlmAgent):
         """
         if not isinstance(config, dict):
             return
-        for key in ("reasoning_effort", "reasoning_summary", "text_verbosity"):
-            value = config.get(key)
-            if value is not None:
-                setattr(self, key, value)
-    
+        reasoning_effort = config.get("reasoning_effort")
+        reasoning_summary = config.get("reasoning_summary")
+        text_verbosity = config.get("text_verbosity")
+
+        if reasoning_effort is not None or reasoning_summary is not None:
+            # Only update provided parts; keep existing values when None
+            self.reasoning_effort = reasoning_effort or self.reasoning_effort
+            self.reasoning_summary = reasoning_summary or self.reasoning_summary
+        if text_verbosity is not None:
+            self.text_verbosity = text_verbosity
+
     def count_input_tokens(self, instructions: str, input_text: str) -> int:
         """
         Count input tokens exactly using tiktoken for the given model.
@@ -113,7 +141,7 @@ class NetLogoPlantUMLMessirCorrectorAgent(LlmAgent):
             Exact token count for the input
         """
         try:
-            # Get the appropriate encoding for the model, fallback if not recognized
+            # Get the appropriate encoding for the model
             try:
                 encoding = tiktoken.encoding_for_model(self.model)
             except Exception:
@@ -133,51 +161,35 @@ class NetLogoPlantUMLMessirCorrectorAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def correct_plantuml_diagrams(self, plantuml_diagrams: Dict[str, Any], scenarios_data: Dict[str, Any], 
-                                 non_compliant_rules: List[str], filename: str = "input") -> Dict[str, Any]:
-        """
-        Correct PlantUML sequence diagrams based on non-compliant rules using the PlantUML Corrector persona.
-        
-        Args:
-            plantuml_diagrams: PlantUML diagrams to correct
-            scenarios_data: Original scenarios data for context
-            non_compliant_rules: List of non-compliant rules to fix
-            filename: Optional filename for reference
-            
-        Returns:
-            Dictionary containing reasoning, corrected diagrams, and any errors
-        """
-        # CRITICAL SAFEGUARD: If no non-compliant rules are provided, return original diagrams unchanged
-        if not non_compliant_rules:
-            return {
-                "reasoning_summary": "No non-compliant rules provided - returning original diagrams unchanged",
-                "data": plantuml_diagrams,
-                "errors": [],
-                "tokens_used": 0,
-                "input_tokens": 0,
-                "output_tokens": 0
-            }
-        
-        instructions = f"{combined_persona}"
+    def parse_netlogo_code(self, code: str, filename: str, output_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
+        if not filename or not isinstance(filename, str):
+            raise ValueError("filename is required and must be a non-empty string")
+        # Compose instructions: persona + explicit IL-SYN references as separate context files
+        ilsyn_refs = ""
+        try:
+            # Allow orchestrator to provide absolute paths via instance attributes
+            mapping_path = pathlib.Path(getattr(self, "il_syn_mapping_path", IL_SYN_MAPPING_DEFAULT))
+            description_path = pathlib.Path(getattr(self, "il_syn_description_path", IL_SYN_DESCRIPTION_DEFAULT))
+            mapping_txt = mapping_path.read_text(encoding="utf-8") if mapping_path.exists() else ""
+            description_txt = description_path.read_text(encoding="utf-8") if description_path.exists() else ""
+            ilsyn_refs = f"\n\n[REFERENCE: DSL_IL_SYN-description.md]\n{description_txt}\n\n[REFERENCE: DSL_IL_SYN-mapping.md]\n{mapping_txt}\n"
+            # Log reference ingestion status similarly to semantics agent
+            if mapping_path and not mapping_txt:
+                print(f"[WARNING] IL-SYN mapping file not found: {mapping_path}")
+            if description_path and not description_txt:
+                print(f"[WARNING] IL-SYN description file not found: {description_path}")
+            if mapping_txt or description_txt:
+                print("OK: Ingested IL-SYN reference files for syntax parsing")
+        except Exception as e:
+            print(f"[WARNING] Failed to load IL-SYN references: {e}")
+
+        instructions = f"{persona}{ilsyn_refs}"
         
         input_text = f"""
-Please correct the following PlantUML sequence diagrams based on the non-compliant rules:
-
 Filename: {filename}
-
-Original Scenarios Data (for context):
-```json
-{json.dumps(scenarios_data, indent=2)}
+Code:
 ```
-
-Original PlantUML Diagrams:
-```json
-{json.dumps(plantuml_diagrams, indent=2)}
-```
-
-Non-compliant Rules to Fix:
-```json
-{json.dumps(non_compliant_rules, indent=2)}
+{code}
 ```
 """
         
@@ -186,7 +198,7 @@ Non-compliant Rules to Fix:
         
         try:
             # Create response using OpenAI Responses API
-            api_config = get_reasoning_config("plantuml_corrector")
+            api_config = get_reasoning_config("syntax_parser")
             # Update reasoning configuration with agent's settings
             if "reasoning" in api_config:
                 api_config["reasoning"]["effort"] = self.reasoning_effort
@@ -196,8 +208,7 @@ Non-compliant Rules to Fix:
                 "input": input_text
             })
             
-            # Use unified helper with configured timeout
-            timeout = AGENT_TIMEOUTS.get("plantuml_corrector") if 'AGENT_TIMEOUTS' in globals() or 'AGENT_TIMEOUTS' in locals() else None
+            timeout = AGENT_TIMEOUTS.get("syntax_parser")
             response = create_and_wait(self.client, api_config, timeout_seconds=timeout)
             
             # Extract content and reasoning via helpers
@@ -237,31 +248,33 @@ Non-compliant Rules to Fix:
                 
                 # Extract and normalize fields from JSON response.
                 # Always save under 'data': if no 'data' key present, wrap top-level object.
-                corrected_diagrams = {}
+                ast = {}
                 if isinstance(response_data, dict):
                     if "data" in response_data and isinstance(response_data["data"], dict):
-                        corrected_diagrams = response_data["data"]
+                        ast = response_data["data"]
                     else:
-                        corrected_diagrams = response_data
+                        ast = response_data
                 errors = response_data.get("errors", []) if isinstance(response_data, dict) else []
 
                 # Extract token usage from response (centralized helper)
                 usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
                 tokens_used = usage.get("total_tokens", 0)
                 input_tokens = usage.get("input_tokens", 0)
-                output_tokens = usage.get("output_tokens", 0)
+                api_output_tokens = usage.get("output_tokens", 0)
                 reasoning_tokens = usage.get("reasoning_tokens", 0)
-                visible_output_tokens = max((output_tokens or 0) - (reasoning_tokens or 0), 0)
-                total_output_tokens = visible_output_tokens + (reasoning_tokens or 0)
+                # Prefer API-derived total output tokens when possible
+                # Prefer API-provided output tokens for total_output_tokens
+                total_output_tokens = api_output_tokens if api_output_tokens is not None else max((tokens_used or 0) - (input_tokens or 0), 0)
+                visible_output_tokens = max((total_output_tokens or 0) - (reasoning_tokens or 0), 0)
                 usage_dict = usage
 
                 return {
                     "reasoning_summary": reasoning_summary,
-                    "data": corrected_diagrams,
+                    "data": ast,
                     "errors": [],
                     "tokens_used": tokens_used,
                     "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
+                    "visible_output_tokens": visible_output_tokens,
                     "raw_usage": usage_dict,
                     "reasoning_tokens": reasoning_tokens,
                     "total_output_tokens": total_output_tokens,
@@ -271,10 +284,11 @@ Non-compliant Rules to Fix:
                 return {
                     "reasoning_summary": reasoning_summary,
                     "data": None,
-                    "errors": [f"Failed to parse corrected diagrams JSON: {e}", f"Raw response: {content[:200]}..."],
+                    "errors": [f"Failed to parse AST JSON: {e}", f"Raw response: {content[:200]}..."],
                     "tokens_used": 0,
                     "input_tokens": 0,
-                    "output_tokens": 0,
+                    "visible_output_tokens": 0,
+                    "total_output_tokens": 0,
                     "raw_response": raw_response_serialized
                 }
                 
@@ -285,7 +299,8 @@ Non-compliant Rules to Fix:
                 "errors": [f"Model inference error: {e}", f"Model used: {self.model}"],
                 "tokens_used": 0,
                 "input_tokens": 0,
-                "output_tokens": 0
+                "visible_output_tokens": 0,
+                "total_output_tokens": 0
             }
     
 
@@ -296,18 +311,18 @@ Non-compliant Rules to Fix:
             return
             
         # New format: base-name_timestamp_AI-model_step_agent-name_version_reasoning-suffix_rest
-        agent_name = "plantuml_corrector"
+        agent_name = "syntax_parser"
         # Use the agent's current reasoning level instead of global config
         reasoning_suffix = f"reasoning-{self.reasoning_effort}-{self.reasoning_summary}"
         
         # Resolve base output directory (per-agent if provided)
         base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
-        # Save complete response as single JSON file (simplified)
+        # Save complete response as single JSON file (simplified filename)
         json_file = base_output_dir / "output-response.json"
         
         # Create complete response structure
         complete_response = {
-            "agent_type": "plantuml_corrector",
+            "agent_type": "syntax_parser",
             "model": self.model,
             "timestamp": self.timestamp,
             "base_name": base_name,
@@ -324,49 +339,57 @@ Non-compliant Rules to Fix:
         }
         
         # Validate response before saving
-        validation_errors = validate_agent_response("plantuml_corrector", complete_response)
+        validation_errors = validate_agent_response("syntax_parser", complete_response)
         if validation_errors:
-            print(f"[WARNING] Validation errors in plantuml corrector response: {validation_errors}")
+            print(f"[WARNING] Validation errors in syntax parser response: {validation_errors}")
         
         # Verify exact keys before saving
-        expected_keys = expected_keys_for_agent("plantuml_corrector")
+        expected_keys = expected_keys_for_agent("syntax_parser")
         ok, missing, extra = verify_exact_keys(complete_response, expected_keys)
+        # Debug logging to diagnose schema/key mismatches and write targets
+        try:
+            print(f"[DEBUG] syntax_parser.save_results WRITE_FILES={WRITE_FILES}")
+            print(f"[DEBUG] syntax_parser.save_results output_dir={base_output_dir}")
+            print(f"[DEBUG] syntax_parser.save_results base_name={base_name} model={self.model} step_number={step_number}")
+            print(f"[DEBUG] syntax_parser emitted keys: {sorted(list(complete_response.keys()))}")
+            print(f"[DEBUG] syntax_parser expected keys: {sorted(list(expected_keys))}")
+            if not ok:
+                print(f"[ERROR] syntax_parser missing keys: {sorted(list(missing))}")
+                print(f"[ERROR] syntax_parser extra keys: {sorted(list(extra))}")
+        except Exception as e:
+            print(f"[WARNING] Failed to print debug schema info (syntax_parser): {e}")
         if not ok:
-            raise ValueError(f"response.json keys mismatch for plantuml_corrector. Missing: {sorted(missing)} Extra: {sorted(extra)}")
+            raise ValueError(f"response.json keys mismatch for syntax_parser. Missing: {sorted(missing)} Extra: {sorted(extra)}")
 
         # Save complete response as JSON file
         json_file.write_text(json.dumps(complete_response, indent=2, ensure_ascii=False), encoding="utf-8")
         print(f"OK: {base_name} -> output-response.json")
         
-        # Save reasoning summary as markdown file
-        reasoning_file = base_output_dir / "output-reasoning.md"
-        reasoning_content = f"""# Reasoning Summary - {agent_name.title().replace('_', ' ')}
+        # Streaming artifact generation intentionally disabled to avoid legacy file creation
 
-**Base Name:** {base_name}
-**Model:** {self.model}
-**Timestamp:** {self.timestamp}
-**Step Number:** {step_number if step_number else 'N/A'}
-**Reasoning Level:** {self.reasoning_effort}
-**Reasoning Summary:** {results.get("reasoning_summary") or "No explicit reasoning summary available."}
-
-## Token Usage
-
-- **Total Tokens:** {results.get("tokens_used", 0):,}
-- **Input Tokens:** {results.get("input_tokens", 0):,}
- - **Visible Output Tokens:** {results.get("visible_output_tokens", 0):,}
-- **Reasoning Tokens:** {results.get("reasoning_tokens", 0):,}
-- **Total Output Tokens (reasoning + visible):** {results.get("total_output_tokens", (results.get('visible_output_tokens', 0) or 0) + (results.get('reasoning_tokens', 0) or 0)):,}
-
-## Reasoning Summary
-
-{results.get("reasoning_summary") or "No explicit reasoning summary available."}
-
-## Errors
-
-{chr(10).join(f"- {error}" for error in results.get("errors", [])) if results.get("errors") else "No errors"}
-"""
-        reasoning_file.write_text(reasoning_content, encoding="utf-8")
-        print(f"OK: {base_name} -> output-reasoning.md")
+        # Save reasoning payload as markdown file (centralized writer)
+        payload = {
+            "reasoning": results.get("reasoning"),
+            "reasoning_summary": results.get("reasoning_summary"),
+            "tokens_used": results.get("tokens_used"),
+            "input_tokens": results.get("input_tokens"),
+            "visible_output_tokens": results.get("visible_output_tokens"),
+            "total_output_tokens": results.get("total_output_tokens"),
+            "reasoning_tokens": results.get("reasoning_tokens"),
+            "usage": results.get("raw_usage"),
+            "errors": results.get("errors"),
+        }
+        write_reasoning_md_from_payload(
+            output_dir=base_output_dir,
+            agent_name=agent_name,
+            base_name=base_name,
+            model=self.model,
+            timestamp=self.timestamp,
+            reasoning_effort=self.reasoning_effort,
+            step_number=step_number,
+            payload=payload,
+        )
+        print(f"OK: {base_name} -> reasoning.md")
         
         # Save data field as separate file
         data_file = base_output_dir / "output-data.json"
@@ -379,49 +402,3 @@ Non-compliant Rules to Fix:
         # Write minimal artifacts (non-breaking additions)
         write_minimal_artifacts(base_output_dir, results.get("raw_response"))
 
-        # Additionally, write a corrected standalone .puml file containing the diagram text (if available)
-        try:
-            diagram_text = self._extract_plantuml_text(results.get("data")) if results.get("data") else None
-            if diagram_text and "@startuml" in diagram_text and "@enduml" in diagram_text:
-                # Enforce canonical filename for Stage 07 corrected diagram
-                puml_file = base_output_dir / "diagram.puml"
-                puml_file.write_text(diagram_text, encoding="utf-8")
-                print(f"OK: {base_name} -> diagram.puml")
-                results["puml_file"] = str(puml_file)
-            else:
-                print("WARNING: Could not extract valid PlantUML diagram text to write corrected .puml file")
-        except Exception as e:
-            print(f"[WARNING] Failed to write corrected .puml file: {e}")
-
-    def _extract_plantuml_text(self, data: Dict[str, Any]) -> str:
-        if not isinstance(data, dict):
-            return ""
-        candidate_nodes = []
-        if "typical" in data:
-            candidate_nodes.append(data["typical"])
-        candidate_nodes.extend(list(data.values()))
-
-        def find_in_obj(obj: Any) -> str:
-            if isinstance(obj, str) and "@startuml" in obj:
-                return obj
-            if isinstance(obj, dict):
-                for key in ("plantuml", "diagram", "uml", "content", "text"):
-                    val = obj.get(key)
-                    if isinstance(val, str) and "@startuml" in val:
-                        return val
-                for val in obj.values():
-                    found = find_in_obj(val)
-                    if found:
-                        return found
-            if isinstance(obj, list):
-                for item in obj:
-                    found = find_in_obj(item)
-                    if found:
-                        return found
-            return ""
-
-        for node in candidate_nodes:
-            found = find_in_obj(node)
-            if found:
-                return found.strip()
-        return find_in_obj(data).strip()
