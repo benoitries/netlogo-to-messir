@@ -202,8 +202,12 @@ Filename: {base_name}
                     """Best-effort JSON extraction when prose wraps a JSON object.
                     Tries direct loads; if it fails, extracts the first top-level JSON object substring.
                     """
+                    # Clean JavaScript-style comments from JSON
+                    import re
+                    s_clean = re.sub(r'//.*$', '', s, flags=re.MULTILINE)
+                    
                     try:
-                        return json.loads(s)
+                        return json.loads(s_clean)
                     except Exception:
                         pass
                     # Attempt to locate the first JSON object within the text
@@ -211,8 +215,10 @@ Filename: {base_name}
                     end = s.rfind("}")
                     if start != -1 and end != -1 and end > start:
                         candidate = s[start:end+1].strip()
+                        # Clean comments from candidate
+                        candidate_clean = re.sub(r'//.*$', '', candidate, flags=re.MULTILINE)
                         try:
-                            return json.loads(candidate)
+                            return json.loads(candidate_clean)
                         except Exception:
                             # Try to narrow to a block that begins with {"data":
                             anchor = s.find('{"data"')
@@ -220,8 +226,10 @@ Filename: {base_name}
                                 end2 = s.find("\n\n", anchor)
                                 end2 = end if end2 == -1 else end2
                                 candidate2 = s[anchor:end2].strip()
+                                # Clean comments from candidate2
+                                candidate2_clean = re.sub(r'//.*$', '', candidate2, flags=re.MULTILINE)
                                 try:
-                                    return json.loads(candidate2)
+                                    return json.loads(candidate2_clean)
                                 except Exception:
                                     pass
                     # Give up; raise to caller

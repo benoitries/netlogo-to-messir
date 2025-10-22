@@ -6,6 +6,7 @@ Centralizes all file and directory path constants
 
 import os
 import pathlib
+from pathlib import Path
 from typing import Dict, Set
 
 # Base directory (parent of this file)
@@ -23,17 +24,20 @@ INPUT_PERSONA_DIR = BASE_DIR / "input-persona"
 # Output directory
 OUTPUT_DIR = BASE_DIR / "output"
 
-# Persona files
-PERSONA_SYNTAX_PARSER = INPUT_PERSONA_DIR / "PSN_1_NetLogoSyntaxParser-v5.md"
-PERSONA_SEMANTICS_PARSER = INPUT_PERSONA_DIR / "PSN_2_NetlogoSemanticsParser-v4.md"
-PERSONA_MESSIR_MAPPER = INPUT_PERSONA_DIR / "PSN_3_MessirUCIConceptsMapper-v3.md"
-PERSONA_SCENARIO_WRITER = INPUT_PERSONA_DIR / "PSN_4_MessirUCIScenarioWriter-v2.md"
-PERSONA_PLANTUML_WRITER = INPUT_PERSONA_DIR / "PSN_5_PlantUMLWriter-v2.md"
-PERSONA_PLANTUML_AUDITOR = INPUT_PERSONA_DIR / "PSN_6_PlantUMLMessirAuditor-v6.md"
-PERSONA_PLANTUML_CORRECTOR = INPUT_PERSONA_DIR / "PSN_7_PlantUMLMessirCorrector-v2.md"
+# Persona files (default to persona-v1)
+PERSONA_SYNTAX_PARSER = INPUT_PERSONA_DIR / "persona-v1" / "PSN_1_NetLogoSyntaxParser.md"
+PERSONA_SEMANTICS_PARSER = INPUT_PERSONA_DIR / "persona-v1" / "PSN_2_NetlogoSemanticsParser.md"
+PERSONA_MESSIR_MAPPER = INPUT_PERSONA_DIR / "persona-v1" / "PSN_3_MessirUCIConceptsMapper.md"
+PERSONA_SCENARIO_WRITER = INPUT_PERSONA_DIR / "persona-v1" / "PSN_4_MessirUCIScenarioWriter.md"
+PERSONA_PLANTUML_WRITER = INPUT_PERSONA_DIR / "persona-v1" / "PSN_5_PlantUMLWriter.md"
+PERSONA_PLANTUML_AUDITOR = INPUT_PERSONA_DIR / "persona-v1" / "PSN_6_PlantUMLMessirAuditor.md"
+PERSONA_PLANTUML_CORRECTOR = INPUT_PERSONA_DIR / "persona-v1" / "PSN_7_PlantUMLMessirCorrector.md"
 
-# Rules files
-MESSIR_RULES_FILE = INPUT_PERSONA_DIR / "DSL_Target_MUCIM-full-definition-for-compliance.md"
+# Rules files (default to persona-v1)
+MESSIR_RULES_FILE = INPUT_PERSONA_DIR / "persona-v1" / "DSL_Target_MUCIM-full-definition-for-compliance.md"
+
+# Default persona set
+DEFAULT_PERSONA_SET = "persona-v1"
 
 # File patterns
 NETLOGO_CODE_PATTERN = "*-netlogo-code.md"
@@ -238,3 +242,46 @@ AGENT_KEYS: Dict[str, Set[str]] = {
 def expected_keys_for_agent(agent_type: str) -> Set[str]:
     """Get expected keys for a specific agent type."""
     return AGENT_KEYS.get(agent_type, COMMON_KEYS | OPTIONAL_KEYS)
+
+
+def get_persona_file_paths(persona_set: str = DEFAULT_PERSONA_SET) -> Dict[str, Path]:
+    """
+    Get persona file paths for a specific persona set.
+    
+    Args:
+        persona_set: Name of the persona set (subfolder in input-persona)
+        
+    Returns:
+        Dictionary mapping persona file names to their paths
+    """
+    persona_dir = INPUT_PERSONA_DIR / persona_set
+    
+    return {
+        "syntax_parser": persona_dir / "PSN_1_NetLogoSyntaxParser.md",
+        "semantics_parser": persona_dir / "PSN_2_NetlogoSemanticsParser.md",
+        "messir_mapper": persona_dir / "PSN_3_MessirUCIConceptsMapper.md",
+        "scenario_writer": persona_dir / "PSN_4_MessirUCIScenarioWriter.md",
+        "plantuml_writer": persona_dir / "PSN_5_PlantUMLWriter.md",
+        "plantuml_auditor": persona_dir / "PSN_6_PlantUMLMessirAuditor.md",
+        "plantuml_corrector": persona_dir / "PSN_7_PlantUMLMessirCorrector.md",
+        "messir_rules": persona_dir / "DSL_Target_MUCIM-full-definition-for-compliance.md",
+        "dsl_il_syn_description": persona_dir / "DSL_IL_SYN-description.md",
+        "dsl_il_syn_mapping": persona_dir / "DSL_IL_SYN-mapping.md",
+        "dsl_il_sem_description": persona_dir / "DSL_IL_SEM-description.md",
+        "dsl_il_sem_mapping": persona_dir / "DSL_IL_SEM-mapping.md"
+    }
+
+
+def get_persona_file_path(persona_set: str, file_type: str) -> Path:
+    """
+    Get a specific persona file path for a persona set.
+    
+    Args:
+        persona_set: Name of the persona set
+        file_type: Type of persona file (e.g., 'syntax_parser', 'messir_rules')
+        
+    Returns:
+        Path to the requested persona file
+    """
+    persona_paths = get_persona_file_paths(persona_set)
+    return persona_paths.get(file_type, Path())

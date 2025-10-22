@@ -9,6 +9,7 @@ This project implements an 8-step orchestration pipeline that transforms NetLogo
 ### Key Features
 
 - **Multi-Agent Architecture**: 7 specialized AI agents handling different aspects of the conversion
+- **Multi-Persona Support**: Interactive selection of persona sets for different agent configurations
 - **Automated Orchestration**: Parallel-first for steps 01–02, then sequential with error correction and compliance auditing
 - **MESSIR Compliance**: Ensures generated diagrams follow MESSIR-UCI standards
 - **Multiple AI Model Support**: Compatible with GPT-5, GPT-5-mini, and GPT-5-nano
@@ -124,16 +125,18 @@ export OPENAI_API_KEY="<YOUR_API_KEY>" && \
 python3 /Users/benoit.ries/Library/CloudStorage/OneDrive-UniversityofLuxembourg/cursor-workspace-individual/research.publi.reverse.engineering.netlogo.to.messir.ucid/code-netlogo-to-messir/scripts/run_default_nano.py | cat
 ```
 
-This will persist outputs under the canonical structure in `code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>/<case>/`.
+This will persist outputs under the canonical structure in `code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>/`.
 
 ### Experimentation parameters
 
 - Reasoning: `reasoning: { effort: "minimal" | "low" | "medium" | "high" }` (default: `medium`)
 - Text: `text: { verbosity: "low" | "medium" | "high" }` (default: `medium`)
+- Persona Set: Interactive selection from available persona sets in `input-persona/` (default: `persona-v1`)
 
 These parameters are supported through:
 - Direct programmatic calls: use `orchestrator.update_reasoning_config(effort, summary)` and `orchestrator.update_text_config(verbosity)`
 - Terminal interactive flow: select reasoning effort (now including "minimal") and text verbosity when prompted
+- Persona set selection: Interactive menu listing all available persona sets, with `persona-v1` as default
 
 ### OpenAI API Usage
 
@@ -215,7 +218,7 @@ code-netlogo-to-messir/
   output/
     runs/
       YYYY-MM-DD/
-        HHMM/
+        HHMM-<PERSONA_SET>/
           <case-name>/
             01-syntax_parser/
             02-semantics_parser/

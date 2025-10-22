@@ -6,7 +6,7 @@ This document summarizes the current orchestration flow and highlights ambiguiti
 
 ## Pipeline Overview
 - Stages: 01 Syntax Parser + 02 Semantics Parser (parallel) → 03 Messir Mapper → 04 Scenario Writer → 05 PlantUML Writer → 06 PlantUML Messir Auditor → 07 PlantUML Messir Corrector → 08 Final Auditor
-- Output root: `code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>/<case>-<model>-reason-<X>-verb-<Y>/<NN-stage>/`
+- Output root: `code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<model>-reason-<X>-verb-<Y>/<NN-stage>/`
 - Each stage writes standardized artifacts: `output-response.json`, `output-reasoning.md`, `output-data.json` (+ optional `.puml` for diagram stages).
 
 ---

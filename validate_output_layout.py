@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Validate output layout under output/runs/<YYYY-MM-DD>/<HHMM>/<combination>/.
+Validate output layout under output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<combination>/.
 Where <combination> is <case>-<model-name>-reason-<reasoning-value>-verb-<verbosity-value>.
 
 - Picks the latest run by date/time unless --run <path> is provided

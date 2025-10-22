@@ -137,7 +137,7 @@ def write_reasoning_md_from_payload(
     content = "\n\n".join(sections)
     reasoning_file.write_text(content, encoding="utf-8")
 
-def setup_orchestration_logger(base_name: str, model_name: str, timestamp: str, reasoning_effort: str = "medium", text_verbosity: str = "medium") -> logging.Logger:
+def setup_orchestration_logger(base_name: str, model_name: str, timestamp: str, reasoning_effort: str = "medium", text_verbosity: str = "medium", persona_set: str = "persona-v1") -> logging.Logger:
     """
     Set up a logger for orchestration execution with file output.
     
@@ -164,7 +164,7 @@ def setup_orchestration_logger(base_name: str, model_name: str, timestamp: str, 
     
     # Create file handler under per-run/per-combination directory
     # New format: output/runs/<YYYY-MM-DD>/<HHMM>/<case>-<model>-reason-<effort>-verb-<verbosity>/<case>_<timestamp>_<model>_orchestrator.log
-    run_dir = get_run_base_dir(timestamp, base_name, model_name, reasoning_effort, text_verbosity)
+    run_dir = get_run_base_dir(timestamp, base_name, model_name, reasoning_effort, text_verbosity, persona_set)
     run_dir.mkdir(parents=True, exist_ok=True)
     log_filename = f"{base_name}_{timestamp}_{model_name}_orchestrator.log"
     log_file = run_dir / log_filename

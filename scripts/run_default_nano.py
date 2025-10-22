@@ -38,7 +38,7 @@ async def run_default(args: argparse.Namespace) -> None:
     model_name = DEFAULT_MODEL
     base_name = args.base
 
-    orchestrator = NetLogoOrchestrator(model_name=model_name)
+    orchestrator = NetLogoOrchestrator(model_name=model_name, persona_set=args.persona_set)
 
     # Apply requested configuration globally via unified API
     orchestrator.update_agent_configs(
@@ -96,6 +96,7 @@ def main() -> None:
     parser.add_argument("--reasoning", choices=["low", "medium", "high"], default="medium", help="Reasoning effort")
     parser.add_argument("--summary", choices=["auto", "manual"], default="auto", help="Reasoning summary mode")
     parser.add_argument("--verbosity", choices=["low", "medium", "high"], default="low", help="Text verbosity level")
+    parser.add_argument("--persona-set", type=str, default=None, help="Persona set to use (bypasses interactive selection)")
     args = parser.parse_args()
     asyncio.run(run_default(args))
 

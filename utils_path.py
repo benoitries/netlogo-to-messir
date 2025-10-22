@@ -36,6 +36,7 @@ def get_run_base_dir(
     model_name: str,
     reasoning_effort: str,
     text_verbosity: str,
+    persona_set: str = "persona-v1",
     output_dir: Optional[Path] = None,
 ) -> Path:
     """Compute the base directory for a run combination.
@@ -46,14 +47,15 @@ def get_run_base_dir(
         model_name: Model name (from AVAILABLE_MODELS)
         reasoning_effort: minimal|low|medium|high
         text_verbosity: low|medium|high
+        persona_set: Persona set name (default: persona-v1)
         output_dir: Override for OUTPUT_DIR mainly for testing
 
     Returns:
-        Path to: OUTPUT_DIR/runs/YYYY-MM-DD/HHMM/<combination-folder>
+        Path to: OUTPUT_DIR/runs/YYYY-MM-DD/HHMM-<PERSONA_SET_NAME>/<combination-folder>
     """
     odir = output_dir if output_dir is not None else OUTPUT_DIR
     day_folder = f"{timestamp[0:4]}-{timestamp[4:6]}-{timestamp[6:8]}"
-    time_folder = timestamp.split("_")[1]
+    time_folder = f"{timestamp.split('_')[1]}-{persona_set}"
     combo = build_combination_folder_name(case_name, model_name, reasoning_effort, text_verbosity)
     return odir / "runs" / day_folder / time_folder / combo
 
