@@ -20,7 +20,8 @@ This project implements an 8-step orchestration pipeline that transforms NetLogo
 
 For a concise overview of the orchestration flow, per-agent inputs/outputs, and known ambiguities/inconsistencies, see:
 
-- `code-netlogo-to-messir/Workflow_summary.md`
+- `code-netlogo-to-messir/docs/orchestration-flow.md` (detailed per-agent I/O and conditions)
+- `code-netlogo-to-messir/docs/orchestrator_workflow_summary.md` (findings and inconsistencies)
 
 ## 🏗️ Architecture
 

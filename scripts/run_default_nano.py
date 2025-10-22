@@ -12,6 +12,7 @@ This wrapper avoids interactive prompts and runs a single combination.
 import asyncio
 import argparse
 import datetime
+import re
 import sys
 from pathlib import Path
 import subprocess
@@ -32,8 +33,10 @@ async def run_default(args: argparse.Namespace) -> None:
     from utils_openai_client import validate_openai_key
     print("Validating OpenAI API key...")
     if not validate_openai_key():
+        print("ERROR: OpenAI API key validation failed: Connection error.")
+        print("Please check your API key and try again")
         print("Exiting due to invalid OpenAI API key")
-        return
+        sys.exit(1)
     
     model_name = DEFAULT_MODEL
     base_name = args.base
@@ -76,8 +79,13 @@ async def run_default(args: argparse.Namespace) -> None:
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     runs_root = Path(__file__).resolve().parents[1] / "output" / "runs" / today
     if runs_root.exists():
-        # Find the latest HHMM folder
-        candidates = sorted([p for p in runs_root.iterdir() if p.is_dir()], key=lambda p: p.name, reverse=True)
+        # Match folders with pattern: HHMM-persona-v1 (or just HHMM for legacy)
+        time_persona_pattern = re.compile(r"^(\d{4})(-persona-[^/]+)?$")
+        candidates = sorted(
+            [p for p in runs_root.iterdir() if p.is_dir() and time_persona_pattern.match(p.name)],
+            key=lambda p: p.name,
+            reverse=True
+        )
         if candidates:
             last_run_dir = candidates[0]
             print(f"Validating output-response.json keys under: {last_run_dir}")
