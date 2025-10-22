@@ -15,11 +15,11 @@ BASE_DIR = pathlib.Path(__file__).resolve().parent
 # OpenAI API configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Input directories
-INPUT_NETLOGO_DIR = BASE_DIR / "input-netlogo"
-INPUT_ICRASH_DIR = BASE_DIR / "input-icrash"
-INPUT_IMAGES_DIR = BASE_DIR / "input-images"
-INPUT_PERSONA_DIR = BASE_DIR / "input-persona"
+# Input directories - use environment variables if set, otherwise use default paths
+INPUT_NETLOGO_DIR = Path(os.getenv("INPUT_NETLOGO_DIR", BASE_DIR / "input-netlogo"))
+INPUT_ICRASH_DIR = Path(os.getenv("INPUT_ICRASH_DIR", BASE_DIR / "input-icrash"))
+INPUT_IMAGES_DIR = Path(os.getenv("INPUT_IMAGES_DIR", BASE_DIR / "input-images"))
+INPUT_PERSONA_DIR = Path(os.getenv("INPUT_PERSONA_DIR", BASE_DIR / "input-persona"))
 
 # Output directory
 OUTPUT_DIR = BASE_DIR / "output"
