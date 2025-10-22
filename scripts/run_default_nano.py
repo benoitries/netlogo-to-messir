@@ -38,7 +38,7 @@ async def run_default(args: argparse.Namespace) -> None:
     model_name = DEFAULT_MODEL
     base_name = args.base
 
-    orchestrator = NetLogoOrchestrator(model_name=model_name, persona_set=args.persona_set)
+    orchestrator = NetLogoOrchestrator(model_name=model_name)
 
     # Apply requested configuration globally via unified API
     orchestrator.update_agent_configs(
