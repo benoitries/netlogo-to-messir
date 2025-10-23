@@ -6,7 +6,7 @@ File I/O operations and path management for the NetLogo orchestrator.
 
 import pathlib
 from typing import Dict, Any, List, Optional
-from utils_config_constants import INPUT_NETLOGO_DIR, INPUT_ICRASH_DIR, MESSIR_RULES_FILE
+from utils_config_constants import INPUT_NETLOGO_DIR, LUCIM_RULES_FILE
 from utils_path import get_run_base_dir
 
 
@@ -51,79 +51,20 @@ class OrchestratorFileIO:
         
         return files
     
-    def find_icrash_files(self) -> List[pathlib.Path]:
-        """
-        Find icrash files in the input-icrash directory.
-        
-        Returns:
-            List of icrash file paths
-        """
-        icrash_files = []
-        
-        if INPUT_ICRASH_DIR.exists():
-            for icrash_file in INPUT_ICRASH_DIR.glob("*.pdf"):
-                icrash_files.append(icrash_file)
-        
-        return icrash_files
     
-    def read_icrash_file_content(self, icrash_file: pathlib.Path) -> Dict[str, str]:
+    
+    def load_lucim_dsl_content(self) -> str:
         """
-        Read the content of an iCrash PDF file.
+        Load LUCIM DSL content from the rules file.
         
-        Args:
-            icrash_file: Path to the iCrash PDF file
-            
         Returns:
-            Dictionary containing filename, filepath, and content
+            LUCIM DSL content as string
         """
         try:
-            # For now, we'll use a simple approach to extract text from PDF
-            # In a production environment, you might want to use a proper PDF library like PyPDF2 or pdfplumber
-            
-            # Try to read the file as text first (in case it's not a real PDF)
-            try:
-                with open(icrash_file, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                return {
-                    "filename": icrash_file.name,
-                    "filepath": str(icrash_file),
-                    "content": content
-                }
-            except UnicodeDecodeError:
-                # If it's a real PDF, we'll use a fallback approach
-                # For now, we'll create a reference based on the filename
-                if "actors" in icrash_file.name.lower():
-                    content = "iCrash Actors Reference: Contains definitions of system actors and their roles in the iCrash case study. Use this to understand actor naming conventions and responsibilities."
-                elif "casestudy" in icrash_file.name.lower():
-                    content = "iCrash Case Study: Contains the complete case study description with system requirements, actors, and event patterns. Use this as the primary reference for Messir UCI mapping."
-                else:
-                    content = f"iCrash Reference File: {icrash_file.name} - Contains relevant patterns and examples for Messir UCI mapping."
-                
-                return {
-                    "filename": icrash_file.name,
-                    "filepath": str(icrash_file),
-                    "content": content
-                }
-                
-        except Exception as e:
-            return {
-                "filename": icrash_file.name,
-                "filepath": str(icrash_file),
-                "content": f"Error reading file: {e}"
-            }
-    
-    def load_messir_dsl_content(self) -> str:
-        """
-        Load MUCIM DSL content from the rules file.
-        
-        Returns:
-            MUCIM DSL content as string
-        """
-        try:
-            messir_dsl_content = MESSIR_RULES_FILE.read_text(encoding="utf-8")
-            return messir_dsl_content
+            lucim_dsl_content = LUCIM_RULES_FILE.read_text(encoding="utf-8")
+            return lucim_dsl_content
         except FileNotFoundError:
-            raise FileNotFoundError(f"MANDATORY INPUT MISSING: MUCIM DSL file not found: {MESSIR_RULES_FILE}")
+            raise FileNotFoundError(f"MANDATORY INPUT MISSING: LUCIM DSL file not found: {LUCIM_RULES_FILE}")
     
     def load_icrash_contents(self) -> List[Dict[str, str]]:
         """
@@ -216,15 +157,12 @@ class OrchestratorFileIO:
             validation_results["valid"] = False
             validation_results["errors"].append(f"No NetLogo files found for base name '{base_name}'")
         
-        # Check for MUCIM DSL file
-        if not MESSIR_RULES_FILE.exists():
+        # Check for LUCIM DSL file
+        if not LUCIM_RULES_FILE.exists():
             validation_results["valid"] = False
-            validation_results["errors"].append(f"MANDATORY INPUT MISSING: MUCIM DSL file not found: {MESSIR_RULES_FILE}")
+            validation_results["errors"].append(f"MANDATORY INPUT MISSING: LUCIM DSL file not found: {LUCIM_RULES_FILE}")
         
-        # Check for iCrash files (optional but recommended)
-        icrash_files = self.find_icrash_files()
-        if not icrash_files:
-            validation_results["warnings"].append(f"No iCrash files found in {INPUT_ICRASH_DIR}")
+        # iCrash files are no longer used
         
         return validation_results
     
@@ -252,10 +190,10 @@ class OrchestratorFileIO:
         """
         # Create directories for all 8 steps
         step_agents = [
-            (1, "syntax_parser"),
-            (2, "semantics_parser"),
-            (3, "messir_mapper"),
-            (4, "scenario_writer"),
+            (1, "netlogo_abstract_syntax_extractor"),
+            (2, "behavior_extractor"),
+            (3, "lucim_environment_synthesizer"),
+            (4, "lucim_scenario_synthesizer"),
             (5, "plantuml_writer"),
             (6, "plantuml_messir_auditor"),
             (7, "plantuml_messir_corrector"),
@@ -318,13 +256,13 @@ class OrchestratorFileIO:
         }
         
         # Add specific file patterns based on agent type
-        if agent_type == "syntax_parser":
-            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_1a_syntax_parser_v1_*.md"
-        elif agent_type == "semantics_parser":
-            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_1b_semantics_parser_v1_*.json/md"
-        elif agent_type == "messir_mapper":
-            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_2_messir_v1_*.json/md"
-        elif agent_type == "scenario_writer":
+        if agent_type == "netlogo_abstract_syntax_extractor":
+            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_1a_netlogo_abstract_syntax_extractor_v1_*.md"
+        elif agent_type == "behavior_extractor":
+            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_1b_behavior_extractor_v1_*.json/md"
+        elif agent_type == "lucim_environment_synthesizer":
+            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_3_lucim_environment_synthesizer_v1_*.json/md"
+        elif agent_type == "lucim_scenario_synthesizer":
             file_info["pattern"] = f"{base_name}_{timestamp}_{model}_3_scenario_v1_*.md"
         elif agent_type == "plantuml_writer":
             file_info["pattern"] = f"{base_name}_{timestamp}_{model}_4_plantuml_*.json/md/.puml"

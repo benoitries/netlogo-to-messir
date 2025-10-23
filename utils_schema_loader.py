@@ -15,10 +15,10 @@ import json
 from typing import Dict, Any, Optional
 
 from utils_config_constants import (
-    PERSONA_SYNTAX_PARSER,
-    PERSONA_SEMANTICS_PARSER,
-    PERSONA_MESSIR_MAPPER,
-    PERSONA_SCENARIO_WRITER,
+    PERSONA_NETLOGO_ABSTRACT_SYNTAX_EXTRACTOR,
+    PERSONA_BEHAVIOR_EXTRACTOR,
+    PERSONA_LUCIM_ENVIRONMENT_SYNTHESIZER,
+    PERSONA_LUCIM_SCENARIO_SYNTHESIZER,
     PERSONA_PLANTUML_WRITER,
     PERSONA_PLANTUML_AUDITOR,
     PERSONA_PLANTUML_CORRECTOR,
@@ -26,10 +26,10 @@ from utils_config_constants import (
 
 
 AGENT_TO_PERSONA = {
-    "syntax_parser": PERSONA_SYNTAX_PARSER,
-    "semantics_parser": PERSONA_SEMANTICS_PARSER,
-    "messir_mapper": PERSONA_MESSIR_MAPPER,
-    "scenario_writer": PERSONA_SCENARIO_WRITER,
+    "netlogo_abstract_syntax_extractor": PERSONA_NETLOGO_ABSTRACT_SYNTAX_EXTRACTOR,
+    "behavior_extractor": PERSONA_BEHAVIOR_EXTRACTOR,
+    "lucim_environment_synthesizer": PERSONA_LUCIM_ENVIRONMENT_SYNTHESIZER,
+    "lucim_scenario_synthesizer": PERSONA_LUCIM_SCENARIO_SYNTHESIZER,
     "plantuml_writer": PERSONA_PLANTUML_WRITER,
     "plantuml_auditor": PERSONA_PLANTUML_AUDITOR,
     "plantuml_corrector": PERSONA_PLANTUML_CORRECTOR,

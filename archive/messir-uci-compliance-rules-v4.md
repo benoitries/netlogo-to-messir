@@ -1,15 +1,15 @@
-# MUCIM DSL — Messir Use-Case Instance Domain-Specific Language
+# LUCIM DSL — Messir Use-Case Instance Domain-Specific Language
 
 ## 1. Scope and Audience (Informative)
 
 ### 1.1 Background
-Messir is a model-driven methodology and family of domain-specific modeling languages (DSMLs) covering requirements, analysis, design, test, and validation phases. It builds on UML and OCL to provide precise, verifiable specifications of reactive systems. Messir emphasizes scenario-driven modeling (actors, system, events, constraints) and traceability from requirements to validation artifacts. Within this family, the MUCIM DSL captures single use-case instances as constrained UML Sequence Diagrams, enforcing a system-centered interaction discipline (Actor↔System only) and well-formedness rules suitable for automated validation and documentation.
+Messir is a model-driven methodology and family of domain-specific modeling languages (DSMLs) covering requirements, analysis, design, test, and validation phases. It builds on UML and OCL to provide precise, verifiable specifications of reactive systems. Messir emphasizes scenario-driven modeling (actors, system, events, constraints) and traceability from requirements to validation artifacts. Within this family, the LUCIM DSL captures single use-case instances as constrained UML Sequence Diagrams, enforcing a system-centered interaction discipline (Actor↔System only) and well-formedness rules suitable for automated validation and documentation.
 
 ### 1.2 Purpose
-Define the MUCIM (Messir Use-Case Instance Model) DSL as a constrained subset of UML Sequence Diagrams for modeling system–actor interactions in reactive system scenarios.
+Define the LUCIM (Messir Use-Case Instance Model) DSL as a constrained subset of UML Sequence Diagrams for modeling system–actor interactions in reactive system scenarios.
 
 ### 1.3 Audience
-MUCIM modelers, business stakeholders, model validators, requirements engineers, and tool builders.
+LUCIM modelers, business stakeholders, model validators, requirements engineers, and tool builders.
 
 ### 1.4 In-Scope
 - Constrained UML Sequence Diagrams for single use-case instances
@@ -59,7 +59,7 @@ Rule IDs are stable and unique: ASn and SSn (M2), TCSn and GCSn and NAMn (M1). E
 ### 3.1 Abstract Syntax (AS)
 
 #### 3.1.1 Element Inventory
-- `Interaction`: Root container for the MUCIM model
+- `Interaction`: Root container for the LUCIM model
 - `Lifeline`: System and Actor participants
 - `Message`: Actor↔System communications only
 - `OccurrenceSpecification`: Message send/receive events
@@ -149,7 +149,7 @@ Activation bars must never overlap. Following sequence is forbidden: an event, s
 **SS — Directionality (OE/IE)**
 
 SS1_OEIE_MESSAGE_DIRECTIONALITY.
-Every message in a MUCIM interaction SHALL connect exactly one Actor lifeline and the unique System lifeline. Messages between two Actors and messages from System to System are FORBIDDEN.
+Every message in a LUCIM interaction SHALL connect exactly one Actor lifeline and the unique System lifeline. Messages between two Actors and messages from System to System are FORBIDDEN.
 
 **SS — Activation Bars (AB)**
 
@@ -170,7 +170,7 @@ A machine- and human-readable catalog enumerating AS/SS rules with: ID, Title, I
 
 **TCS — Scenario (SCE)**
 
-TCS1_SCE_MUCIM_REPRESENTATION.
+TCS1_SCE_LUCIM_REPRESENTATION.
 A Messir use case instance must be represented as a UML Sequence Diagram using strictly PlantUML textual syntax.
 
 TCS2_SCE_ALLOW_BLANK_LINES.
@@ -286,7 +286,7 @@ Each rule maps to diagnostics and generated artifacts across the pipeline; maint
 
 ## 6. Examples and Counter-examples (Informative)
 
-### 6.1 Minimal Valid MUCIM
+### 6.1 Minimal Valid LUCIM
 ```plantuml
 @startuml
 participant System as system
@@ -321,7 +321,7 @@ activate system  // FORBIDDEN
 
 ## 7. Glossary (Informative)
 
-- MUCIM: Messir Use-Case Instance Model
+- LUCIM: Messir Use-Case Instance Model
 - System: The unique reactive system participant
 - Actor: External domain role interacting with the System
 - Output Event (OE): Actor→System message

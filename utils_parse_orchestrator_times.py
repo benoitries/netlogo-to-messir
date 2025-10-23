@@ -14,10 +14,10 @@ COMP_LINE = re.compile(r'^.*completed in\s+([0-9]+\.[0-9]+|[0-9]+)s')
 DETAIL_LINE = re.compile(r'^.*SUCCESS\s+([0-9]+\.[0-9]+|[0-9]+)s')
 
 STEP_ORDER = [
-    ('syntax_parser', 1),
-    ('semantics_parser', 2),
-    ('messir_mapper', 3),
-    ('scenario_writer', 4),
+    ('netlogo_abstract_syntax_extractor', 1),
+    ('behavior_extractor', 2),
+    ('lucim_environment_synthesizer', 3),
+    ('lucim_scenario_synthesizer', 4),
     ('plantuml_writer', 5),
     ('plantuml_messir_auditor', 6)
 ]

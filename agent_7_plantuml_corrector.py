@@ -18,32 +18,30 @@ from utils_config_constants import expected_keys_for_agent
 from utils_plantuml import process_plantuml_file
 
 from utils_config_constants import (
-    PERSONA_PLANTUML_CORRECTOR, OUTPUT_DIR, MESSIR_RULES_FILE,
-    AGENT_VERSION_PLANTUML_CORRECTOR, get_reasoning_config,
-    validate_agent_response, DEFAULT_MODEL, AGENT_TIMEOUTS)
+    PERSONA_PLANTUML_CORRECTOR, OUTPUT_DIR, LUCIM_RULES_FILE,
+    get_reasoning_config, validate_agent_response, DEFAULT_MODEL, AGENT_TIMEOUTS)
 
 # Configuration
 PERSONA_FILE = PERSONA_PLANTUML_CORRECTOR
 WRITE_FILES = True
 
-# Load persona and Messir rules
+# Load persona and LUCIM rules
 persona = PERSONA_FILE.read_text(encoding="utf-8")
-messir_rules = ""
+lucim_rules = ""
 try:
-    messir_rules = MESSIR_RULES_FILE.read_text(encoding="utf-8")
+    lucim_rules = LUCIM_RULES_FILE.read_text(encoding="utf-8")
 except FileNotFoundError:
-    raise SystemExit(f"ERROR: Compliance rules file not found: {MESSIR_RULES_FILE}")
+    raise SystemExit(f"ERROR: Compliance rules file not found: {LUCIM_RULES_FILE}")
 
 # Concatenate persona and rules
-combined_persona = f"{persona}\n\n{messir_rules}"
+combined_persona = f"{persona}\n\n{lucim_rules}"
 
-AGENT_VERSION = AGENT_VERSION_PLANTUML_CORRECTOR
 
 def sanitize_model_name(model_name: str) -> str:
     """Sanitize model name by replacing hyphens with underscores for valid identifier."""
     return model_name.replace("-", "_")
 
-class NetLogoPlantUMLMessirCorrectorAgent(LlmAgent):
+class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
     model: str = DEFAULT_MODEL
     timestamp: str = ""
     name: str = "NetLogo PlantUML Corrector"
@@ -57,7 +55,7 @@ class NetLogoPlantUMLMessirCorrectorAgent(LlmAgent):
         sanitized_name = sanitize_model_name(model_name)
         super().__init__(
             name=f"netlogo_plantuml_corrector_agent_{sanitized_name}",
-            description="PlantUML corrector agent for fixing Messir UCI compliance issues"
+            description="PlantUML corrector agent for fixing LUCIM UCI compliance issues"
         )
         self.model = model_name
         
@@ -133,14 +131,14 @@ class NetLogoPlantUMLMessirCorrectorAgent(LlmAgent):
             return estimated_tokens
         
     def correct_plantuml_diagrams(self, plantuml_diagrams: Dict[str, Any],
-                                 non_compliant_rules: List[str], messir_dsl_content: str = None, filename: str = "input") -> Dict[str, Any]:
+                                 non_compliant_rules: List[str], lucim_dsl_content: str = None, filename: str = "input") -> Dict[str, Any]:
         """
         Correct PlantUML sequence diagrams based on non-compliant rules using the PlantUML Corrector persona.
         
         Args:
             plantuml_diagrams: PlantUML diagrams to correct
             non_compliant_rules: List of non-compliant rules to fix
-            messir_dsl_content: MUCIM DSL full definition content (MANDATORY)
+            lucim_dsl_content: LUCIM DSL full definition content (MANDATORY)
             filename: Optional filename for reference
             
         Returns:
@@ -168,11 +166,11 @@ class NetLogoPlantUMLMessirCorrectorAgent(LlmAgent):
                 "output_tokens": 0
             }
         
-        if messir_dsl_content is None or messir_dsl_content.strip() == "":
+        if lucim_dsl_content is None or lucim_dsl_content.strip() == "":
             return {
-                "reasoning_summary": "MISSING MANDATORY INPUT: MUCIM DSL content is required",
+                "reasoning_summary": "MISSING MANDATORY INPUT: LUCIM DSL content is required",
                 "data": None,
-                "errors": ["MANDATORY INPUT MISSING: MUCIM DSL content must be provided"],
+                "errors": ["MANDATORY INPUT MISSING: LUCIM DSL content must be provided"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
@@ -194,9 +192,9 @@ Non-compliant Rules to Fix:
 {json.dumps(non_compliant_rules, indent=2)}
 ```
 
-MUCIM DSL Full Definition:
+LUCIM DSL Full Definition:
 ```
-{messir_dsl_content}
+{lucim_dsl_content}
 ```
 """
         

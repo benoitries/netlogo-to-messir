@@ -4,26 +4,26 @@ Messir is a scientific methodology covering the requirements, design, test and v
 
 ## Messir Use-Case Instance Concepts
 
-### **Messir Use-Case Instance Model (MUCIM)**
-A structured model representing a single use-case scenario in Messir. It defines the interaction between the system and actors through input and output events, enriched with parameters and visualized using sequence diagrams. MUCIM serves as the core modeling unit for compliance, simulation, and documentation.
+### **Messir Use-Case Instance Model (LUCIM)**
+A structured model representing a single use-case scenario in Messir. It defines the interaction between the system and actors through input and output events, enriched with parameters and visualized using sequence diagrams. LUCIM serves as the core modeling unit for compliance, simulation, and documentation.
 
 ### **System (SYS)**
-The central entity in the model that represents the software or organizational system. It is unique in each diagram and serves as the sender or receiver of events. It cannot activate itself or send messages to itself. In MUCIM, the System is the core reactive component.
+The central entity in the model that represents the software or organizational system. It is unique in each diagram and serves as the sender or receiver of events. It cannot activate itself or send messages to itself. In LUCIM, the System is the core reactive component.
 
 ### **Actors (ACT)**
-External entities that interact with the system. Each actor represents a role or persona from the domain and can initiate or receive events. Actors cannot communicate directly with each other. In MUCIM, actors are modeled as participants with domain-specific roles.
+External entities that interact with the system. Each actor represents a role or persona from the domain and can initiate or receive events. Actors cannot communicate directly with each other. In LUCIM, actors are modeled as participants with domain-specific roles.
 
 ### **Input Events (IE)**
-Events sent **from the system to an actor**. They represent system-initiated events. Input events are prefixed with `ie` and use dashed arrows in the diagram. In MUCIM, input events reflect the system's responses or triggers toward actors.
+Events sent **from the system to an actor**. They represent system-initiated events. Input events are prefixed with `ie` and use dashed arrows in the diagram. In LUCIM, input events reflect the system's responses or triggers toward actors.
 
 ### **Output Events (OE)**
-Events sent **from an actor to the system**. They represent actor-initiated events. Output events are prefixed with `oe` and use solid arrows in the diagram. In MUCIM, output events represent external stimuli or commands directed at the system.
+Events sent **from an actor to the system**. They represent actor-initiated events. Output events are prefixed with `oe` and use solid arrows in the diagram. In LUCIM, output events represent external stimuli or commands directed at the system.
 
 ### **Event Parameters (EP)**
-Data attached to events that describe the context, content, or intent of the interaction. Parameters must be realistic, domain-specific, and formatted for clarity. They can include identifiers, textual content, or structured values. In MUCIM, parameters enrich event semantics and support traceability.
+Data attached to events that describe the context, content, or intent of the interaction. Parameters must be realistic, domain-specific, and formatted for clarity. They can include identifiers, textual content, or structured values. In LUCIM, parameters enrich event semantics and support traceability.
 
 ### **Activation Bars (AB)**
-Visual indicators of a participant's active period during an event. They are placed only on actors (never on the system) and follow strict ordering and color conventions based on the event type. In MUCIM, activation bars help visualize temporal engagement of actors.
+Visual indicators of a participant's active period during an event. They are placed only on actors (never on the system) and follow strict ordering and color conventions based on the event type. In LUCIM, activation bars help visualize temporal engagement of actors.
 
 
 ## Well-Formedness Rules (WFR)
@@ -79,11 +79,11 @@ Activation bars must never overlap. following sequence is forbidden : an event, 
 
 ### **Concrete Syntax (CS)**
 
-**CS_MUCIM**
-CS_MUCIM_REPRESENTATION.
+**CS_LUCIM**
+CS_LUCIM_REPRESENTATION.
 A Messir use case instance **must be represented as a UML Sequence Diagram** using strictly plantUML textual syntax.
 
-CS_MUCIM_ALLOW_BLANK_LINES.
+CS_LUCIM_ALLOW_BLANK_LINES.
 In plantUML diagrams, blank lines are allowed and must safely be ignored.
 
 **CS_SYS**

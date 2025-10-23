@@ -85,10 +85,10 @@ class OrchestratorLogger:
             results: The results dictionary
         """
         # Determine success status for each step
-        syntax_parser_success = results.get("ast", {}).get("data") is not None
-        semantics_parser_success = results.get("semantics", {}).get("data") is not None
-        messir_success = results.get("messir_mapper", {}).get("data") is not None
-        scenario_success = results.get("scenario_writer", {}).get("data") is not None
+        netlogo_abstract_syntax_extractor_success = results.get("ast", {}).get("data") is not None
+        behavior_extractor_success = results.get("semantics", {}).get("data") is not None
+        lucim_environment_success = results.get("lucim_environment_synthesizer", {}).get("data") is not None
+        lucim_scenario_synthesizer_success = results.get("lucim_scenario_synthesizer", {}).get("data") is not None
         plantuml_writer_success = results.get("plantuml_writer", {}).get("data") is not None
         plantuml_messir_auditor_success = results.get("plantuml_messir_auditor", {}).get("data") is not None
         plantuml_messir_corrector_success = results.get("plantuml_messir_corrector", {}).get("data") is not None
@@ -99,10 +99,10 @@ class OrchestratorLogger:
         plantuml_messir_final_auditor_executed = "plantuml_messir_final_auditor" in results
         
         self.logger.info(f"{base_name} results:")
-        self.logger.info(f"  Step 1 - Syntax Parser: {'✓' if syntax_parser_success else '✗'}")
-        self.logger.info(f"  Step 2 - Semantics Parser: {'✓' if semantics_parser_success else '✗'}")
-        self.logger.info(f"  Step 3 - Messir Mapper: {'✓' if messir_success else '✗'}")
-        self.logger.info(f"  Step 4 - Scenario Writer: {'✓' if scenario_success else '✗'}")
+        self.logger.info(f"  Step 1 - Syntax Parser: {'✓' if netlogo_abstract_syntax_extractor_success else '✗'}")
+        self.logger.info(f"  Step 2 - Behavior Extractor: {'✓' if behavior_extractor_success else '✗'}")
+        self.logger.info(f"  Step 3 - LUCIM Environment Synthesizer: {'✓' if lucim_environment_success else '✗'}")
+        self.logger.info(f"  Step 4 - LUCIM Scenario Synthesizer: {'✓' if lucim_scenario_synthesizer_success else '✗'}")
         self.logger.info(f"  Step 5 - PlantUML Writer: {'✓' if plantuml_writer_success else '✗'}")
         self.logger.info(f"  Step 6 - PlantUML Messir Auditor: {'✓' if plantuml_messir_auditor_success else '✗'}")
         
@@ -152,10 +152,10 @@ class OrchestratorLogger:
         self.logger.info(f"\n🔍 DETAILED AGENT STATUS:")
         
         # Determine status for each agent
-        syntax_parser_success = results.get("ast", {}).get("data") is not None
-        semantics_parser_success = results.get("semantics", {}).get("data") is not None
-        messir_success = results.get("messir_mapper", {}).get("data") is not None
-        scenario_success = results.get("scenario_writer", {}).get("data") is not None
+        netlogo_abstract_syntax_extractor_success = results.get("ast", {}).get("data") is not None
+        behavior_extractor_success = results.get("semantics", {}).get("data") is not None
+        lucim_environment_success = results.get("lucim_environment_synthesizer", {}).get("data") is not None
+        lucim_scenario_synthesizer_success = results.get("lucim_scenario_synthesizer", {}).get("data") is not None
         plantuml_writer_success = results.get("plantuml_writer", {}).get("data") is not None
         plantuml_messir_auditor_success = results.get("plantuml_messir_auditor", {}).get("data") is not None
         plantuml_messir_corrector_success = results.get("plantuml_messir_corrector", {}).get("data") is not None
@@ -165,10 +165,10 @@ class OrchestratorLogger:
         plantuml_messir_corrector_executed = "plantuml_messir_corrector" in results
         plantuml_messir_final_auditor_executed = "plantuml_messir_final_auditor" in results
         
-        self.logger.info(f"   Step 1 - Syntax Parser Agent: {'✓ SUCCESS' if syntax_parser_success else '✗ FAILED'}")
-        self.logger.info(f"   Step 2 - Semantics Parser Agent: {'✓ SUCCESS' if semantics_parser_success else '✗ FAILED'}")
-        self.logger.info(f"   Step 3 - Messir Mapper Agent: {'✓ SUCCESS' if messir_success else '✗ FAILED'}")
-        self.logger.info(f"   Step 4 - Scenario Writer Agent: {'✓ SUCCESS' if scenario_success else '✗ FAILED'}")
+        self.logger.info(f"   Step 1 - Syntax Parser Agent: {'✓ SUCCESS' if netlogo_abstract_syntax_extractor_success else '✗ FAILED'}")
+        self.logger.info(f"   Step 2 - Behavior Extractor Agent: {'✓ SUCCESS' if behavior_extractor_success else '✗ FAILED'}")
+        self.logger.info(f"   Step 3 - LUCIM Environment Synthesizer Agent: {'✓ SUCCESS' if lucim_environment_success else '✗ FAILED'}")
+        self.logger.info(f"   Step 4 - LUCIM Scenario Synthesizer Agent: {'✓ SUCCESS' if lucim_scenario_synthesizer_success else '✗ FAILED'}")
         self.logger.info(f"   Step 5 - PlantUML Writer Agent: {'✓ SUCCESS' if plantuml_writer_success else '✗ FAILED'}")
         self.logger.info(f"   Step 6 - PlantUML Messir Auditor Agent: {'✓ SUCCESS' if plantuml_messir_auditor_success else '✗ FAILED'}")
         
@@ -189,13 +189,13 @@ class OrchestratorLogger:
         for result_key, result_data in results.items():
             if result_data and isinstance(result_data, dict):
                 agent_type = result_data.get("agent_type", "unknown")
-                if agent_type == "syntax_parser":
-                    self.logger.info(f"   • Syntax Parser: {base_name}_{timestamp}_{model}_1a_syntax_parser_v1_*.md")
-                elif agent_type == "semantics_parser":
-                    self.logger.info(f"   • Semantics Parser: {base_name}_{timestamp}_{model}_1b_semantics_parser_v1_*.json/md")
-                elif agent_type == "messir_mapper":
-                    self.logger.info(f"   • Messir Mapper: {base_name}_{timestamp}_{model}_2_messir_v1_*.json/md")
-                elif agent_type == "scenario_writer":
+                if agent_type == "netlogo_abstract_syntax_extractor":
+                    self.logger.info(f"   • Syntax Parser: {base_name}_{timestamp}_{model}_1a_netlogo_abstract_syntax_extractor_v1_*.md")
+                elif agent_type == "behavior_extractor":
+                    self.logger.info(f"   • Behavior Extractor: {base_name}_{timestamp}_{model}_1b_behavior_extractor_v1_*.json/md")
+                elif agent_type == "lucim_environment_synthesizer":
+                    self.logger.info(f"   • LUCIM Environment Synthesizer: {base_name}_{timestamp}_{model}_2_lucim_environment_v1_*.json/md")
+                elif agent_type == "lucim_scenario_synthesizer":
                     self.logger.info(f"   • Scenarios: {base_name}_{timestamp}_{model}_3_scenario_v1_*.md")
                 elif agent_type == "plantuml_writer":
                     self.logger.info(f"   • PlantUML Diagrams: {base_name}_{timestamp}_{model}_4_plantuml_*.json/md/.puml")
@@ -227,7 +227,7 @@ class OrchestratorLogger:
             self.logger.info(f"   🎯 Result: Final audit confirms Messir compliance")
         elif final_compliance["status"] == "NON-COMPLIANT":
             self.logger.info(f"   ❌ FINAL COMPLIANCE: NON-COMPLIANT")
-            self.logger.info(f"   📊 Result: One or more MESSIR rules were violated")
+            self.logger.info(f"   📊 Result: One or more LUCIM rules were violated")
         else:
             self.logger.info(f"   ❓ COMPLIANCE STATUS: UNKNOWN")
             self.logger.info(f"   ⚠️  Result: No authoritative compliance verdict available")

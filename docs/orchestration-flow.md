@@ -7,7 +7,7 @@ This document provides a precise, concise description of the end-to-end orchestr
 The system implements an 8-stage pipeline with parallel execution for stages 01-02, followed by sequential processing from stage 03 onwards.
 
 **Execution Order:**
-1. **Stages 01-02**: Parallel execution (Syntax Parser + Semantics Parser)
+1. **Stages 01-02**: Parallel execution (Syntax Parser + Behavior Extractor)
 2. **Stages 03-08**: Sequential execution with conditional branches
 
 **Output Structure:**
@@ -17,13 +17,13 @@ code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mod
 
 ## Per-Agent I/O and Conditions
 
-### 01 — Syntax Parser (`agent_1_syntax_parser.py`)
+### 01 — NetLogo Abstract Syntax Extractor (`agent_1_netlogo_abstract_syntax_extractor.py`)
 
 **Inputs:**
 - NetLogo code content (string from `input-netlogo/<case>-netlogo-code.md`)
 - IL-SYN mapping file: `input-persona/<PERSONA_SET>/DSL_IL_SYN-mapping.md`
 - IL-SYN description file: `input-persona/<PERSONA_SET>/DSL_IL_SYN-description.md`
-- Persona instructions: `input-persona/<PERSONA_SET>/PSN_1_NetLogoSyntaxParser.md`
+- Persona instructions: `input-persona/<PERSONA_SET>/PSN_1_NetLogoAbstractSyntaxExtractor.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
@@ -34,15 +34,15 @@ code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mod
 
 **Conditions:**
 - If IL-SYN reference files are missing: warning logged, processing continues with reduced context
-- Always executes in parallel with Semantics Parser (stage 02)
+- Always executes in parallel with Behavior Extractor (stage 02)
 
-### 02 — Semantics Parser (`agent_2_semantics_parser.py`)
+### 02 — Behavior Extractor (`agent_2_netlogo_behavior_extractor.py`)
 
 **Inputs:**
 - IL-SEM mapping file: `input-persona/<PERSONA_SET>/DSL_IL_SEM-mapping.md`
 - IL-SEM description file: `input-persona/<PERSONA_SET>/DSL_IL_SEM-description.md`
 - UI interface images: `input-netlogo/<case>-netlogo-interface-1.png`, `input-netlogo/<case>-netlogo-interface-2.png`
-- Persona instructions: `input-persona/<PERSONA_SET>/PSN_2_NetlogoSemanticsParser.md`
+- Persona instructions: `input-persona/<PERSONA_SET>/PSN_2_NetlogoBehaviorExtractor.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
@@ -56,18 +56,18 @@ code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mod
 - Always executes in parallel with Syntax Parser (stage 01)
 - If UI images are missing: processing continues with reduced context
 
-### 03 — Messir Concepts Mapper (`agent_3_messir_concepts_mapper.py`)
+### 03 — LUCIM Environment Synthesizer (`agent_3_lucim_environment_synthesizer.py`)
 
 **Inputs:**
-- State machine from Stage 02: `../02-semantics_parser/output-data.json`
-- Messir/UCI rules: `input-persona/<PERSONA_SET>/DSL_Target_MUCIM-full-definition-for-compliance.md`
+- State machine from Stage 02: `../02-behavior_extractor/output-data.json`
+- Messir/UCI rules: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
 - Optional iCrash references: `input-icrash/*.pdf`
-- Persona instructions: `input-persona/<PERSONA_SET>/PSN_3_MessirUCIConceptsMapper.md`
+- Persona instructions: `input-persona/<PERSONA_SET>/PSN_3_LUCIMEnvironmentSynthesizer.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
 - `output-reasoning.md` (reasoning trace)
-- `output-data.json` (Messir concepts)
+- `output-data.json` (LUCIM environment concepts)
 - `output-raw_response.json` (raw API response)
 - `input-instructions.md` (processed instructions)
 
@@ -75,14 +75,14 @@ code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mod
 - Executes sequentially after stages 01-02 completion
 - If iCrash references are missing: processing continues without them
 
-### 04 — Scenario Writer (`agent_4_scenario_writer.py`)
+### 04 — LUCIM Scenario Synthesizer (`agent_4_lucim_scenario_synthesizer.py`)
 
 **Inputs:**
-- State machine from Stage 02: `../02-semantics_parser/output-data.json`
-- Messir concepts from Stage 03: `../03-messir_mapper/output-data.json`
-- MUCIM DSL definition: `input-persona/<PERSONA_SET>/DSL_Target_MUCIM-full-definition-for-compliance.md`
+- State machine from Stage 02: `../02-behavior_extractor/output-data.json`
+- LUCIM environment from Stage 03: `../03-lucim_environment_synthesizer/output-data.json`
+- LUCIM DSL definition: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
 - iCrash references: `input-icrash/*.pdf` (MANDATORY)
-- Persona instructions: `input-persona/<PERSONA_SET>/PSN_4_MessirUCIScenarioWriter.md`
+- Persona instructions: `input-persona/<PERSONA_SET>/PSN_4_LUCIMScenarioSynthesizer.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
@@ -98,8 +98,8 @@ code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mod
 ### 05 — PlantUML Writer (`agent_5_plantuml_writer.py`)
 
 **Inputs:**
-- Scenarios from Stage 04: `../04-scenario_writer/output-data.json`
-- Messir/UCI rules: `input-persona/<PERSONA_SET>/DSL_Target_MUCIM-full-definition-for-compliance.md`
+- Scenarios from Stage 04: `../04-lucim_scenario_synthesizer/output-data.json`
+- Messir/UCI rules: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
 - Persona instructions: `input-persona/<PERSONA_SET>/PSN_5_PlantUMLWriter.md`
 
 **Outputs:**
@@ -118,7 +118,7 @@ code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mod
 
 **Inputs:**
 - Standalone PlantUML file from Stage 05: `../05-plantuml_writer/diagram.puml` (MANDATORY)
-- MUCIM DSL definition: `input-persona/<PERSONA_SET>/DSL_Target_MUCIM-full-definition-for-compliance.md` (MANDATORY)
+- LUCIM DSL definition: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md` (MANDATORY)
 - Persona instructions: `input-persona/<PERSONA_SET>/PSN_6_PlantUMLMessirAuditor.md`
 
 **Outputs:**
@@ -138,7 +138,7 @@ code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mod
 **Inputs:**
 - PlantUML diagrams from Stage 05: `../05-plantuml_writer/output-data.json` and/or `../05-plantuml_writer/diagram.puml`
 - Non-compliant rules from Stage 06: `../06-plantuml_messir_auditor/output-data.json` (MANDATORY)
-- MUCIM DSL definition: `input-persona/<PERSONA_SET>/DSL_Target_MUCIM-full-definition-for-compliance.md` (MANDATORY)
+- LUCIM DSL definition: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md` (MANDATORY)
 - Persona instructions: `input-persona/<PERSONA_SET>/PSN_7_PlantUMLMessirCorrector.md`
 
 **Outputs:**
@@ -158,8 +158,8 @@ code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mod
 
 **Inputs:**
 - Corrected diagrams from Stage 07: `../07-plantuml_messir_corrector/output-data.json` and/or corrected `.puml` file
-- Scenarios from Stage 04: `../04-scenario_writer/output-data.json` (MANDATORY)
-- MUCIM DSL definition: `input-persona/<PERSONA_SET>/DSL_Target_MUCIM-full-definition-for-compliance.md` (MANDATORY)
+- Scenarios from Stage 04: `../04-lucim_scenario_synthesizer/output-data.json` (MANDATORY)
+- LUCIM DSL definition: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md` (MANDATORY)
 - Persona instructions: `input-persona/<PERSONA_SET>/PSN_6_PlantUMLMessirAuditor.md`
 
 **Outputs:**

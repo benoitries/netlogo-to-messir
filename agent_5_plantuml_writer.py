@@ -11,9 +11,8 @@ import pathlib
 import tiktoken
 from typing import Dict, Any
 from utils_config_constants import (
-    PERSONA_PLANTUML_WRITER, OUTPUT_DIR, MESSIR_RULES_FILE,
-    AGENT_VERSION_PLANTUML_WRITER, get_reasoning_config,
-    validate_agent_response, DEFAULT_MODEL)
+    PERSONA_PLANTUML_WRITER, OUTPUT_DIR, LUCIM_RULES_FILE,
+    get_reasoning_config, validate_agent_response, DEFAULT_MODEL)
 
 from google.adk.agents import LlmAgent
 from openai import OpenAI
@@ -34,16 +33,15 @@ WRITE_FILES = True
 
 # Load persona and Messir rules
 persona = PERSONA_FILE.read_text(encoding="utf-8")
-messir_rules = ""
+lucim_rules = ""
 try:
-    messir_rules = MESSIR_RULES_FILE.read_text(encoding="utf-8")
+    lucim_rules = LUCIM_RULES_FILE.read_text(encoding="utf-8")
 except FileNotFoundError:
-    raise SystemExit(f"ERROR: Compliance rules file not found: {MESSIR_RULES_FILE}")
+    raise SystemExit(f"ERROR: Compliance rules file not found: {LUCIM_RULES_FILE}")
 
 # Concatenate persona and rules
-combined_persona = f"{persona}\n\n{messir_rules}"
+combined_persona = f"{persona}\n\n{lucim_rules}"
 
-AGENT_VERSION = AGENT_VERSION_PLANTUML_WRITER
 
 def sanitize_model_name(model_name: str) -> str:
     """Sanitize model name by replacing hyphens with underscores for valid identifier."""

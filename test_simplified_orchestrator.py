@@ -18,8 +18,8 @@ async def test_simplified_orchestrator():
     base_name = "3d-solids"  # Use a known case
     
     try:
-        # Create orchestrator
-        orchestrator = NetLogoOrchestratorSimplified(model_name="gpt-5-mini")
+        # Create orchestrator with persona set to avoid interactive prompt
+        orchestrator = NetLogoOrchestratorSimplified(model_name="gpt-5-mini", persona_set="persona-v1")
         
         # Configure for low effort to speed up testing
         orchestrator.update_reasoning_config("low", "auto")

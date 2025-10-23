@@ -13,19 +13,19 @@ import time
 import logging
 from typing import Dict, Any, List
 
-from agent_1_syntax_parser import NetLogoSyntaxParserAgent
-from agent_2_semantics_parser import NetLogoSemanticsParserAgent
-from agent_3_messir_concepts_mapper import NetLogoMessirMapperAgent
-from agent_4_scenario_writer import NetLogoScenarioWriterAgent
+from agent_1_netlogo_abstract_syntax_extractor import NetLogoAbstractSyntaxExtractorAgent
+from agent_2_netlogo_behavior_extractor import NetLogoBehaviorExtractorAgent
+from agent_3_lucim_environment_synthesizer import NetLogoLucimEnvironmentSynthesizerAgent
+from agent_4_lucim_scenario_synthesizer import NetLogoLUCIMScenarioSynthesizerAgent
 from agent_5_plantuml_writer import NetLogoPlantUMLWriterAgent
-from agent_6_plantuml_auditor import NetLogoPlantUMLMessirAuditorAgent
+from agent_6_plantuml_auditor import NetLogoPlantUMLLUCIMAuditorAgent
 from utils_format import FormatUtils
-from agent_7_plantuml_corrector import NetLogoPlantUMLMessirCorrectorAgent
+from agent_7_plantuml_corrector import NetLogoPlantUMLLUCIMCorrectorAgent
 
 from utils_config_constants import (
-    INPUT_NETLOGO_DIR, INPUT_ICRASH_DIR, OUTPUT_DIR, INPUT_PERSONA_DIR,
+    INPUT_NETLOGO_DIR, OUTPUT_DIR, INPUT_PERSONA_DIR,
     AGENT_CONFIGS, AVAILABLE_MODELS, DEFAULT_MODEL, ensure_directories,
-    validate_agent_response, MESSIR_RULES_FILE
+    validate_agent_response, LUCIM_RULES_FILE
 )
 from utils_logging import setup_orchestration_logger, format_parameter_bundle, attach_stdio_to_logger
 from utils_path import get_run_base_dir
@@ -36,7 +36,7 @@ from utils_config_constants import OUTPUT_DIR
 ensure_directories()
 
 class NetLogoOrchestrator:
-    """Orchestrator for processing NetLogo files using Syntax and Semantics agents in parallel."""
+    """Orchestrator for processing NetLogo files using NetLogo Abstract Syntax Extractor and Semantics agents in parallel."""
     
     def __init__(self, model_name: str = DEFAULT_MODEL):
         """
@@ -56,38 +56,38 @@ class NetLogoOrchestrator:
         # Timing tracking
         self.execution_times = {
             "total_orchestration": 0,
-            "syntax_parser": 0,
-            "semantics_parser": 0,
-            "messir_mapper": 0,
-            "scenario_writer": 0,
+            "netlogo_abstract_syntax_extractor": 0,
+            "behavior_extractor": 0,
+            "lucim_environment_synthesizer": 0,
+            "lucim_scenario_synthesizer": 0,
             "plantuml_writer": 0,
-            "plantuml_messir_auditor": 0,
-            "plantuml_messir_corrector": 0,
-            "plantuml_messir_final_auditor": 0
+            "plantuml_lucim_auditor": 0,
+            "plantuml_lucim_corrector": 0,
+            "plantuml_lucim_final_auditor": 0
         }
         
         # Token usage tracking (no caps)
         self.token_usage = {
-            "syntax_parser": {"used": 0},
-            "semantics_parser": {"used": 0},
-            "messir_mapper": {"used": 0},
-            "scenario_writer": {"used": 0},
+            "netlogo_abstract_syntax_extractor": {"used": 0},
+            "behavior_extractor": {"used": 0},
+            "lucim_environment_synthesizer": {"used": 0},
+            "lucim_scenario_synthesizer": {"used": 0},
             "plantuml_writer": {"used": 0},
-            "plantuml_messir_auditor": {"used": 0},
-            "plantuml_messir_corrector": {"used": 0},
-            "plantuml_messir_final_auditor": {"used": 0}
+            "plantuml_lucim_auditor": {"used": 0},
+            "plantuml_lucim_corrector": {"used": 0},
+            "plantuml_lucim_final_auditor": {"used": 0}
         }
         
         # Detailed timing tracking with start/end timestamps
         self.detailed_timing = {
-            "syntax_parser": {"start": 0, "end": 0, "duration": 0},
-            "semantics_parser": {"start": 0, "end": 0, "duration": 0},
-            "messir_mapper": {"start": 0, "end": 0, "duration": 0},
-            "scenario_writer": {"start": 0, "end": 0, "duration": 0},
+            "netlogo_abstract_syntax_extractor": {"start": 0, "end": 0, "duration": 0},
+            "behavior_extractor": {"start": 0, "end": 0, "duration": 0},
+            "lucim_environment_synthesizer": {"start": 0, "end": 0, "duration": 0},
+            "lucim_scenario_synthesizer": {"start": 0, "end": 0, "duration": 0},
             "plantuml_writer": {"start": 0, "end": 0, "duration": 0},
-            "plantuml_messir_auditor": {"start": 0, "end": 0, "duration": 0},
-            "plantuml_messir_corrector": {"start": 0, "end": 0, "duration": 0},
-            "plantuml_messir_final_auditor": {"start": 0, "end": 0, "duration": 0}
+            "plantuml_lucim_auditor": {"start": 0, "end": 0, "duration": 0},
+            "plantuml_lucim_corrector": {"start": 0, "end": 0, "duration": 0},
+            "plantuml_lucim_final_auditor": {"start": 0, "end": 0, "duration": 0}
         }
         
         # Token caps removed entirely
@@ -97,33 +97,33 @@ class NetLogoOrchestrator:
         self.agent_configs = AGENT_CONFIGS.copy()
         
         # Initialize agents (no max token caps)
-        self.syntax_parser_agent = NetLogoSyntaxParserAgent(model_name, self.timestamp)
+        self.netlogo_abstract_syntax_extractor_agent = NetLogoAbstractSyntaxExtractorAgent(model_name, self.timestamp)
         # Pass IL-SYN file absolute paths to syntax parser agent (can be overridden externally)
         try:
             base_dir = pathlib.Path(__file__).resolve().parent
             ilsyn_mapping_path = (base_dir / "input-persona" / "DSL_IL_SYN-mapping.md").resolve()
             ilsyn_description_path = (base_dir / "input-persona" / "DSL_IL_SYN-description.md").resolve()
-            if hasattr(self.syntax_parser_agent, "update_il_syn_inputs"):
-                self.syntax_parser_agent.update_il_syn_inputs(str(ilsyn_mapping_path), str(ilsyn_description_path))
+            if hasattr(self.netlogo_abstract_syntax_extractor_agent, "update_il_syn_inputs"):
+                self.netlogo_abstract_syntax_extractor_agent.update_il_syn_inputs(str(ilsyn_mapping_path), str(ilsyn_description_path))
             else:
                 # Backward compatibility: set attributes directly if method unavailable
-                self.syntax_parser_agent.il_syn_mapping_path = str(ilsyn_mapping_path)
-                self.syntax_parser_agent.il_syn_description_path = str(ilsyn_description_path)
-            print("OK: Configured IL-SYN reference paths for syntax parser")
+                self.netlogo_abstract_syntax_extractor_agent.il_syn_mapping_path = str(ilsyn_mapping_path)
+                self.netlogo_abstract_syntax_extractor_agent.il_syn_description_path = str(ilsyn_description_path)
+            print("OK: Configured IL-SYN reference paths for NetLogo Abstract Syntax Extractor")
         except Exception as e:
-            print(f"[WARNING] Unable to set IL-SYN paths for syntax parser: {e}")
-        self.semantics_parser_agent = NetLogoSemanticsParserAgent(model_name, self.timestamp)
+            print(f"[WARNING] Unable to set IL-SYN paths for NetLogo Abstract Syntax Extractor: {e}")
+        self.behavior_extractor_agent = NetLogoBehaviorExtractorAgent(model_name, self.timestamp)
         # Configure IL-SEM inputs for semantics agent (absolute paths)
         il_sem_mapping = INPUT_PERSONA_DIR / "DSL_IL_SEM-mapping.md"
         il_sem_description = INPUT_PERSONA_DIR / "DSL_IL_SEM-description.md"
-        if hasattr(self.semantics_parser_agent, "update_il_sem_inputs"):
-            self.semantics_parser_agent.update_il_sem_inputs(str(il_sem_mapping), str(il_sem_description))
-        self.messir_mapper_agent = NetLogoMessirMapperAgent(model_name, self.timestamp)
-        self.scenario_writer_agent = NetLogoScenarioWriterAgent(model_name, self.timestamp)
+        if hasattr(self.behavior_extractor_agent, "update_il_sem_inputs"):
+            self.behavior_extractor_agent.update_il_sem_inputs(str(il_sem_mapping), str(il_sem_description))
+        self.lucim_environment_synthesizer_agent = NetLogoLucimEnvironmentSynthesizerAgent(model_name, self.timestamp)
+        self.lucim_scenario_synthesizer_agent = NetLogoLUCIMScenarioSynthesizerAgent(model_name, self.timestamp)
         self.plantuml_writer_agent = NetLogoPlantUMLWriterAgent(model_name, self.timestamp)
-        self.plantuml_messir_auditor_agent = NetLogoPlantUMLMessirAuditorAgent(model_name, self.timestamp)
-        self.plantuml_messir_corrector_agent = NetLogoPlantUMLMessirCorrectorAgent(model_name, self.timestamp)
-        self.plantuml_messir_final_auditor_agent = NetLogoPlantUMLMessirAuditorAgent(model_name, self.timestamp)
+        self.plantuml_lucim_auditor_agent = NetLogoPlantUMLLUCIMAuditorAgent(model_name, self.timestamp)
+        self.plantuml_lucim_corrector_agent = NetLogoPlantUMLLUCIMCorrectorAgent(model_name, self.timestamp)
+        self.plantuml_lucim_final_auditor_agent = NetLogoPlantUMLLUCIMAuditorAgent(model_name, self.timestamp)
 
     def update_agent_configs(self, reasoning_effort: str = None, reasoning_summary: str = None, text_verbosity: str = None):
         """
@@ -145,14 +145,14 @@ class NetLogoOrchestrator:
 
         # List of (agent attr, text_support_flag)
         agent_list = [
-            ("syntax_parser_agent", True),
-            ("semantics_parser_agent", True),
-            ("messir_mapper_agent", True),
-            ("scenario_writer_agent", True),
+            ("netlogo_abstract_syntax_extractor_agent", True),
+            ("behavior_extractor_agent", True),
+            ("lucim_environment_synthesizer_agent", True),
+            ("lucim_scenario_synthesizer_agent", True),
             ("plantuml_writer_agent", True),
-            ("plantuml_messir_auditor_agent", True),
-            ("plantuml_messir_corrector_agent", True),
-            ("plantuml_messir_final_auditor_agent", True),
+            ("plantuml_lucim_auditor_agent", True),
+            ("plantuml_lucim_corrector_agent", True),
+            ("plantuml_lucim_final_auditor_agent", True),
         ]
 
         for agent_attr, supports_text in agent_list:
@@ -226,24 +226,6 @@ class NetLogoOrchestrator:
         
         return files
     
-    def find_icrash_files(self) -> List[pathlib.Path]:
-        """
-        Find icrash files in the input-icrash directory.
-        
-        Returns:
-            List of icrash file paths
-        """
-        icrash_files = []
-        
-        if INPUT_ICRASH_DIR.exists():
-            for icrash_file in INPUT_ICRASH_DIR.glob("*.pdf"):
-                icrash_files.append(icrash_file)
-        
-        if not icrash_files:
-            if self.logger:
-                self.logger.warning(f"Warning: No icrash files found in {INPUT_ICRASH_DIR}")
-        
-        return icrash_files
     
     def _execute_agent_with_tracking(self, agent_name: str, agent_func, *args, **kwargs):
         """
@@ -350,8 +332,8 @@ class NetLogoOrchestrator:
         
         # Define agent names first
         agent_names = [
-            "syntax_parser", "semantics_parser", "messir_mapper", "scenario_writer",
-            "plantuml_writer", "plantuml_messir_auditor", "plantuml_messir_corrector", "plantuml_messir_final_auditor"
+            "netlogo_abstract_syntax_extractor", "behavior_extractor", "lucim_environment_synthesizer", "lucim_scenario_synthesizer",
+            "plantuml_writer", "plantuml_lucim_auditor", "plantuml_lucim_corrector", "plantuml_lucim_final_auditor"
         ]
         
         # Calculate totals
@@ -361,14 +343,14 @@ class NetLogoOrchestrator:
         
         # Calculate input/output token totals from processed results
         agent_to_result_key = {
-            "syntax_parser": "ast",
-            "semantics_parser": "semantics",
-            "messir_mapper": "messir_mapper",
-            "scenario_writer": "scenario_writer",
+            "netlogo_abstract_syntax_extractor": "ast",
+            "behavior_extractor": "semantics",
+            "lucim_environment_synthesizer": "lucim_environment_synthesizer",
+            "lucim_scenario_synthesizer": "lucim_scenario_synthesizer",
             "plantuml_writer": "plantuml_writer",
-            "plantuml_messir_auditor": "plantuml_messir_auditor",
-            "plantuml_messir_corrector": "plantuml_messir_corrector",
-            "plantuml_messir_final_auditor": "plantuml_messir_final_auditor",
+            "plantuml_lucim_auditor": "plantuml_lucim_auditor",
+            "plantuml_lucim_corrector": "plantuml_lucim_corrector",
+            "plantuml_lucim_final_auditor": "plantuml_lucim_final_auditor",
         }
         total_input_tokens = 0
         total_output_tokens = 0
@@ -477,8 +459,8 @@ class NetLogoOrchestrator:
                 total_execution_time += inner_results.get("execution_times", {}).get("total_orchestration", 0)
                 # Sum input/output/reasoning tokens across agents for this orchestration
                 agent_keys = [
-                    "ast", "semantics", "messir_mapper", "scenario_writer",
-                    "plantuml_writer", "plantuml_messir_auditor", "plantuml_messir_corrector", "plantuml_messir_final_auditor"
+                    "ast", "semantics", "lucim_environment_synthesizer", "lucim_scenario_synthesizer",
+                    "plantuml_writer", "plantuml_lucim_auditor", "plantuml_lucim_corrector", "plantuml_lucim_final_auditor"
                 ]
                 for key in agent_keys:
                     if key in inner_results and isinstance(inner_results.get(key), dict):
@@ -503,8 +485,8 @@ class NetLogoOrchestrator:
                 total_time = inner_results.get("execution_times", {}).get("total_orchestration", 0)
                 total_tokens = sum(
                     inner_results.get("token_usage", {}).get(agent, {}).get("used", 0)
-                    for agent in ["syntax_parser", "semantics_parser", "messir_mapper", "scenario_writer", 
-                                 "plantuml_writer", "plantuml_messir_auditor", "plantuml_messir_corrector", "plantuml_messir_final_auditor"]
+                    for agent in ["netlogo_abstract_syntax_extractor", "behavior_extractor", "lucim_environment_synthesizer", "scenario_writer", 
+                                 "plantuml_writer", "plantuml_lucim_auditor", "plantuml_lucim_corrector", "plantuml_lucim_final_auditor"]
                 )
 
             # Calculate success rate based on inner agent results of this orchestration
@@ -514,8 +496,8 @@ class NetLogoOrchestrator:
                 inner_results = next(iter(result["results"].values()))
 
             agent_keys = [
-                "ast", "semantics", "messir_mapper", "scenario_writer",
-                "plantuml_writer", "plantuml_messir_auditor", "plantuml_messir_corrector", "plantuml_messir_final_auditor"
+                "ast", "semantics", "lucim_environment_synthesizer", "scenario_writer",
+                "plantuml_writer", "plantuml_lucim_auditor", "plantuml_lucim_corrector", "plantuml_lucim_final_auditor"
             ]
 
             successful_agents = 0
@@ -545,13 +527,13 @@ class NetLogoOrchestrator:
             if isinstance(inner_results, dict):
                 total_tokens_used += sum(
                     inner_results.get("token_usage", {}).get(agent, {}).get("used", 0)
-                    for agent in ["syntax_parser", "semantics_parser", "messir_mapper", "scenario_writer", 
-                                 "plantuml_writer", "plantuml_messir_auditor", "plantuml_messir_corrector", "plantuml_messir_final_auditor"]
+                    for agent in ["netlogo_abstract_syntax_extractor", "behavior_extractor", "lucim_environment_synthesizer", "scenario_writer", 
+                                 "plantuml_writer", "plantuml_lucim_auditor", "plantuml_lucim_corrector", "plantuml_lucim_final_auditor"]
                 )
                 # Sum reasoning tokens across agents if present
                 agent_keys = [
-                    "ast", "semantics", "messir_mapper", "scenario_writer",
-                    "plantuml_writer", "plantuml_messir_auditor", "plantuml_messir_corrector", "plantuml_messir_final_auditor"
+                    "ast", "semantics", "lucim_environment_synthesizer", "lucim_scenario_synthesizer",
+                    "plantuml_writer", "plantuml_lucim_auditor", "plantuml_lucim_corrector", "plantuml_lucim_final_auditor"
                 ]
                 for key in agent_keys:
                     if key in inner_results and isinstance(inner_results.get(key), dict):
@@ -592,22 +574,22 @@ class NetLogoOrchestrator:
         tv = None
         reff = None
         try:
-            if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
-                tv = self.agent_configs["syntax_parser"].get("text_verbosity")
-                reff = self.agent_configs["syntax_parser"].get("reasoning_effort")
+            if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
+                tv = self.agent_configs["netlogo_abstract_syntax_extractor"].get("text_verbosity")
+                reff = self.agent_configs["netlogo_abstract_syntax_extractor"].get("reasoning_effort")
         except Exception:
             pass
         try:
             run_dir = get_run_base_dir(self.timestamp, base_name, model, reff or "medium", tv or "medium")
             step_to_agent = {
-                1: "syntax_parser",
-                2: "semantics_parser",
-                3: "messir_mapper",
-                4: "scenario_writer",
+                1: "netlogo_abstract_syntax_extractor",
+                2: "behavior_extractor",
+                3: "lucim_environment_synthesizer",
+                4: "lucim_scenario_synthesizer",
                 5: "plantuml_writer",
-                6: "plantuml_messir_auditor",
-                7: "plantuml_messir_corrector",
-                8: "plantuml_messir_final_auditor"
+                6: "plantuml_lucim_auditor",
+                7: "plantuml_lucim_corrector",
+                8: "plantuml_lucim_final_auditor"
             }
             agent_name = step_to_agent.get(step)
             if agent_name:
@@ -650,14 +632,14 @@ class NetLogoOrchestrator:
                     
                     # Map step number to agent name
                     step_to_agent = {
-                        1: "syntax_parser",
-                        2: "semantics_parser", 
-                        3: "messir_mapper",
-                        4: "scenario_writer",
+                        1: "netlogo_abstract_syntax_extractor",
+                        2: "behavior_extractor", 
+                        3: "lucim_environment_synthesizer",
+                        4: "lucim_scenario_synthesizer",
                         5: "plantuml_writer",
-                        6: "plantuml_messir_auditor",
-                        7: "plantuml_messir_corrector",
-                        8: "plantuml_messir_final_auditor"
+                        6: "plantuml_lucim_auditor",
+                        7: "plantuml_lucim_corrector",
+                        8: "plantuml_lucim_final_auditor"
                     }
                     
                     agent_name = step_to_agent.get(step)
@@ -680,7 +662,7 @@ class NetLogoOrchestrator:
             self.logger.warning(f"Warning: Could not load existing results for step {step}: {e}")
             return None
     
-    def _process_with_syntax_parser_agent(self, file_info: Dict[str, Any]) -> Dict[str, Any]:
+    def _process_with_netlogo_abstract_syntax_extractor_agent(self, file_info: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process a single NetLogo file using the Syntax Parser agent.
         
@@ -700,7 +682,7 @@ class NetLogoOrchestrator:
             code_content = code_file.read_text(encoding="utf-8")
         except Exception as e:
             return {
-                "agent_type": "syntax_parser",
+                "agent_type": "netlogo_abstract_syntax_extractor",
                 "reasoning_summary": f"Error reading code file: {e}",
                 "data": None,
                 "errors": [f"File reading error: {e}"]
@@ -709,32 +691,32 @@ class NetLogoOrchestrator:
         # Use the AST agent to parse the code
         # Prepare per-run/per-combination directory and step output dir before invoking agent
         step_str = f"{int(self.step_counter):02d}"
-        agent_id = "syntax_parser"
+        agent_id = "netlogo_abstract_syntax_extractor"
         tv = None
-        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
-            tv = self.agent_configs["syntax_parser"].get("text_verbosity")
+        if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
+            tv = self.agent_configs["netlogo_abstract_syntax_extractor"].get("text_verbosity")
         reff = None
-        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
-            reff = self.agent_configs["syntax_parser"].get("reasoning_effort")
+        if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
+            reff = self.agent_configs["netlogo_abstract_syntax_extractor"].get("reasoning_effort")
         run_dir = get_run_base_dir(self.timestamp, base_name, self.model, reff or "medium", tv or "medium")
         agent_output_dir = run_dir / f"{step_str}-{agent_id}"
         agent_output_dir.mkdir(parents=True, exist_ok=True)
-        result = self.syntax_parser_agent.parse_netlogo_code(
+        result = self.netlogo_abstract_syntax_extractor_agent.parse_netlogo_code(
             code_content,
             f"{base_name}-netlogo-code.md",
             output_dir=agent_output_dir
         )
         
         # Add agent type identifier
-        result["agent_type"] = "syntax_parser"
+        result["agent_type"] = "netlogo_abstract_syntax_extractor"
         
         # Save results using the AST agent's save method
-        self.syntax_parser_agent.save_results(result, base_name, self.model, self.step_counter, output_dir=agent_output_dir)
+        self.netlogo_abstract_syntax_extractor_agent.save_results(result, base_name, self.model, self.step_counter, output_dir=agent_output_dir)
         self.step_counter += 1
         
         return result
     
-    def _process_with_semantics_parser_agent(self, file_info: Dict[str, Any]) -> Dict[str, Any]:
+    def _process_with_behavior_extractor_agent(self, file_info: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process a single NetLogo file using the Semantics Parser agent.
         
@@ -751,29 +733,29 @@ class NetLogoOrchestrator:
         self.logger.info(f"Processing {base_name} with Semantics Parser agent...")
         
         # Use the Semantics agent with Stage 2 inputs only (no AST, no raw code)
-        result = self.semantics_parser_agent.parse_from_ilsem_and_ui(
+        result = self.behavior_extractor_agent.parse_from_ilsem_and_ui(
             interface_images,
             base_name
         )
         
         # Add agent type identifier
-        result["agent_type"] = "semantics_parser"
+        result["agent_type"] = "behavior_extractor"
         
         # Save results using the Semantics Parser agent's save method
         step_str = f"{int(self.step_counter):02d}"
-        agent_id = "semantics_parser"
+        agent_id = "behavior_extractor"
         # New per-run/per-combination directory using centralized path builder
         tv = None
-        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
-            tv = self.agent_configs["syntax_parser"].get("text_verbosity")
+        if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
+            tv = self.agent_configs["netlogo_abstract_syntax_extractor"].get("text_verbosity")
         reff = None
-        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
-            reff = self.agent_configs["syntax_parser"].get("reasoning_effort")
+        if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
+            reff = self.agent_configs["netlogo_abstract_syntax_extractor"].get("reasoning_effort")
         run_dir = get_run_base_dir(self.timestamp, base_name, self.model, reff or "medium", tv or "medium")
         agent_output_dir = run_dir / f"{step_str}-{agent_id}"
         agent_output_dir.mkdir(parents=True, exist_ok=True)
         # Validation must occur post-enrichment; save_results constructs the complete_response and validates internally
-        self.semantics_parser_agent.save_results(result, base_name, self.model, self.step_counter, output_dir=agent_output_dir)
+        self.behavior_extractor_agent.save_results(result, base_name, self.model, self.step_counter, output_dir=agent_output_dir)
         self.step_counter += 1
         
         return result
@@ -793,11 +775,11 @@ class NetLogoOrchestrator:
         # Prepare per-run/per-case directories
         # New structure: output/runs/<YYYY-MM-DD>/<HHMM>/<case>-<model>-reason-<effort>-verb-<verbosity>
         tv = None
-        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
-            tv = self.agent_configs["syntax_parser"].get("text_verbosity")
+        if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
+            tv = self.agent_configs["netlogo_abstract_syntax_extractor"].get("text_verbosity")
         reff = None
-        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
-            reff = self.agent_configs["syntax_parser"].get("reasoning_effort")
+        if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
+            reff = self.agent_configs["netlogo_abstract_syntax_extractor"].get("reasoning_effort")
         run_dir = get_run_base_dir(self.timestamp, base_name, self.model, reff or "medium", tv or "medium")
         run_dir.mkdir(parents=True, exist_ok=True)
         
@@ -846,10 +828,10 @@ class NetLogoOrchestrator:
             
             # Load Messir Mapper results (Step 3)
             if start_step > 3:
-                messir_result = self.load_existing_results(base_name, self.model, 3)
-                if messir_result:
-                    processed_results["messir_mapper"] = messir_result
-                    self.logger.info(f"✓ Loaded Messir Mapper results from step 3")
+                lucim_environment_result = self.load_existing_results(base_name, self.model, 3)
+                if lucim_environment_result:
+                    processed_results["lucim_environment_synthesizer"] = lucim_environment_result
+                    self.logger.info(f"✓ Loaded LUCIM Environment Synthesizer results from step 3")
                 else:
                     self.logger.warning(f"⚠️  No existing Messir Mapper results found for step 3")
             
@@ -857,10 +839,10 @@ class NetLogoOrchestrator:
             if start_step > 4:
                 scenario_result = self.load_existing_results(base_name, self.model, 4)
                 if scenario_result:
-                    processed_results["scenario_writer"] = scenario_result
-                    self.logger.info(f"✓ Loaded Scenario Writer results from step 4")
+                    processed_results["lucim_scenario_synthesizer"] = scenario_result
+                    self.logger.info(f"✓ Loaded LUCIM Scenario Synthesizer results from step 4")
                 else:
-                    self.logger.warning(f"⚠️  No existing Scenario Writer results found for step 4")
+                    self.logger.warning(f"⚠️  No existing LUCIM Scenario Synthesizer results found for step 4")
             
             # Load PlantUML Writer results (Step 5)
             if start_step > 5:
@@ -875,7 +857,7 @@ class NetLogoOrchestrator:
             if start_step > 6:
                 audit_result = self.load_existing_results(base_name, self.model, 6)
                 if audit_result:
-                    processed_results["plantuml_messir_auditor"] = audit_result
+                    processed_results["plantuml_lucim_auditor"] = audit_result
                     self.logger.info(f"✓ Loaded PlantUML Messir Auditor results from step 6")
                 else:
                     self.logger.warning(f"⚠️  No existing PlantUML Messir Auditor results found for step 6")
@@ -884,7 +866,7 @@ class NetLogoOrchestrator:
             if start_step > 7:
                 corrector_result = self.load_existing_results(base_name, self.model, 7)
                 if corrector_result:
-                    processed_results["plantuml_messir_corrector"] = corrector_result
+                    processed_results["plantuml_lucim_corrector"] = corrector_result
                     self.logger.info(f"✓ Loaded PlantUML Messir Corrector results from step 7")
                 else:
                     self.logger.warning(f"⚠️  No existing PlantUML Messir Corrector results found for step 7")
@@ -893,30 +875,30 @@ class NetLogoOrchestrator:
         
         # Step 1: Syntax Parser Agent
         if start_step <= 1:
-            self.logger.info(f"Step 1: Running Syntax Parser agent for {base_name}...")
+            self.logger.info(f"Step 1: Running NetLogo Abstract Syntax Extractor agent for {base_name}...")
             
             try:
-                syntax_parser_result = self._execute_agent_with_tracking(
-                    "syntax_parser",
-                    self.syntax_parser_agent.parse_netlogo_code,
+                netlogo_abstract_syntax_extractor_result = self._execute_agent_with_tracking(
+                    "netlogo_abstract_syntax_extractor",
+                    self.netlogo_abstract_syntax_extractor_agent.parse_netlogo_code,
                     code_content, 
                     f"{base_name}-netlogo-code.md"
                 )
                 
                 # Add agent type identifier
-                syntax_parser_result["agent_type"] = "syntax_parser"
+                netlogo_abstract_syntax_extractor_result["agent_type"] = "netlogo_abstract_syntax_extractor"
                 
-                # Save results using the Syntax Parser agent's save method
-                agent_output_dir = run_dir / "01-syntax_parser"
+                # Save results using the NetLogo Abstract Syntax Extractor agent's save method
+                agent_output_dir = run_dir / "01-netlogo_abstract_syntax_extractor"
                 agent_output_dir.mkdir(parents=True, exist_ok=True)
-                self.syntax_parser_agent.save_results(syntax_parser_result, base_name, self.model, "1", output_dir=agent_output_dir)  # Step 1 for Syntax Parser
+                self.netlogo_abstract_syntax_extractor_agent.save_results(netlogo_abstract_syntax_extractor_result, base_name, self.model, "1", output_dir=agent_output_dir)  # Step 1 for NetLogo Abstract Syntax Extractor
                 self.step_counter = 2  # Set step counter for next sequential agent
                 
-                processed_results["ast"] = syntax_parser_result
+                processed_results["ast"] = netlogo_abstract_syntax_extractor_result
                 
             except Exception as e:
                 error_result = {
-                    "agent_type": "syntax_parser",
+                    "agent_type": "netlogo_abstract_syntax_extractor",
                     "reasoning_summary": f"Syntax Parser agent failed: {str(e)}",
                     "data": None,
                     "errors": [f"Syntax Parser agent error: {str(e)}"]
@@ -931,35 +913,35 @@ class NetLogoOrchestrator:
             self.logger.info(f"Step 2: Running Semantics Parser agent for {base_name}...")
             
             try:
-                semantics_parser_result = self._execute_agent_with_tracking(
-                    "semantics_parser",
-                    self.semantics_parser_agent.parse_from_ilsem_and_ui,
+                behavior_extractor_result = self._execute_agent_with_tracking(
+                    "behavior_extractor",
+                    self.behavior_extractor_agent.parse_from_ilsem_and_ui,
                     interface_images,
                     base_name
                 )
                 
                 # Add agent type identifier
-                semantics_parser_result["agent_type"] = "semantics_parser"
+                behavior_extractor_result["agent_type"] = "behavior_extractor"
                 
                 # Save results using the Semantics Parser agent's save method
-                agent_output_dir = run_dir / "02-semantics_parser"
+                agent_output_dir = run_dir / "02-behavior_extractor"
                 agent_output_dir.mkdir(parents=True, exist_ok=True)
-                self.semantics_parser_agent.save_results(semantics_parser_result, base_name, self.model, "2", output_dir=agent_output_dir)  # Step 2 for Semantics Parser
+                self.behavior_extractor_agent.save_results(behavior_extractor_result, base_name, self.model, "2", output_dir=agent_output_dir)  # Step 2 for Semantics Parser
                 self.step_counter = 3  # Set step counter for next sequential agent
                 
-                processed_results["semantics"] = semantics_parser_result
+                processed_results["semantics"] = behavior_extractor_result
                 
             except Exception as e:
                 error_result = {
-                    "agent_type": "semantics_parser",
-                    "reasoning_summary": f"Semantics Parser agent failed: {str(e)}",
+                    "agent_type": "behavior_extractor",
+                    "reasoning_summary": f"NetLogo Behavior Extractor agent failed: {str(e)}",
                     "data": None,
-                    "errors": [f"Semantics Parser agent error: {str(e)}"]
+                    "errors": [f"NetLogo Behavior Extractor agent error: {str(e)}"]
                 }
-                self.logger.error(f"✗ Step 2: Semantics Parser agent failed for {base_name}: {str(e)}")
+                self.logger.error(f"✗ Step 2: NetLogo Behavior Extractor agent failed for {base_name}: {str(e)}")
                 processed_results["semantics"] = error_result
         elif start_step > 2:
-            self.logger.info(f"Step 2: Skipping Semantics Parser agent for {base_name} (continue after parallel stage from step {start_step})")
+            self.logger.info(f"Step 2: Skipping NetLogo Behavior Extractor agent for {base_name} (continue after parallel stage from step {start_step})")
         
         # Step 3: Messir Mapper Agent (using AST and State Machine from previous steps)
         if start_step <= 3 and (processed_results.get("ast", {}).get("data") and 
@@ -967,72 +949,66 @@ class NetLogoOrchestrator:
             
             self.logger.info(f"Step 3: Running Messir Mapper agent for {base_name}...")
             
-            # Find and read icrash files
-            icrash_files = self.find_icrash_files()
+            # iCrash files are no longer used
             icrash_contents = []
             
-            for icrash_file in icrash_files:
-                icrash_content = self.read_icrash_file_content(icrash_file)
-                icrash_contents.append(icrash_content)
-                self.logger.info(f"Found icrash file: {icrash_file.name}")
-            
-            # Load MUCIM DSL content
+            # Load LUCIM DSL content
             messir_dsl_content = ""
             try:
-                messir_dsl_content = MESSIR_RULES_FILE.read_text(encoding="utf-8")
-                self.logger.info(f"Loaded MUCIM DSL content from {MESSIR_RULES_FILE}")
+                messir_dsl_content = LUCIM_RULES_FILE.read_text(encoding="utf-8")
+                self.logger.info(f"Loaded LUCIM DSL content from {LUCIM_RULES_FILE}")
             except FileNotFoundError:
-                self.logger.error(f"MANDATORY INPUT MISSING: MUCIM DSL file not found: {MESSIR_RULES_FILE}")
+                self.logger.error(f"MANDATORY INPUT MISSING: LUCIM DSL file not found: {LUCIM_RULES_FILE}")
                 messir_result = {
-                    "reasoning_summary": "MISSING MANDATORY INPUT: MUCIM DSL file not found",
+                    "reasoning_summary": "MISSING MANDATORY INPUT: LUCIM DSL file not found",
                     "data": None,
-                    "errors": [f"MANDATORY INPUT MISSING: MUCIM DSL file not found: {MESSIR_RULES_FILE}"],
+                    "errors": [f"MANDATORY INPUT MISSING: LUCIM DSL file not found: {LUCIM_RULES_FILE}"],
                     "tokens_used": 0,
                     "input_tokens": 0,
                     "output_tokens": 0
                 }
-                processed_results["messir_mapper"] = messir_result
+                processed_results["lucim_environment_synthesizer"] = lucim_environment_result
                 return processed_results
             
             try:
-                messir_result = self._execute_agent_with_tracking(
-                    "messir_mapper",
-                    self.messir_mapper_agent.map_to_messir_concepts,
+                lucim_environment_result = self._execute_agent_with_tracking(
+                    "lucim_environment_synthesizer",
+                    self.lucim_environment_synthesizer_agent.synthesize_lucim_environment,
                     processed_results["semantics"]["data"],
                     base_name,
                     processed_results["ast"]["data"],  # Step 01 AST data (MANDATORY)
-                    messir_dsl_content,  # MUCIM DSL content (MANDATORY)
+                    messir_dsl_content,  # LUCIM DSL content (MANDATORY)
                     icrash_contents
                 )
                 
                 # Add agent type identifier
-                messir_result["agent_type"] = "messir_mapper"
+                lucim_environment_result["agent_type"] = "lucim_environment_synthesizer"
                 
-                # Save results using the Messir mapper agent's save method
-                agent_output_dir = run_dir / "03-messir_mapper"
+                # Save results using the LUCIM Environment Synthesizer agent's save method
+                agent_output_dir = run_dir / "03-lucim_environment_synthesizer"
                 agent_output_dir.mkdir(parents=True, exist_ok=True)
-                self.messir_mapper_agent.save_results(messir_result, base_name, self.model, "3", output_dir=agent_output_dir)  # Step 3 for Messir Mapper
+                self.lucim_environment_synthesizer_agent.save_results(lucim_environment_result, base_name, self.model, "3", output_dir=agent_output_dir)  # Step 3 for LUCIM Environment Synthesizer
                 self.step_counter = 4  # Set step counter for next sequential agent
                 
-                processed_results["messir_mapper"] = messir_result
+                processed_results["lucim_environment_synthesizer"] = lucim_environment_result
                 
             except Exception as e:
                 error_result = {
-                    "agent_type": "messir_mapper",
-                    "reasoning_summary": f"Messir mapping failed: {str(e)}",
+                    "agent_type": "lucim_environment_synthesizer",
+                    "reasoning_summary": f"LUCIM Environment synthesis failed: {str(e)}",
                     "data": None,
-                    "errors": [f"Messir mapping error: {str(e)}"]
+                    "errors": [f"LUCIM Environment synthesis error: {str(e)}"]
                 }
-                self.logger.error(f"✗ Step 3: Messir Mapper agent failed for {base_name}: {str(e)}")
-                processed_results["messir_mapper"] = error_result
+                self.logger.error(f"✗ Step 3: LUCIM Environment Synthesizer agent failed for {base_name}: {str(e)}")
+                processed_results["lucim_environment_synthesizer"] = error_result
         elif start_step > 3:
-            self.logger.info(f"Step 3: Skipping Messir Mapper agent for {base_name} (continue after parallel stage from step {start_step})")
+            self.logger.info(f"Step 3: Skipping LUCIM Environment Synthesizer agent for {base_name} (continue after parallel stage from step {start_step})")
         else:
-            self.logger.info(f"Skipping Step 3: Messir Mapper agent for {base_name} (AST or State Machine failed)")
+            self.logger.info(f"Skipping Step 3: LUCIM Environment Synthesizer agent for {base_name} (AST or State Machine failed)")
         
-        # Step 4: Scenario Writer Agent (using mandatory inputs: Step 02 state machine, Step 03 Messir concepts, MUCIM DSL, iCrash refs)
+        # Step 4: Scenario Writer Agent (using mandatory inputs: Step 02 state machine, Step 03 LUCIM environment, LUCIM DSL, iCrash refs)
         if start_step <= 4 and (processed_results.get("ast", {}).get("data") and 
-            processed_results.get("messir_mapper", {}).get("data") and
+            processed_results.get("lucim_environment_synthesizer", {}).get("data") and
             processed_results.get("semantics", {}).get("data")):
             
             self.logger.info(f"Step 4: Running Scenario Writer agent for {base_name}...")
@@ -1040,65 +1016,56 @@ class NetLogoOrchestrator:
             try:
                 # Load mandatory inputs for Scenario Writer
                 state_machine = processed_results["semantics"]["data"]
-                messir_concepts = processed_results["messir_mapper"]["data"]
+                lucim_environment = processed_results["lucim_environment_synthesizer"]["data"]
                 
-                # Load MUCIM DSL full definition
+                # Load LUCIM DSL full definition
                 messir_rules_content = ""
                 try:
-                    messir_rules_content = MESSIR_RULES_FILE.read_text(encoding="utf-8")
+                    messir_rules_content = LUCIM_RULES_FILE.read_text(encoding="utf-8")
                 except FileNotFoundError:
-                    self.logger.error(f"ERROR: MUCIM DSL file not found: {MESSIR_RULES_FILE}")
-                    raise SystemExit(f"ERROR: MUCIM DSL file not found: {MESSIR_RULES_FILE}")
+                    self.logger.error(f"ERROR: LUCIM DSL file not found: {LUCIM_RULES_FILE}")
+                    raise SystemExit(f"ERROR: LUCIM DSL file not found: {LUCIM_RULES_FILE}")
                 
-                # Load iCrash references
-                icrash_refs_content = ""
-                icrash_files = self.find_icrash_files()
-                if icrash_files:
-                    # For now, we'll include a note about iCrash files being available
-                    # In a full implementation, you might want to extract text from PDFs
-                    icrash_refs_content = f"iCrash reference files available: {[f.name for f in icrash_files]}"
-                    self.logger.info(f"Found {len(icrash_files)} iCrash reference files")
-                else:
-                    icrash_refs_content = "No iCrash reference files found"
-                    self.logger.warning("No iCrash reference files found")
+                # iCrash files are no longer used
+                icrash_refs_content = "iCrash reference files are no longer used"
                 
                 scenario_result = self._execute_agent_with_tracking(
-                    "scenario_writer",
-                    self.scenario_writer_agent.write_scenarios,
+                    "lucim_scenario_synthesizer",
+                    self.lucim_scenario_synthesizer_agent.write_scenarios,
                     state_machine,
-                    messir_concepts,
+                    lucim_environment,
                     messir_rules_content,
                     icrash_refs_content,
                     base_name
                 )
                 
                 # Add agent type identifier
-                scenario_result["agent_type"] = "scenario_writer"
+                scenario_result["agent_type"] = "lucim_scenario_synthesizer"
                 
                 # Save results using the Scenario writer agent's save method
-                agent_output_dir = run_dir / "04-scenario_writer"
+                agent_output_dir = run_dir / "04-lucim_scenario_synthesizer"
                 agent_output_dir.mkdir(parents=True, exist_ok=True)
-                self.scenario_writer_agent.save_results(scenario_result, base_name, self.model, "4", output_dir=agent_output_dir)  # Step 4 for Scenario Writer
+                self.lucim_scenario_synthesizer_agent.save_results(scenario_result, base_name, self.model, "4", output_dir=agent_output_dir)  # Step 4 for LUCIM Scenario Synthesizer
                 self.step_counter = 5  # Set step counter for next sequential agent
                 
-                processed_results["scenario_writer"] = scenario_result
+                processed_results["lucim_scenario_synthesizer"] = scenario_result
                 
             except Exception as e:
                 error_result = {
-                    "agent_type": "scenario_writer",
+                    "agent_type": "lucim_scenario_synthesizer",
                     "reasoning_summary": f"Scenario writing failed: {str(e)}",
                     "data": None,
                     "errors": [f"Scenario writing error: {str(e)}"]
                 }
-                self.logger.error(f"✗ Step 4: Scenario Writer agent failed for {base_name}: {str(e)}")
-                processed_results["scenario_writer"] = error_result
+                self.logger.error(f"✗ Step 4: LUCIM Scenario Synthesizer agent failed for {base_name}: {str(e)}")
+                processed_results["lucim_scenario_synthesizer"] = error_result
         elif start_step > 4:
-            self.logger.info(f"Step 4: Skipping Scenario Writer agent for {base_name} (continue after parallel stage from step {start_step})")
+            self.logger.info(f"Step 4: Skipping LUCIM Scenario Synthesizer agent for {base_name} (continue after parallel stage from step {start_step})")
         else:
-            self.logger.info(f"Skipping Step 4: Scenario Writer agent for {base_name} (AST, MessirConcepts, or State Machine failed)")
+            self.logger.info(f"Skipping Step 4: LUCIM Scenario Synthesizer agent for {base_name} (AST, MessirConcepts, or State Machine failed)")
         
         # Step 5: PlantUML Writer Agent (using scenarios from previous step)
-        if start_step <= 5 and processed_results.get("scenario_writer", {}).get("data"):
+        if start_step <= 5 and processed_results.get("lucim_scenario_synthesizer", {}).get("data"):
             
             self.logger.info(f"Step 5: Running PlantUML Writer agent for {base_name}...")
             
@@ -1106,7 +1073,7 @@ class NetLogoOrchestrator:
                 plantuml_writer_result = self._execute_agent_with_tracking(
                     "plantuml_writer",
                     self.plantuml_writer_agent.generate_plantuml_diagrams,
-                    processed_results["scenario_writer"]["data"],
+                    processed_results["lucim_scenario_synthesizer"]["data"],
                     base_name
                 )
                 
@@ -1151,31 +1118,31 @@ class NetLogoOrchestrator:
             
             try:
                 # Get scenarios data for context
-                scenarios_data = processed_results.get("scenario_writer", {}).get("data", {})
+                scenarios_data = processed_results.get("lucim_scenario_synthesizer", {}).get("data", {})
                 
-                # Load MUCIM DSL content (MANDATORY)
+                # Load LUCIM DSL content (MANDATORY)
                 messir_dsl_content = ""
                 try:
-                    messir_dsl_content = MESSIR_RULES_FILE.read_text(encoding="utf-8")
-                    self.logger.info(f"Loaded MUCIM DSL content for PlantUML Auditor")
+                    messir_dsl_content = LUCIM_RULES_FILE.read_text(encoding="utf-8")
+                    self.logger.info(f"Loaded LUCIM DSL content for PlantUML Auditor")
                 except FileNotFoundError:
-                    self.logger.error(f"MANDATORY INPUT MISSING: MUCIM DSL file not found: {MESSIR_RULES_FILE}")
-                    plantuml_messir_auditor_result = {
-                        "reasoning_summary": "MISSING MANDATORY INPUT: MUCIM DSL file not found",
+                    self.logger.error(f"MANDATORY INPUT MISSING: LUCIM DSL file not found: {LUCIM_RULES_FILE}")
+                    plantuml_lucim_auditor_result = {
+                        "reasoning_summary": "MISSING MANDATORY INPUT: LUCIM DSL file not found",
                         "data": None,
-                        "errors": [f"MANDATORY INPUT MISSING: MUCIM DSL file not found: {MESSIR_RULES_FILE}"],
+                        "errors": [f"MANDATORY INPUT MISSING: LUCIM DSL file not found: {LUCIM_RULES_FILE}"],
                         "tokens_used": 0,
                         "input_tokens": 0,
                         "output_tokens": 0
                     }
-                    processed_results["plantuml_messir_auditor"] = plantuml_messir_auditor_result
+                    processed_results["plantuml_lucim_auditor"] = plantuml_lucim_auditor_result
                     return processed_results
                 
                 # Get PlantUML file path (MANDATORY)
                 plantuml_file_path = processed_results["plantuml_writer"].get("puml_file", "")
                 if not plantuml_file_path:
                     self.logger.error(f"MANDATORY INPUT MISSING: .puml file path not found in PlantUML Writer results")
-                    plantuml_messir_auditor_result = {
+                    plantuml_lucim_auditor_result = {
                         "reasoning_summary": "MISSING MANDATORY INPUT: .puml file path not found",
                         "data": None,
                         "errors": [f"MANDATORY INPUT MISSING: .puml file path not found in PlantUML Writer results"],
@@ -1183,31 +1150,31 @@ class NetLogoOrchestrator:
                         "input_tokens": 0,
                         "output_tokens": 0
                     }
-                    processed_results["plantuml_messir_auditor"] = plantuml_messir_auditor_result
+                    processed_results["plantuml_lucim_auditor"] = plantuml_lucim_auditor_result
                     return processed_results
                 
-                plantuml_messir_auditor_result = self._execute_agent_with_tracking(
-                    "plantuml_messir_auditor",
-                    self.plantuml_messir_auditor_agent.audit_plantuml_diagrams,
+                plantuml_lucim_auditor_result = self._execute_agent_with_tracking(
+                    "plantuml_lucim_auditor",
+                    self.plantuml_lucim_auditor_agent.audit_plantuml_diagrams,
                     plantuml_file_path,
-                    str(MESSIR_RULES_FILE),
+                    str(LUCIM_RULES_FILE),
                     base_name
                 )
                 
                 # Add agent type identifier
-                plantuml_messir_auditor_result["agent_type"] = "plantuml_messir_auditor"
+                plantuml_lucim_auditor_result["agent_type"] = "plantuml_lucim_auditor"
                 
                 # Save results using the PlantUML Messir auditor agent's save method
-                agent_output_dir = run_dir / "06-plantuml_messir_auditor"
+                agent_output_dir = run_dir / "06-plantuml_lucim_auditor"
                 agent_output_dir.mkdir(parents=True, exist_ok=True)
-                self.plantuml_messir_auditor_agent.save_results(plantuml_messir_auditor_result, base_name, self.model, "6", output_dir=agent_output_dir)  # Step 6 for PlantUML Messir Auditor
+                self.plantuml_lucim_auditor_agent.save_results(plantuml_lucim_auditor_result, base_name, self.model, "6", output_dir=agent_output_dir)  # Step 6 for PlantUML Messir Auditor
                 self.step_counter = 7  # Set step counter for next sequential agent
                 
-                processed_results["plantuml_messir_auditor"] = plantuml_messir_auditor_result
+                processed_results["plantuml_lucim_auditor"] = plantuml_lucim_auditor_result
                 
                 # Early exit: if compliant after Step 6, end flow gracefully (skip steps 7 and 8)
                 try:
-                    audit_data = plantuml_messir_auditor_result.get("data", {}) if isinstance(plantuml_messir_auditor_result, dict) else {}
+                    audit_data = plantuml_lucim_auditor_result.get("data", {}) if isinstance(plantuml_lucim_auditor_result, dict) else {}
                     if audit_data and audit_data.get("verdict") == "compliant":
                         self.logger.info("Step 6 verdict is compliant. Ending flow gracefully. Skipping steps 7 and 8.")
                         # Calculate total orchestration time
@@ -1225,13 +1192,13 @@ class NetLogoOrchestrator:
                     self.logger.warning(f"Early-exit check failed softly: {_e}")
             except Exception as e:
                 error_result = {
-                    "agent_type": "plantuml_messir_auditor",
+                    "agent_type": "plantuml_lucim_auditor",
                     "reasoning_summary": f"PlantUML Messir auditing failed: {str(e)}",
                     "data": None,
                     "errors": [f"PlantUML Messir auditing error: {str(e)}"]
                 }
                 self.logger.error(f"✗ Step 6: PlantUML Messir Auditor agent failed for {base_name}: {str(e)}")
-                processed_results["plantuml_messir_auditor"] = error_result
+                processed_results["plantuml_lucim_auditor"] = error_result
         elif start_step > 6:
             self.logger.info(f"Step 6: Skipping PlantUML Messir Auditor agent for {base_name} (continue after parallel stage from step {start_step})")
         else:
@@ -1250,9 +1217,9 @@ class NetLogoOrchestrator:
         if start_step <= 7:
             # Check if Step 6 (PlantUML Messir Auditor) succeeded and provided expected input
             plantuml_data = processed_results.get("plantuml_writer", {}).get("data")
-            audit_data = processed_results.get("plantuml_messir_auditor", {}).get("data")
+            audit_data = processed_results.get("plantuml_lucim_auditor", {}).get("data")
             # Check for errors in both top-level errors and data.errors fields
-            audit_top_level_errors = processed_results.get("plantuml_messir_auditor", {}).get("errors", [])
+            audit_top_level_errors = processed_results.get("plantuml_lucim_auditor", {}).get("errors", [])
             audit_data_errors = audit_data.get("errors", []) if audit_data else []
             audit_has_errors = bool(audit_top_level_errors) or bool(audit_data_errors)
             
@@ -1265,27 +1232,27 @@ class NetLogoOrchestrator:
                 self.logger.info(f"Step 7: Running PlantUML Messir Corrector agent for {base_name} (found {len(non_compliant_rules)} non-compliant rules, {len(audit_data_errors)} syntax errors)...")
                 
                 try:
-                    # Load MUCIM DSL content (MANDATORY)
+                    # Load LUCIM DSL content (MANDATORY)
                     messir_dsl_content = ""
                     try:
-                        messir_dsl_content = MESSIR_RULES_FILE.read_text(encoding="utf-8")
-                        self.logger.info(f"Loaded MUCIM DSL content for PlantUML Corrector")
+                        messir_dsl_content = LUCIM_RULES_FILE.read_text(encoding="utf-8")
+                        self.logger.info(f"Loaded LUCIM DSL content for PlantUML Corrector")
                     except FileNotFoundError:
-                        self.logger.error(f"MANDATORY INPUT MISSING: MUCIM DSL file not found: {MESSIR_RULES_FILE}")
-                        plantuml_messir_corrector_result = {
-                            "reasoning_summary": "MISSING MANDATORY INPUT: MUCIM DSL file not found",
+                        self.logger.error(f"MANDATORY INPUT MISSING: LUCIM DSL file not found: {LUCIM_RULES_FILE}")
+                        plantuml_lucim_corrector_result = {
+                            "reasoning_summary": "MISSING MANDATORY INPUT: LUCIM DSL file not found",
                             "data": None,
-                            "errors": [f"MANDATORY INPUT MISSING: MUCIM DSL file not found: {MESSIR_RULES_FILE}"],
+                            "errors": [f"MANDATORY INPUT MISSING: LUCIM DSL file not found: {LUCIM_RULES_FILE}"],
                             "tokens_used": 0,
                             "input_tokens": 0,
                             "output_tokens": 0
                         }
-                        processed_results["plantuml_messir_corrector"] = plantuml_messir_corrector_result
+                        processed_results["plantuml_lucim_corrector"] = plantuml_lucim_corrector_result
                         return processed_results
                     
-                    plantuml_messir_corrector_result = self._execute_agent_with_tracking(
-                        "plantuml_messir_corrector",
-                        self.plantuml_messir_corrector_agent.correct_plantuml_diagrams,
+                    plantuml_lucim_corrector_result = self._execute_agent_with_tracking(
+                        "plantuml_lucim_corrector",
+                        self.plantuml_lucim_corrector_agent.correct_plantuml_diagrams,
                         plantuml_data,
                         non_compliant_rules,
                         messir_dsl_content,
@@ -1293,42 +1260,42 @@ class NetLogoOrchestrator:
                     )
                     
                     # Add agent type identifier
-                    plantuml_messir_corrector_result["agent_type"] = "plantuml_messir_corrector"
+                    plantuml_lucim_corrector_result["agent_type"] = "plantuml_lucim_corrector"
                     
                     # Save results using the PlantUML Messir corrector agent's save method
-                    agent_output_dir = run_dir / "07-plantuml_messir_corrector"
+                    agent_output_dir = run_dir / "07-plantuml_lucim_corrector"
                     agent_output_dir.mkdir(parents=True, exist_ok=True)
-                    self.plantuml_messir_corrector_agent.save_results(plantuml_messir_corrector_result, base_name, self.model, "7", output_dir=agent_output_dir)  # Step 7 for PlantUML Messir Corrector
+                    self.plantuml_lucim_corrector_agent.save_results(plantuml_lucim_corrector_result, base_name, self.model, "7", output_dir=agent_output_dir)  # Step 7 for PlantUML Messir Corrector
                     self.step_counter = 8  # Set step counter for next sequential agent
                     
-                    processed_results["plantuml_messir_corrector"] = plantuml_messir_corrector_result
-                    plantuml_messir_corrector_executed = True
-                    plantuml_messir_corrector_success = True
+                    processed_results["plantuml_lucim_corrector"] = plantuml_lucim_corrector_result
+                    plantuml_lucim_corrector_executed = True
+                    plantuml_lucim_corrector_success = True
                     
                 except Exception as e:
                     error_result = {
-                        "agent_type": "plantuml_messir_corrector",
+                        "agent_type": "plantuml_lucim_corrector",
                         "reasoning_summary": f"PlantUML Messir correction failed: {str(e)}",
                         "data": None,
                         "errors": [f"PlantUML Messir correction error: {str(e)}"]
                     }
                     self.logger.error(f"✗ Step 7: PlantUML Messir Corrector agent failed for {base_name}: {str(e)}")
-                    processed_results["plantuml_messir_corrector"] = error_result
-                    plantuml_messir_corrector_executed = True
-                    plantuml_messir_corrector_success = False
+                    processed_results["plantuml_lucim_corrector"] = error_result
+                    plantuml_lucim_corrector_executed = True
+                    plantuml_lucim_corrector_success = False
                     
             elif plantuml_data and audit_data and not has_issues_to_fix:
                 # Skip corrector if there are no issues to fix (no non-compliant rules and no syntax errors)
                 self.logger.info(f"Step 7: Skipping PlantUML Messir Corrector agent for {base_name} (no issues to fix)")
-                processed_results["plantuml_messir_corrector"] = {
-                    "agent_type": "plantuml_messir_corrector",
+                processed_results["plantuml_lucim_corrector"] = {
+                    "agent_type": "plantuml_lucim_corrector",
                     "reasoning_summary": "Corrector skipped - no issues to fix",
                     "data": plantuml_data,  # Pass through original data
                     "errors": [],
                     "skipped": True
                 }
-                plantuml_messir_corrector_executed = False
-                plantuml_messir_corrector_success = True
+                plantuml_lucim_corrector_executed = False
+                plantuml_lucim_corrector_success = True
                 
             else:
                 # Step 6 failed or missing prerequisites
@@ -1341,27 +1308,27 @@ class NetLogoOrchestrator:
                     missing_prereq.append("audit completed successfully or found non-compliant rules to fix")
                 
                 error_result = {
-                    "agent_type": "plantuml_messir_corrector",
+                    "agent_type": "plantuml_lucim_corrector",
                     "reasoning_summary": f"Corrector skipped - Step 6 (auditor) failed or missing prerequisites: {', '.join(missing_prereq)}",
                     "data": None,
                     "errors": [f"Missing prerequisites: {', '.join(missing_prereq)}"]
                 }
                 self.logger.info(f"Step 7: Skipping PlantUML Messir Corrector agent for {base_name} (Step 6 failed or missing prerequisites)")
-                processed_results["plantuml_messir_corrector"] = error_result
-                plantuml_messir_corrector_executed = False
-                plantuml_messir_corrector_success = False
+                processed_results["plantuml_lucim_corrector"] = error_result
+                plantuml_lucim_corrector_executed = False
+                plantuml_lucim_corrector_success = False
         else:
             self.logger.info(f"Step 7: Skipping PlantUML Messir Corrector agent for {base_name} (continue after parallel stage from step {start_step})")
             # Add a placeholder entry to indicate the corrector was skipped due to resume
-            processed_results["plantuml_messir_corrector"] = {
-                "agent_type": "plantuml_messir_corrector",
+            processed_results["plantuml_lucim_corrector"] = {
+                "agent_type": "plantuml_lucim_corrector",
                 "reasoning_summary": f"Corrector skipped - continue after parallel stage from step {start_step}",
                 "data": None,
                 "errors": [],
                 "skipped": True
             }
-            plantuml_messir_corrector_executed = False
-            plantuml_messir_corrector_success = True
+            plantuml_lucim_corrector_executed = False
+            plantuml_lucim_corrector_success = True
         
         # Step 8: Final PlantUML Messir Auditor (always run)
         if start_step <= 8:
@@ -1369,12 +1336,12 @@ class NetLogoOrchestrator:
             
             try:
                 # Determine what to audit based on corrector status
-                corrector_has_data = processed_results.get("plantuml_messir_corrector", {}).get("data") is not None
-                corrector_has_errors = bool(processed_results.get("plantuml_messir_corrector", {}).get("errors", []))
+                corrector_has_data = processed_results.get("plantuml_lucim_corrector", {}).get("data") is not None
+                corrector_has_errors = bool(processed_results.get("plantuml_lucim_corrector", {}).get("errors", []))
                 
                 if corrector_has_data and not corrector_has_errors:
                     # Audit the corrected PlantUML diagram from the corrector
-                    plantuml_data_to_audit = processed_results["plantuml_messir_corrector"]["data"]
+                    plantuml_data_to_audit = processed_results["plantuml_lucim_corrector"]["data"]
                     self.logger.info(f"Step 8: Auditing corrected PlantUML diagrams")
                 else:
                     # Audit the original PlantUML diagram (corrector failed, was skipped, or has errors)
@@ -1389,13 +1356,13 @@ class NetLogoOrchestrator:
                         raise Exception("No PlantUML data available for final audit")
                 
                 # Get scenarios data for context
-                scenarios_data = processed_results.get("scenario_writer", {}).get("data", {})
+                scenarios_data = processed_results.get("lucim_scenario_synthesizer", {}).get("data", {})
                 
                 # Determine the .puml file path for the corrected diagrams
                 puml_file_path = ""
                 if corrector_has_data and not corrector_has_errors:
                     # Use corrected .puml file from Step 7
-                    corrector_output_dir = run_dir / "07-plantuml_messir_corrector"
+                    corrector_output_dir = run_dir / "07-plantuml_lucim_corrector"
                     puml_files = list(corrector_output_dir.glob("*.puml"))
                     if puml_files:
                         puml_file_path = str(puml_files[0])
@@ -1412,11 +1379,11 @@ class NetLogoOrchestrator:
                     else:
                         self.logger.warning(f"Step 8: No .puml file found in writer output, using data only")
                 
-                # MUCIM DSL file path (mandatory)
-                mucim_dsl_file_path = str(MESSIR_RULES_FILE)
-                self.logger.info(f"Step 8: Using MUCIM DSL file: {mucim_dsl_file_path}")
+                # LUCIM DSL file path (mandatory)
+                mucim_dsl_file_path = str(LUCIM_RULES_FILE)
+                self.logger.info(f"Step 8: Using LUCIM DSL file: {mucim_dsl_file_path}")
                 
-                # Enforce mandatory inputs for final audit: require existing .puml and MUCIM DSL
+                # Enforce mandatory inputs for final audit: require existing .puml and LUCIM DSL
                 from pathlib import Path as _Path
                 missing_reasons = []
                 if not puml_file_path:
@@ -1424,12 +1391,12 @@ class NetLogoOrchestrator:
                 elif not _Path(puml_file_path).exists():
                     missing_reasons.append(f".puml file does not exist: {puml_file_path}")
                 if not _Path(mucim_dsl_file_path).exists():
-                    missing_reasons.append(f"MUCIM DSL file not found: {mucim_dsl_file_path}")
+                    missing_reasons.append(f"LUCIM DSL file not found: {mucim_dsl_file_path}")
 
-                plantuml_messir_final_auditor_result = None
+                plantuml_lucim_final_auditor_result = None
                 if missing_reasons:
                     reason = "; ".join(missing_reasons)
-                    plantuml_messir_final_auditor_result = {
+                    plantuml_lucim_final_auditor_result = {
                         "reasoning_summary": f"MISSING MANDATORY INPUT: {reason}",
                         "data": None,
                         "errors": [f"MISSING MANDATORY INPUT: {reason}"],
@@ -1440,39 +1407,39 @@ class NetLogoOrchestrator:
                     self.logger.error(f"MANDATORY INPUTS MISSING for Step 8: {reason}")
                 else:
                     # Use the strict auditor API: (puml_file_path, mucim_dsl_file_path, base_name)
-                    plantuml_messir_final_auditor_result = self._execute_agent_with_tracking(
-                        "plantuml_messir_final_auditor",
-                        self.plantuml_messir_final_auditor_agent.audit_plantuml_diagrams,
+                    plantuml_lucim_final_auditor_result = self._execute_agent_with_tracking(
+                        "plantuml_lucim_final_auditor",
+                        self.plantuml_lucim_final_auditor_agent.audit_plantuml_diagrams,
                         puml_file_path,
                         mucim_dsl_file_path,
                         base_name
                     )
                 
                 # Add agent type identifier
-                plantuml_messir_final_auditor_result["agent_type"] = "plantuml_messir_final_auditor"
+                plantuml_lucim_final_auditor_result["agent_type"] = "plantuml_lucim_final_auditor"
                 
                 # Save results using the PlantUML Messir auditor agent's save method
-                agent_output_dir = run_dir / "08-plantuml_messir_final_auditor"
+                agent_output_dir = run_dir / "08-plantuml_lucim_final_auditor"
                 agent_output_dir.mkdir(parents=True, exist_ok=True)
-                self.plantuml_messir_final_auditor_agent.save_results(plantuml_messir_final_auditor_result, base_name, self.model, "8", output_dir=agent_output_dir)  # Step 8 for Final Auditor
+                self.plantuml_lucim_final_auditor_agent.save_results(plantuml_lucim_final_auditor_result, base_name, self.model, "8", output_dir=agent_output_dir)  # Step 8 for Final Auditor
                 self.step_counter = 9  # Set step counter for next sequential agent
                 
-                processed_results["plantuml_messir_final_auditor"] = plantuml_messir_final_auditor_result
+                processed_results["plantuml_lucim_final_auditor"] = plantuml_lucim_final_auditor_result
                 
             except Exception as e:
                 error_result = {
-                    "agent_type": "plantuml_messir_final_auditor",
+                    "agent_type": "plantuml_lucim_final_auditor",
                     "reasoning_summary": f"PlantUML Messir final audit failed: {str(e)}",
                     "data": None,
                     "errors": [f"PlantUML Messir final audit error: {str(e)}"]
                 }
                 self.logger.error(f"✗ Step 8: PlantUML Messir Final Auditor agent failed for {base_name}: {str(e)}")
-                processed_results["plantuml_messir_final_auditor"] = error_result
+                processed_results["plantuml_lucim_final_auditor"] = error_result
         else:
             self.logger.info(f"Step 8: Skipping PlantUML Messir Final Auditor agent for {base_name} (continue after parallel stage from step {start_step})")
             # Add a placeholder entry to indicate the final auditor was skipped due to resume
-            processed_results["plantuml_messir_final_auditor"] = {
-                "agent_type": "plantuml_messir_final_auditor",
+            processed_results["plantuml_lucim_final_auditor"] = {
+                "agent_type": "plantuml_lucim_final_auditor",
                 "reasoning_summary": f"Final auditor skipped - continue after parallel stage from step {start_step}",
                 "data": None,
                 "errors": [],
@@ -1505,11 +1472,11 @@ class NetLogoOrchestrator:
         base_name = file_info["base_name"]
         # New per-run/per-combination directory using centralized path builder
         tv = None
-        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
-            tv = self.agent_configs["syntax_parser"].get("text_verbosity")
+        if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
+            tv = self.agent_configs["netlogo_abstract_syntax_extractor"].get("text_verbosity")
         reff = None
-        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
-            reff = self.agent_configs["syntax_parser"].get("reasoning_effort")
+        if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
+            reff = self.agent_configs["netlogo_abstract_syntax_extractor"].get("reasoning_effort")
         run_dir = get_run_base_dir(self.timestamp, base_name, self.model, reff or "medium", tv or "medium")
         run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1526,8 +1493,8 @@ class NetLogoOrchestrator:
             # Offload blocking call to a worker thread so it does not block the event loop
             return await asyncio.to_thread(
                 self._execute_agent_with_tracking,
-                "syntax_parser",
-                self.syntax_parser_agent.parse_netlogo_code,
+                "netlogo_abstract_syntax_extractor",
+                self.netlogo_abstract_syntax_extractor_agent.parse_netlogo_code,
                 code_content,
                 f"{base_name}-netlogo-code.md"
             )
@@ -1536,8 +1503,8 @@ class NetLogoOrchestrator:
             # Offload blocking call to a worker thread so it does not block the event loop
             return await asyncio.to_thread(
                 self._execute_agent_with_tracking,
-                "semantics_parser",
-                self.semantics_parser_agent.parse_from_ilsem_and_ui,
+                "behavior_extractor",
+                self.behavior_extractor_agent.parse_from_ilsem_and_ui,
                 file_info["interface_images"],
                 base_name
             )
@@ -1580,8 +1547,8 @@ class NetLogoOrchestrator:
                         t.cancel()
                 except Exception:
                     pass
-            syntax_result = syntax_result if 'syntax_result' in locals() else RuntimeError("syntax_parser timed out")
-            semantics_result_direct = semantics_result_direct if 'semantics_result_direct' in locals() else RuntimeError("semantics_parser (direct) timed out")
+            syntax_result = syntax_result if 'syntax_result' in locals() else RuntimeError("netlogo_abstract_syntax_extractor timed out")
+            semantics_result_direct = semantics_result_direct if 'semantics_result_direct' in locals() else RuntimeError("behavior_extractor (direct) timed out")
         finally:
             hb.cancel()
 
@@ -1591,16 +1558,16 @@ class NetLogoOrchestrator:
         if isinstance(syntax_result, Exception):
             self.logger.error(f"Syntax Parser failed in parallel path: {syntax_result}")
             processed_results["ast"] = {
-                "agent_type": "syntax_parser",
+                "agent_type": "netlogo_abstract_syntax_extractor",
                 "reasoning_summary": f"Syntax Parser agent failed: {syntax_result}",
                 "data": None,
                 "errors": [f"Syntax Parser agent error: {syntax_result}"]
             }
         else:
-            syntax_result["agent_type"] = "syntax_parser"
-            agent_output_dir = run_dir / "01-syntax_parser"
+            syntax_result["agent_type"] = "netlogo_abstract_syntax_extractor"
+            agent_output_dir = run_dir / "01-netlogo_abstract_syntax_extractor"
             agent_output_dir.mkdir(parents=True, exist_ok=True)
-            self.syntax_parser_agent.save_results(syntax_result, base_name, self.model, "1", output_dir=agent_output_dir)
+            self.netlogo_abstract_syntax_extractor_agent.save_results(syntax_result, base_name, self.model, "1", output_dir=agent_output_dir)
             self.step_counter = max(self.step_counter, 2)
             processed_results["ast"] = syntax_result
 
@@ -1608,7 +1575,7 @@ class NetLogoOrchestrator:
         if isinstance(semantics_result_direct, Exception):
             self.logger.error(f"Semantics Parser (direct) failed in parallel path: {semantics_result_direct}")
             processed_results["semantics"] = {
-                "agent_type": "semantics_parser",
+                "agent_type": "behavior_extractor",
                 "reasoning_summary": f"Semantics Parser direct failed: {semantics_result_direct}",
                 "data": None,
                 "errors": [f"Semantics Parser direct error: {semantics_result_direct}"]
@@ -1616,10 +1583,10 @@ class NetLogoOrchestrator:
         else:
             semantics_result = semantics_result_direct
 
-            semantics_result["agent_type"] = "semantics_parser"
-            agent_output_dir = run_dir / "02-semantics_parser"
+            semantics_result["agent_type"] = "behavior_extractor"
+            agent_output_dir = run_dir / "02-behavior_extractor"
             agent_output_dir.mkdir(parents=True, exist_ok=True)
-            self.semantics_parser_agent.save_results(semantics_result, base_name, self.model, "2", output_dir=agent_output_dir)
+            self.behavior_extractor_agent.save_results(semantics_result, base_name, self.model, "2", output_dir=agent_output_dir)
             self.step_counter = max(self.step_counter, 3)
             processed_results["semantics"] = semantics_result
 
@@ -1647,13 +1614,13 @@ class NetLogoOrchestrator:
         """
         # Set up logging for this orchestration run, including reasoning and text verbosity
         tv = None
-        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
-            tv = self.agent_configs["syntax_parser"].get("text_verbosity")
+        if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
+            tv = self.agent_configs["netlogo_abstract_syntax_extractor"].get("text_verbosity")
         reff = None
         rsum = None
-        if isinstance(self.agent_configs, dict) and "syntax_parser" in self.agent_configs:
-            reff = self.agent_configs["syntax_parser"].get("reasoning_effort")
-            rsum = self.agent_configs["syntax_parser"].get("reasoning_summary")
+        if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
+            reff = self.agent_configs["netlogo_abstract_syntax_extractor"].get("reasoning_effort")
+            rsum = self.agent_configs["netlogo_abstract_syntax_extractor"].get("reasoning_summary")
 
         self.logger = setup_orchestration_logger(
             base_name,
@@ -1707,56 +1674,56 @@ class NetLogoOrchestrator:
             results[base_name] = result
             
                     # Print status
-            syntax_parser_success = result.get("ast", {}).get("data") is not None
-            semantics_parser_success = result.get("semantics", {}).get("data") is not None
-            messir_success = result.get("messir_mapper", {}).get("data") is not None
-            scenario_success = result.get("scenario_writer", {}).get("data") is not None
+            netlogo_abstract_syntax_extractor_success = result.get("ast", {}).get("data") is not None
+            behavior_extractor_success = result.get("semantics", {}).get("data") is not None
+            lucim_environment_success = result.get("lucim_environment_synthesizer", {}).get("data") is not None
+            scenario_success = result.get("lucim_scenario_synthesizer", {}).get("data") is not None
             plantuml_writer_success = result.get("plantuml_writer", {}).get("data") is not None
-            plantuml_messir_auditor_success = result.get("plantuml_messir_auditor", {}).get("data") is not None
-            plantuml_messir_corrector_success = result.get("plantuml_messir_corrector", {}).get("data") is not None
-            plantuml_messir_final_auditor_success = result.get("plantuml_messir_final_auditor", {}).get("data") is not None
+            plantuml_lucim_auditor_success = result.get("plantuml_lucim_auditor", {}).get("data") is not None
+            plantuml_lucim_corrector_success = result.get("plantuml_lucim_corrector", {}).get("data") is not None
+            plantuml_lucim_final_auditor_success = result.get("plantuml_lucim_final_auditor", {}).get("data") is not None
             
             # Check if PlantUML Messir Corrector was executed (only if diagrams were non-compliant)
-            plantuml_messir_corrector_executed = "plantuml_messir_corrector" in result
-            plantuml_messir_final_auditor_executed = "plantuml_messir_final_auditor" in result
+            plantuml_lucim_corrector_executed = "plantuml_lucim_corrector" in result
+            plantuml_lucim_final_auditor_executed = "plantuml_lucim_final_auditor" in result
             
             # Determine if agents were skipped (not present in result) vs failed (present but failed)
             # A step is skipped if it's not in the result at all, not if it failed
             semantics_skipped = "semantics" not in result
-            messir_skipped = "messir_mapper" not in result
-            scenario_skipped = "scenario_writer" not in result
+            lucim_environment_skipped = "lucim_environment_synthesizer" not in result
+            scenario_skipped = "lucim_scenario_synthesizer" not in result
             plantuml_writer_skipped = "plantuml_writer" not in result
-            plantuml_messir_auditor_skipped = "plantuml_messir_auditor" not in result
+            plantuml_lucim_auditor_skipped = "plantuml_lucim_auditor" not in result
             
             self.logger.info(f"{base_name} results:")
-            self.logger.info(f"  Step 1 - Syntax Parser: {'✓' if syntax_parser_success else '✗'}")
-            self.logger.info(f"  Step 2 - Semantics Parser: {'✓' if semantics_parser_success else '✗'}")
-            self.logger.info(f"  Step 3 - Messir Mapper: {'✓' if messir_success else '✗'}")
+            self.logger.info(f"  Step 1 - Syntax Parser: {'✓' if netlogo_abstract_syntax_extractor_success else '✗'}")
+            self.logger.info(f"  Step 2 - NetLogo Behavior Extractor: {'✓' if behavior_extractor_success else '✗'}")
+            self.logger.info(f"  Step 3 - LUCIM Environment Synthesizer: {'✓' if lucim_environment_success else '✗'}")
             self.logger.info(f"  Step 4 - Scenario Writer: {'✓' if scenario_success else '✗'}")
             self.logger.info(f"  Step 5 - PlantUML Writer: {'✓' if plantuml_writer_success else '✗'}")
-            self.logger.info(f"  Step 6 - PlantUML Messir Auditor: {'✓' if plantuml_messir_auditor_success else '✗'}")
-            if plantuml_messir_corrector_executed:
-                self.logger.info(f"  Step 7 - PlantUML Messir Corrector: {'✓' if plantuml_messir_corrector_success else '✗'}")
-            if plantuml_messir_final_auditor_executed:
-                self.logger.info(f"  Step 8 - PlantUML Messir Final Auditor: {'✓' if plantuml_messir_final_auditor_success else '✗'}")
+            self.logger.info(f"  Step 6 - PlantUML Messir Auditor: {'✓' if plantuml_lucim_auditor_success else '✗'}")
+            if plantuml_lucim_corrector_executed:
+                self.logger.info(f"  Step 7 - PlantUML Messir Corrector: {'✓' if plantuml_lucim_corrector_success else '✗'}")
+            if plantuml_lucim_final_auditor_executed:
+                self.logger.info(f"  Step 8 - PlantUML Messir Final Auditor: {'✓' if plantuml_lucim_final_auditor_success else '✗'}")
             else:
                 self.logger.info(f"  Step 7 - PlantUML Messir Corrector: SKIPPED (diagrams already compliant)")
             
-            if not syntax_parser_success and result.get("ast", {}).get("errors"):
+            if not netlogo_abstract_syntax_extractor_success and result.get("ast", {}).get("errors"):
                 self.logger.warning(f"    Step 1 - Syntax Parser errors: {len(result['ast']['errors'])} found")
-            if not semantics_parser_success and result.get("semantics", {}).get("errors"):
-                self.logger.warning(f"    Step 2 - Semantics Parser errors: {len(result['semantics']['errors'])} found")
-            if not messir_success and result.get("messir_mapper", {}).get("errors"):
-                self.logger.warning(f"    Step 3 - Messir mapping errors: {len(result['messir_mapper']['errors'])} found")
-            if not scenario_success and result.get("scenario_writer", {}).get("errors"):
-                self.logger.warning(f"    Step 4 - Scenario writing errors: {len(result['scenario_writer']['errors'])} found")
+            if not behavior_extractor_success and result.get("semantics", {}).get("errors"):
+                self.logger.warning(f"    Step 2 - NetLogo Behavior Extractor errors: {len(result['semantics']['errors'])} found")
+            if not lucim_environment_success and result.get("lucim_environment_synthesizer", {}).get("errors"):
+                self.logger.warning(f"    Step 3 - LUCIM Environment Synthesizer errors: {len(result['lucim_environment_synthesizer']['errors'])} found")
+            if not scenario_success and result.get("lucim_scenario_synthesizer", {}).get("errors"):
+                self.logger.warning(f"    Step 4 - LUCIM scenario synthesis errors: {len(result['lucim_scenario_synthesizer']['errors'])} found")
             if not plantuml_writer_success and result.get("plantuml_writer", {}).get("errors"):
                 self.logger.warning(f"    Step 5 - PlantUML writing errors: {len(result['plantuml_writer']['errors'])} found")
-            if not plantuml_messir_auditor_success and result.get("plantuml_messir_auditor", {}).get("errors"):
-                self.logger.warning(f"    Step 6 - PlantUML Messir auditing errors: {len(result['plantuml_messir_auditor']['errors'])} found")
+            if not plantuml_lucim_auditor_success and result.get("plantuml_lucim_auditor", {}).get("errors"):
+                self.logger.warning(f"    Step 6 - PlantUML Messir auditing errors: {len(result['plantuml_lucim_auditor']['errors'])} found")
             
-            if plantuml_messir_corrector_executed and not plantuml_messir_corrector_success and result.get("plantuml_messir_corrector", {}).get("errors"):
-                self.logger.warning(f"    Step 7 - PlantUML Messir correction errors: {len(result['plantuml_messir_corrector']['errors'])} found")
+            if plantuml_lucim_corrector_executed and not plantuml_lucim_corrector_success and result.get("plantuml_lucim_corrector", {}).get("errors"):
+                self.logger.warning(f"    Step 7 - PlantUML Messir correction errors: {len(result['plantuml_lucim_corrector']['errors'])} found")
         
         self.logger.info(f"Completed processing for {base_name}")
         
@@ -1771,10 +1738,10 @@ class NetLogoOrchestrator:
         failed_agents = 0
         
         # Count successful and failed agents
-        if syntax_parser_success: successful_agents += 1
+        if netlogo_abstract_syntax_extractor_success: successful_agents += 1
         else: failed_agents += 1
         
-        if semantics_parser_success: successful_agents += 1
+        if behavior_extractor_success: successful_agents += 1
         else: failed_agents += 1
         
         if messir_success: successful_agents += 1
@@ -1786,19 +1753,19 @@ class NetLogoOrchestrator:
         if plantuml_writer_success: successful_agents += 1
         else: failed_agents += 1
         
-        if plantuml_messir_auditor_success: successful_agents += 1
+        if plantuml_lucim_auditor_success: successful_agents += 1
         else: failed_agents += 1
         
         # Add PlantUML Messir Corrector only if it was executed
-        if plantuml_messir_corrector_executed:
+        if plantuml_lucim_corrector_executed:
             total_agents += 1
-            if plantuml_messir_corrector_success: successful_agents += 1
+            if plantuml_lucim_corrector_success: successful_agents += 1
             else: failed_agents += 1
         
         # Add PlantUML Messir Final Auditor only if it was executed
-        if plantuml_messir_final_auditor_executed:
+        if plantuml_lucim_final_auditor_executed:
             total_agents += 1
-            if plantuml_messir_final_auditor_success: successful_agents += 1
+            if plantuml_lucim_final_auditor_success: successful_agents += 1
             else: failed_agents += 1
         
         self.logger.info(f"📊 OVERALL STATUS:")
@@ -1814,37 +1781,37 @@ class NetLogoOrchestrator:
         total_agent_time = 0
         agent_times = []
         
-        if self.execution_times["syntax_parser"] > 0:
-            agent_times.append(("Step 1 - Syntax Parser", self.execution_times["syntax_parser"]))
-            total_agent_time += self.execution_times["syntax_parser"]
+        if self.execution_times["netlogo_abstract_syntax_extractor"] > 0:
+            agent_times.append(("Step 1 - Syntax Parser", self.execution_times["netlogo_abstract_syntax_extractor"]))
+            total_agent_time += self.execution_times["netlogo_abstract_syntax_extractor"]
         
-        if self.execution_times["semantics_parser"] > 0:
-            agent_times.append(("Step 2 - Semantics Parser", self.execution_times["semantics_parser"]))
-            total_agent_time += self.execution_times["semantics_parser"]
+        if self.execution_times["behavior_extractor"] > 0:
+            agent_times.append(("Step 2 - Semantics Parser", self.execution_times["behavior_extractor"]))
+            total_agent_time += self.execution_times["behavior_extractor"]
         
-        if self.execution_times["messir_mapper"] > 0:
-            agent_times.append(("Step 3 - Messir Mapper", self.execution_times["messir_mapper"]))
-            total_agent_time += self.execution_times["messir_mapper"]
+        if self.execution_times["lucim_environment_synthesizer"] > 0:
+            agent_times.append(("Step 3 - LUCIM Environment Synthesizer", self.execution_times["lucim_environment_synthesizer"]))
+            total_agent_time += self.execution_times["lucim_environment_synthesizer"]
         
-        if self.execution_times["scenario_writer"] > 0:
-            agent_times.append(("Step 4 - Scenario Writer", self.execution_times["scenario_writer"]))
-            total_agent_time += self.execution_times["scenario_writer"]
+        if self.execution_times["lucim_scenario_synthesizer"] > 0:
+            agent_times.append(("Step 4 - LUCIM Scenario Synthesizer", self.execution_times["lucim_scenario_synthesizer"]))
+            total_agent_time += self.execution_times["lucim_scenario_synthesizer"]
         
         if self.execution_times["plantuml_writer"] > 0:
             agent_times.append(("Step 5 - PlantUML Writer", self.execution_times["plantuml_writer"]))
             total_agent_time += self.execution_times["plantuml_writer"]
         
-        if self.execution_times["plantuml_messir_auditor"] > 0:
-            agent_times.append(("Step 6 - PlantUML Messir Auditor", self.execution_times["plantuml_messir_auditor"]))
-            total_agent_time += self.execution_times["plantuml_messir_auditor"]
+        if self.execution_times["plantuml_lucim_auditor"] > 0:
+            agent_times.append(("Step 6 - PlantUML Messir Auditor", self.execution_times["plantuml_lucim_auditor"]))
+            total_agent_time += self.execution_times["plantuml_lucim_auditor"]
         
-        if self.execution_times["plantuml_messir_corrector"] > 0:
-            agent_times.append(("Step 7 - PlantUML Messir Corrector", self.execution_times["plantuml_messir_corrector"]))
-            total_agent_time += self.execution_times["plantuml_messir_corrector"]
+        if self.execution_times["plantuml_lucim_corrector"] > 0:
+            agent_times.append(("Step 7 - PlantUML Messir Corrector", self.execution_times["plantuml_lucim_corrector"]))
+            total_agent_time += self.execution_times["plantuml_lucim_corrector"]
         
-        if self.execution_times["plantuml_messir_final_auditor"] > 0:
-            agent_times.append(("Step 8 - PlantUML Messir Final Auditor", self.execution_times["plantuml_messir_final_auditor"]))
-            total_agent_time += self.execution_times["plantuml_messir_final_auditor"]
+        if self.execution_times["plantuml_lucim_final_auditor"] > 0:
+            agent_times.append(("Step 8 - PlantUML Messir Final Auditor", self.execution_times["plantuml_lucim_final_auditor"]))
+            total_agent_time += self.execution_times["plantuml_lucim_final_auditor"]
         
         # Sort agents by execution time (descending)
         agent_times.sort(key=lambda x: x[1], reverse=True)
@@ -1859,13 +1826,13 @@ class NetLogoOrchestrator:
                 self.logger.info(f"      {agent_name}: {FormatUtils.format_duration(agent_time)} ({percentage:.1f}%)")
         
         print(f"\n🔍 DETAILED AGENT STATUS:")
-        self.logger.info(f"   Step 1 - Syntax Parser Agent: {'✓ SUCCESS' if syntax_parser_success else '✗ FAILED'}")
+        self.logger.info(f"   Step 1 - Syntax Parser Agent: {'✓ SUCCESS' if netlogo_abstract_syntax_extractor_success else '✗ FAILED'}")
         
         # Step 2 - Semantics Parser
         if semantics_skipped:
             self.logger.info(f"   Step 2 - Semantics Parser Agent: ⏭️  SKIPPED (Syntax Parser failed)")
         else:
-            self.logger.info(f"   Step 2 - Semantics Parser Agent: {'✓ SUCCESS' if semantics_parser_success else '✗ FAILED'}")
+            self.logger.info(f"   Step 2 - Semantics Parser Agent: {'✓ SUCCESS' if behavior_extractor_success else '✗ FAILED'}")
         
         # Step 3 - Messir Mapper
         if messir_skipped:
@@ -1886,44 +1853,44 @@ class NetLogoOrchestrator:
             self.logger.info(f"   Step 5 - PlantUML Writer Agent: {'✓ SUCCESS' if plantuml_writer_success else '✗ FAILED'}")
         
         # Step 6 - PlantUML Messir Auditor
-        if plantuml_messir_auditor_skipped:
+        if plantuml_lucim_auditor_skipped:
             self.logger.info(f"   Step 6 - PlantUML Messir Auditor Agent: ⏭️  SKIPPED (PlantUML diagrams failed)")
         else:
-            self.logger.info(f"   Step 6 - PlantUML Messir Auditor Agent: {'✓ SUCCESS' if plantuml_messir_auditor_success else '✗ FAILED'}")
+            self.logger.info(f"   Step 6 - PlantUML Messir Auditor Agent: {'✓ SUCCESS' if plantuml_lucim_auditor_success else '✗ FAILED'}")
         
         # Step 7 - PlantUML Messir Corrector
-        if not plantuml_messir_corrector_executed:
+        if not plantuml_lucim_corrector_executed:
             self.logger.info(f"   Step 7 - PlantUML Messir Corrector Agent: ⏭️  SKIPPED (diagrams already compliant)")
         else:
-            self.logger.info(f"   Step 7 - PlantUML Messir Corrector Agent: {'✓ SUCCESS' if plantuml_messir_corrector_success else '✗ FAILED'}")
+            self.logger.info(f"   Step 7 - PlantUML Messir Corrector Agent: {'✓ SUCCESS' if plantuml_lucim_corrector_success else '✗ FAILED'}")
         
         # Step 8 - PlantUML Messir Final Auditor
-        if not plantuml_messir_final_auditor_executed:
+        if not plantuml_lucim_final_auditor_executed:
             self.logger.info(f"   Step 8 - PlantUML Messir Final Auditor Agent: ⏭️  SKIPPED (corrector was skipped or not required)")
         else:
-            self.logger.info(f"   Step 8 - PlantUML Messir Final Auditor Agent: {'✓ SUCCESS' if plantuml_messir_final_auditor_success else '✗ FAILED'}")
+            self.logger.info(f"   Step 8 - PlantUML Messir Final Auditor Agent: {'✓ SUCCESS' if plantuml_lucim_final_auditor_success else '✗ FAILED'}")
         
         self.logger.info(f"\n📁 OUTPUT FILES GENERATED:")
         for result_key, result_data in result.items():
             if result_data and isinstance(result_data, dict):
                 agent_type = result_data.get("agent_type", "unknown")
-                if agent_type == "syntax_parser":
-                    self.logger.info(f"   • Syntax Parser: {base_name}_{self.timestamp}_{self.model}_1a_syntax_parser_v1_*.md")
-                elif agent_type == "semantics_parser":
-                    self.logger.info(f"   • Semantics Parser: {base_name}_{self.timestamp}_{self.model}_1b_semantics_parser_v1_*.json/md")
-                elif agent_type == "messir_mapper":
-                    self.logger.info(f"   • Messir Mapper: {base_name}_{self.timestamp}_{self.model}_2_messir_v1_*.json/md")
-                elif agent_type == "scenario_writer":
+                if agent_type == "netlogo_abstract_syntax_extractor":
+                    self.logger.info(f"   • Syntax Parser: {base_name}_{self.timestamp}_{self.model}_1a_netlogo_abstract_syntax_extractor_v1_*.md")
+                elif agent_type == "behavior_extractor":
+                    self.logger.info(f"   • Semantics Parser: {base_name}_{self.timestamp}_{self.model}_1b_behavior_extractor_v1_*.json/md")
+                elif agent_type == "lucim_environment_synthesizer":
+                    self.logger.info(f"   • LUCIM Environment Synthesizer: {base_name}_{self.timestamp}_{self.model}_3_lucim_environment_synthesizer_v1_*.json/md")
+                elif agent_type == "lucim_scenario_synthesizer":
                     self.logger.info(f"   • Scenarios: {base_name}_{self.timestamp}_{self.model}_3_scenario_v1_*.md")
                 elif agent_type == "plantuml_writer":
                     self.logger.info(f"   • PlantUML Diagrams: {base_name}_{self.timestamp}_{self.model}_4_plantuml_*.json/md/.puml")
-                elif agent_type == "plantuml_messir_auditor":
+                elif agent_type == "plantuml_lucim_auditor":
                     self.logger.info(f"   • PlantUML Messir Audit: {base_name}_{self.timestamp}_{self.model}_5_messir_audit_*.json/md/.puml")
-                elif agent_type == "plantuml_messir_corrector":
+                elif agent_type == "plantuml_lucim_corrector":
                     self.logger.info(f"   • PlantUML Messir Corrector: {base_name}_{self.timestamp}_{self.model}_7_messir_corrector_*.json/md/.puml")
-                elif agent_type == "plantuml_messir_final_auditor":
+                elif agent_type == "plantuml_lucim_final_auditor":
                     self.logger.info(f"   • PlantUML Messir Final Auditor: {base_name}_{self.timestamp}_{self.model}_8_messir_final_auditor_*.json/md/.puml")
-                elif agent_type == "plantuml_messir_auditor" and not plantuml_messir_corrector_executed:
+                elif agent_type == "plantuml_lucim_auditor" and not plantuml_lucim_corrector_executed:
                     self.logger.info(f"   • PlantUML Messir Auditor (Compliant): {base_name}_{self.timestamp}_{self.model}_6_messir_audit_*.json/md/.puml")
         
         self.logger.info(f"\n🎯 PIPELINE COMPLETION:")
@@ -1945,8 +1912,8 @@ class NetLogoOrchestrator:
         }
 
         # Prefer Step 8 (final auditor) if available
-        final_audit_data = result.get("plantuml_messir_final_auditor", {}).get("data") if plantuml_messir_final_auditor_success else None
-        initial_audit_data = result.get("plantuml_messir_auditor", {}).get("data") if plantuml_messir_auditor_success else None
+        final_audit_data = result.get("plantuml_lucim_final_auditor", {}).get("data") if plantuml_lucim_final_auditor_success else None
+        initial_audit_data = result.get("plantuml_lucim_auditor", {}).get("data") if plantuml_lucim_auditor_success else None
 
         if isinstance(final_audit_data, dict) and final_audit_data.get("verdict") in ("compliant", "non-compliant"):
             final_compliance["source"] = "final_auditor_step8"
@@ -1967,7 +1934,7 @@ class NetLogoOrchestrator:
             self.logger.info(f"   🎯 Result: Final audit confirms Messir compliance")
         elif final_compliance["status"] == "NON-COMPLIANT":
             self.logger.info(f"   ❌ FINAL COMPLIANCE: NON-COMPLIANT")
-            self.logger.info(f"   📊 Result: One or more MESSIR rules were violated")
+            self.logger.info(f"   📊 Result: One or more LUCIM rules were violated")
         else:
             self.logger.info(f"   ❓ COMPLIANCE STATUS: UNKNOWN")
             self.logger.info(f"   ⚠️  Result: No authoritative compliance verdict available")
@@ -2425,8 +2392,8 @@ async def main():
     total_successful_agents = 0
     
     agent_keys = [
-        "ast", "semantics", "messir_mapper", "scenario_writer",
-        "plantuml_writer", "plantuml_messir_auditor", "plantuml_messir_corrector", "plantuml_messir_final_auditor"
+        "ast", "semantics", "lucim_environment_synthesizer", "lucim_scenario_synthesizer",
+        "plantuml_writer", "plantuml_lucim_auditor", "plantuml_lucim_corrector", "plantuml_lucim_final_auditor"
     ]
     
     for result_key, result in all_results.items():

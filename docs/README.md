@@ -1,17 +1,17 @@
-# NetLogo to MESSIR Multi-Agent Orchestration System
+# NetLogo to LUCIM Multi-Agent Orchestration System
 
-A sophisticated multi-agent AI system that automatically converts NetLogo agent-based models into MESSIR (Multi-Entity System Specification in Relational) diagrams through an orchestrated pipeline of specialized AI agents.
+A sophisticated multi-agent AI system that automatically converts NetLogo agent-based models into LUCIM (Multi-Entity System Specification in Relational) diagrams through an orchestrated pipeline of specialized AI agents.
 
 ## 🚀 Overview
 
-This project implements an 8-step orchestration pipeline that transforms NetLogo simulation models into standardized MESSIR PlantUML diagrams. The system uses multiple specialized AI agents; steps 01 (Syntax) and 02 (Semantics) are always executed in parallel to optimize throughput, and the pipeline continues sequentially from step 03.
+This project implements an 8-step orchestration pipeline that transforms NetLogo simulation models into standardized LUCIM PlantUML diagrams. The system uses multiple specialized AI agents; steps 01 (Syntax) and 02 (Semantics) are always executed in parallel to optimize throughput, and the pipeline continues sequentially from step 03.
 
 ### Key Features
 
 - **Multi-Agent Architecture**: 7 specialized AI agents handling different aspects of the conversion
 - **Multi-Persona Support**: Interactive selection of persona sets for different agent configurations
 - **Automated Orchestration**: Parallel-first for steps 01–02, then sequential with error correction and compliance auditing
-- **MESSIR Compliance**: Ensures generated diagrams follow MESSIR-UCI standards
+- **LUCIM Compliance**: Ensures generated diagrams follow LUCIM-UCI standards
 - **Multiple AI Model Support**: Compatible with GPT-5, GPT-5-mini, and GPT-5-nano
 - **Comprehensive Logging**: Detailed execution tracking and performance metrics
 - **Cost Optimization**: Built-in cost analysis and token usage monitoring
@@ -28,20 +28,20 @@ For a concise overview of the orchestration flow, per-agent inputs/outputs, and 
 ### The 8-Step Orchestration Pipeline
 
 1. **Syntax Parser** - Extracts and structures NetLogo code components
-2. **Semantics Parser** - Analyzes behavioral patterns and agent interactions
-3. **MESSIR Mapper** - Maps NetLogo concepts to MESSIR entities and relationships
-4. **Scenario Writer** - Generates MESSIR scenario descriptions
+2. **Behavior Extractor** - Extracts behavioral patterns and agent interactions
+3. **LUCIM Mapper** - Maps NetLogo concepts to LUCIM entities and relationships
+4. **LUCIM Scenario Synthesizer** - Synthesizes LUCIM scenario descriptions
 5. **PlantUML Writer** - Creates PlantUML diagram code
-6. **Compliance Auditor** - Validates MESSIR rule compliance
+6. **Compliance Auditor** - Validates LUCIM rule compliance
 7. **Corrector** - Fixes non-compliance issues (if needed)
 8. **Final Audit** - Confirms final compliance
 
 ### AI Agents
 
-- `NetLogoSyntaxParser` - Code structure analysis
-- `NetLogoSemanticsParser` - Behavioral pattern extraction
+- `NetLogoAbstractSyntaxExtractor` - Abstract syntax extraction
+- `NetLogoBehaviorExtractor` - Behavioral pattern extraction
 - `MessirMapper` - Concept mapping and translation
-- `ScenarioWriter` - MESSIR scenario generation
+- `LUCIMScenarioSynthesizer` - LUCIM scenario synthesis
 - `PlantUMLWriter` - Diagram code generation
 - `PlantUMLAuditor` - Compliance validation
 - `PlantUMLCorrector` - Error correction
@@ -51,10 +51,10 @@ For a concise overview of the orchestration flow, per-agent inputs/outputs, and 
 ```
 netlogo-to-messir/
 ├── orchestrator.py                         # Main orchestration engine
-├── agent_1_syntax_parser.py               # Syntax parsing agent
-├── agent_2_semantics_parser.py            # Semantics analysis agent
-├── agent_3_messir_concepts_mapper.py      # MESSIR mapping agent
-├── agent_4_scenario_writer.py             # Scenario writing agent
+├── agent_1_netlogo_abstract_syntax_extractor.py               # NetLogo Abstract Syntax Extractor agent
+├── agent_2_netlogo_behavior_extractor.py  # Behavior extraction agent
+├── agent_3_lucim_environment_synthesizer.py      # LUCIM Environment Synthesizer agent
+├── agent_4_lucim_scenario_synthesizer.py # LUCIM scenario synthesis agent
 ├── agent_5_plantuml_writer.py             # PlantUML generation agent
 ├── agent_6_plantuml_auditor.py             # Compliance auditing agent
 ├── agent_7_plantuml_corrector.py          # Error correction agent
@@ -75,10 +75,10 @@ netlogo-to-messir/
 │   ├── signaling-game-netlogo-code.md
 │   └── archive-initial-case-studies/
 ├── input-persona/                         # AI agent personas and rules
-│   ├── PSN_1_NetLogoSyntaxParser-v5.md
-│   ├── PSN_2_NetlogoSemanticsParser-v4.md
-│   ├── PSN_3_MessirUCIConceptsMapper-v3.md
-│   ├── PSN_4_MessirUCIScenarioWriter-v2.md
+│   ├── PSN_1_NetLogoAbstractSyntaxExtractor-v5.md
+│   ├── PSN_2_NetlogoBehaviorExtractor.md
+│   ├── PSN_3_LUCIMEnvironmentSynthesizer-v3.md
+│   ├── PSN_4_LUCIMScenarioSynthesizer.md
 │   ├── PSN_5_PlantUMLWriter-v2.md
 │   ├── PSN_6_PlantUMLMessirAuditor-v6.md
 │   ├── PSN_7_PlantUMLMessirCorrector-v2.md
@@ -221,10 +221,10 @@ code-netlogo-to-messir/
       YYYY-MM-DD/
         HHMM-<PERSONA_SET>/
           <case-name>/
-            01-syntax_parser/
-            02-semantics_parser/
-            03-messir_mapper/
-            04-scenario_writer/
+            01-netlogo_abstract_syntax_extractor/
+            02-behavior_extractor/
+            03-lucim_environment_synthesizer/
+            04-lucim_scenario_synthesizer/
             05-plantuml_writer/
             06-plantuml_messir_auditor/
             07-plantuml_messir_corrector/
@@ -247,15 +247,15 @@ Validation script: `code-netlogo-to-messir/validate_task_success_criteria.py` (c
 
 ### Reference: Messir/UCI Rules Path (Consistency Check)
 
-The canonical Messir/UCI compliance rules file is referenced through the `MESSIR_RULES_FILE` constant in `utils_config_constants.py` and must point to:
+The canonical Messir/UCI compliance rules file is referenced through the `LUCIM_RULES_FILE` constant in `utils_config_constants.py` and must point to:
 
-`code-netlogo-to-messir/input-persona/DSL_Target_MUCIM-full-definition-for-compliance.md`
+`code-netlogo-to-messir/input-persona/DSL_Target_LUCIM-full-definition-for-compliance.md`
 
 Quick verification commands:
 
 ```bash
-rg -n "MESSIR_RULES_FILE" code-netlogo-to-messir
-rg -n "DSL_Target_MUCIM-full-definition-for-compliance.md" .
+rg -n "LUCIM_RULES_FILE" code-netlogo-to-messir
+rg -n "DSL_Target_LUCIM-full-definition-for-compliance.md" .
 ```
 
 If either command shows mismatches, update the references in Python agents and Markdown docs accordingly.
@@ -296,7 +296,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙏 Acknowledgments
 
 - NetLogo community for providing diverse simulation models
-- MESSIR-UCI specification contributors
+- LUCIM-UCI specification contributors
 - PlantUML project for diagram generation capabilities
 
 ## 📚 Citation
@@ -305,7 +305,7 @@ If you use this work in your research, please cite:
 
 ```bibtex
 @software{netlogo_to_messir_2025,
-  title={NetLogo to MESSIR Multi-Agent Orchestration System},
+  title={NetLogo to LUCIM Multi-Agent Orchestration System},
   author={Ries, Benoit},
   year={2025},
   url={https://github.com/benoitries/netlogo-to-messir}

@@ -48,9 +48,9 @@ async def test_orchestrator_fix():
                     sem_success = file_results["semantics"].get("data") is not None
                     print(f"   Step 2 - Semantics Parser: {'✅' if sem_success else '❌'}")
                 
-                if "messir_mapper" in file_results:
-                    messir_success = file_results["messir_mapper"].get("data") is not None
-                    print(f"   Step 3 - Messir Mapper: {'✅' if messir_success else '❌'}")
+                if "lucim_environment_synthesizer" in file_results:
+                    lucim_environment_success = file_results["lucim_environment_synthesizer"].get("data") is not None
+                    print(f"   Step 3 - LUCIM Environment Synthesizer: {'✅' if lucim_environment_success else '❌'}")
         
         return True
         

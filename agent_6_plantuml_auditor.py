@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 NetLogo PlantUML Auditor Agent using OpenAI models
-Audits PlantUML sequence diagrams for Messir UCI compliance using OpenAI models.
+Audits PlantUML sequence diagrams for LUCIM UCI compliance using OpenAI models.
 """
 
 import os
@@ -17,32 +17,30 @@ from utils_openai_client import create_and_wait, get_output_text, get_reasoning_
 from utils_config_constants import expected_keys_for_agent
 
 from utils_config_constants import (
-    PERSONA_PLANTUML_AUDITOR, OUTPUT_DIR, MESSIR_RULES_FILE,
-    AGENT_VERSION_PLANTUML_AUDITOR, get_reasoning_config,
-    validate_agent_response, DEFAULT_MODEL, AGENT_TIMEOUTS)
+    PERSONA_PLANTUML_AUDITOR, OUTPUT_DIR, LUCIM_RULES_FILE,
+    get_reasoning_config, validate_agent_response, DEFAULT_MODEL, AGENT_TIMEOUTS)
 
 # Configuration
 PERSONA_FILE = PERSONA_PLANTUML_AUDITOR
 WRITE_FILES = True
 
-# Load persona and Messir rules
+# Load persona and LUCIM rules
 persona = PERSONA_FILE.read_text(encoding="utf-8")
-messir_rules = ""
+lucim_rules = ""
 try:
-    messir_rules = MESSIR_RULES_FILE.read_text(encoding="utf-8")
+    lucim_rules = LUCIM_RULES_FILE.read_text(encoding="utf-8")
 except FileNotFoundError:
-    raise SystemExit(f"ERROR: Compliance rules file not found: {MESSIR_RULES_FILE}")
+    raise SystemExit(f"ERROR: Compliance rules file not found: {LUCIM_RULES_FILE}")
 
 # Concatenate persona and rules
-combined_persona = f"{persona}\n\n{messir_rules}"
+combined_persona = f"{persona}\n\n{lucim_rules}"
 
-AGENT_VERSION = AGENT_VERSION_PLANTUML_AUDITOR
 
 def sanitize_model_name(model_name: str) -> str:
     """Sanitize model name by replacing hyphens with underscores for valid identifier."""
     return model_name.replace("-", "_")
 
-class NetLogoPlantUMLMessirAuditorAgent(LlmAgent):
+class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
     model: str = DEFAULT_MODEL
     timestamp: str = ""
     name: str = "NetLogo PlantUML Auditor"
@@ -137,7 +135,7 @@ class NetLogoPlantUMLMessirAuditorAgent(LlmAgent):
 
         Args:
             puml_file_path: Path to the standalone .puml file from Step 5 (mandatory)
-            mucim_dsl_file_path: Path to the MUCIM DSL full definition file (mandatory)
+            mucim_dsl_file_path: Path to the LUCIM DSL full definition file (mandatory)
             filename: Optional filename for reference
 
         Returns:
@@ -167,23 +165,23 @@ class NetLogoPlantUMLMessirAuditorAgent(LlmAgent):
                 "output_tokens": 0
             }
         
-        # Read MUCIM DSL file content
+        # Read LUCIM DSL file content
         try:
             mucim_dsl_content = pathlib.Path(mucim_dsl_file_path).read_text(encoding="utf-8")
         except FileNotFoundError:
             return {
-                "reasoning_summary": f"Error: MUCIM DSL file not found at {mucim_dsl_file_path}",
+                "reasoning_summary": f"Error: LUCIM DSL file not found at {mucim_dsl_file_path}",
                 "data": None,
-                "errors": [f"Required MUCIM DSL file not found: {mucim_dsl_file_path}"],
+                "errors": [f"Required LUCIM DSL file not found: {mucim_dsl_file_path}"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
             }
         except Exception as e:
             return {
-                "reasoning_summary": f"Error reading MUCIM DSL file: {e}",
+                "reasoning_summary": f"Error reading LUCIM DSL file: {e}",
                 "data": None,
-                "errors": [f"Failed to read MUCIM DSL file {mucim_dsl_file_path}: {e}"],
+                "errors": [f"Failed to read LUCIM DSL file {mucim_dsl_file_path}: {e}"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
@@ -198,7 +196,7 @@ Standalone PlantUML Source Code (.puml file):
 {puml_content}
 ```
 
-MUCIM DSL Full Definition:
+LUCIM DSL Full Definition:
 ```markdown
 {mucim_dsl_content}
 ```

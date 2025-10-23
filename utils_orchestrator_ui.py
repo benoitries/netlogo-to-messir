@@ -576,14 +576,14 @@ class OrchestratorUI:
             True if the directory contains required persona files
         """
         required_files = [
-            "PSN_1_NetLogoSyntaxParser.md",
-            "PSN_2_NetlogoSemanticsParser.md", 
-            "PSN_3_MessirUCIConceptsMapper.md",
-            "PSN_4_MessirUCIScenarioWriter.md",
+            "PSN_1_NetLogoAbstractSyntaxExtractor.md",
+            "PSN_2_NetlogoBehaviorExtractor.md", 
+            "PSN_3_LUCIMEnvironmentSynthesizer.md",
+            "PSN_4_LUCIMScenarioSynthesizer.md",
             "PSN_5_PlantUMLWriter.md",
             "PSN_6_PlantUMLMessirAuditor.md",
             "PSN_7_PlantUMLMessirCorrector.md",
-            "DSL_Target_MUCIM-full-definition-for-compliance.md"
+            "DSL_Target_LUCIM-full-definition-for-compliance.md"
         ]
         
         for required_file in required_files:

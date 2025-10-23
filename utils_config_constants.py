@@ -17,24 +17,23 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Input directories - use environment variables if set, otherwise use default paths
 INPUT_NETLOGO_DIR = Path(os.getenv("INPUT_NETLOGO_DIR", BASE_DIR / "input-netlogo"))
-INPUT_ICRASH_DIR = Path(os.getenv("INPUT_ICRASH_DIR", BASE_DIR / "input-icrash"))
-INPUT_IMAGES_DIR = Path(os.getenv("INPUT_IMAGES_DIR", BASE_DIR / "input-images"))
+INPUT_VALID_EXAMPLES_DIR = Path(os.getenv("INPUT_VALID_EXAMPLES_DIR", BASE_DIR / "input-valid-examples"))
 INPUT_PERSONA_DIR = Path(os.getenv("INPUT_PERSONA_DIR", BASE_DIR / "input-persona"))
 
 # Output directory
 OUTPUT_DIR = BASE_DIR / "output"
 
 # Persona files (default to persona-v1)
-PERSONA_SYNTAX_PARSER = INPUT_PERSONA_DIR / "persona-v1" / "PSN_1_NetLogoSyntaxParser.md"
-PERSONA_SEMANTICS_PARSER = INPUT_PERSONA_DIR / "persona-v1" / "PSN_2_NetlogoSemanticsParser.md"
-PERSONA_MESSIR_MAPPER = INPUT_PERSONA_DIR / "persona-v1" / "PSN_3_MessirUCIConceptsMapper.md"
-PERSONA_SCENARIO_WRITER = INPUT_PERSONA_DIR / "persona-v1" / "PSN_4_MessirUCIScenarioWriter.md"
+PERSONA_NETLOGO_ABSTRACT_SYNTAX_EXTRACTOR = INPUT_PERSONA_DIR / "persona-v1" / "PSN_1_NetLogoAbstractSyntaxExtractor.md"
+PERSONA_BEHAVIOR_EXTRACTOR = INPUT_PERSONA_DIR / "persona-v1" / "PSN_2_NetlogoBehaviorExtractor.md"
+PERSONA_LUCIM_ENVIRONMENT_SYNTHESIZER = INPUT_PERSONA_DIR / "persona-v1" / "PSN_3_LUCIMEnvironmentSynthesizer.md"
+PERSONA_LUCIM_SCENARIO_SYNTHESIZER = INPUT_PERSONA_DIR / "persona-v1" / "PSN_4_LUCIMScenarioSynthesizer.md"
 PERSONA_PLANTUML_WRITER = INPUT_PERSONA_DIR / "persona-v1" / "PSN_5_PlantUMLWriter.md"
 PERSONA_PLANTUML_AUDITOR = INPUT_PERSONA_DIR / "persona-v1" / "PSN_6_PlantUMLMessirAuditor.md"
 PERSONA_PLANTUML_CORRECTOR = INPUT_PERSONA_DIR / "persona-v1" / "PSN_7_PlantUMLMessirCorrector.md"
 
 # Rules files (default to persona-v1)
-MESSIR_RULES_FILE = INPUT_PERSONA_DIR / "persona-v1" / "DSL_Target_MUCIM-full-definition-for-compliance.md"
+LUCIM_RULES_FILE = INPUT_PERSONA_DIR / "persona-v1" / "DSL_Target_LUCIM-full-definition-for-compliance.md"
 
 # Default persona set
 DEFAULT_PERSONA_SET = "persona-v1"
@@ -42,16 +41,7 @@ DEFAULT_PERSONA_SET = "persona-v1"
 # File patterns
 NETLOGO_CODE_PATTERN = "*-netlogo-code.md"
 NETLOGO_INTERFACE_PATTERN = "*-netlogo-interface-*.png"
-ICRASH_PATTERN = "*.pdf"
 
-# Agent versions
-AGENT_VERSION_SYNTAX_PARSER = "v5"
-AGENT_VERSION_SEMANTICS_PARSER = "v4"
-AGENT_VERSION_MESSIR_MAPPER = "v3"
-AGENT_VERSION_SCENARIO_WRITER = "v2"
-AGENT_VERSION_PLANTUML_WRITER = "v2"
-AGENT_VERSION_PLANTUML_AUDITOR = "v6"
-AGENT_VERSION_PLANTUML_CORRECTOR = "v2"
 
 # Available AI models (single source of truth)
 # Note: Only update model names here.
@@ -67,25 +57,25 @@ DEFAULT_MODEL = AVAILABLE_MODELS[0] if AVAILABLE_MODELS else ""
 # - reasoning_summary: "auto" or "manual"
 # - text_verbosity: "low", "medium", or "high"
 AGENT_CONFIGS = {
-    "syntax_parser": {
+    "netlogo_abstract_syntax_extractor": {
         "model": DEFAULT_MODEL,
         "reasoning_effort": "medium",  # Increased for better parsing accuracy
         "reasoning_summary": "auto",
         "text_verbosity": "medium"
     },
-    "semantics_parser": {
+    "behavior_extractor": {
         "model": DEFAULT_MODEL,
         "reasoning_effort": "medium",  # Increased for better semantic analysis
         "reasoning_summary": "auto",
         "text_verbosity": "medium"
     },
-    "messir_mapper": {
+    "lucim_environment_synthesizer": {
         "model": DEFAULT_MODEL,
         "reasoning_effort": "medium",
         "reasoning_summary": "auto",
         "text_verbosity": "medium"
     },
-    "scenario_writer": {
+    "lucim_scenario_synthesizer": {
         "model": DEFAULT_MODEL,
         "reasoning_effort": "medium",
         "reasoning_summary": "auto",
@@ -115,10 +105,10 @@ AGENT_CONFIGS = {
 # Agent-level polling timeouts for OpenAI Responses API
 # Default: None (no timeout) for all agents; CLI can override via presets
 AGENT_TIMEOUTS = {
-    "syntax_parser": None,
-    "semantics_parser": None,
-    "messir_mapper": None,
-    "scenario_writer": None,
+    "netlogo_abstract_syntax_extractor": None,
+    "behavior_extractor": None,
+    "lucim_environment_synthesizer": None,
+    "lucim_scenario_synthesizer": None,
     "plantuml_writer": None,
     "plantuml_auditor": None,
     "plantuml_corrector": None,
@@ -135,14 +125,13 @@ def ensure_directories():
     """Ensure all required directories exist"""
     OUTPUT_DIR.mkdir(exist_ok=True)
     INPUT_NETLOGO_DIR.mkdir(exist_ok=True)
-    INPUT_ICRASH_DIR.mkdir(exist_ok=True)
-    INPUT_IMAGES_DIR.mkdir(exist_ok=True)
     INPUT_PERSONA_DIR.mkdir(exist_ok=True)
+    # INPUT_VALID_EXAMPLES_DIR is a symlink, don't try to create it
 
 
 def get_agent_config(agent_name: str) -> dict:
     """Get the complete configuration for a specific agent"""
-    return AGENT_CONFIGS.get(agent_name, AGENT_CONFIGS["syntax_parser"])
+    return AGENT_CONFIGS.get(agent_name, AGENT_CONFIGS["netlogo_abstract_syntax_extractor"])
 
 def get_reasoning_config(agent_name: str) -> dict:
     """Get the complete API configuration for an agent including reasoning, text and model"""
@@ -228,10 +217,10 @@ COMMON_KEYS = {
 OPTIONAL_KEYS = {"raw_response"}
 
 AGENT_KEYS: Dict[str, Set[str]] = {
-    "syntax_parser": COMMON_KEYS | OPTIONAL_KEYS,
-    "semantics_parser": COMMON_KEYS | OPTIONAL_KEYS,
-    "messir_mapper": COMMON_KEYS | OPTIONAL_KEYS,
-    "scenario_writer": COMMON_KEYS | OPTIONAL_KEYS,
+    "netlogo_abstract_syntax_extractor": COMMON_KEYS | OPTIONAL_KEYS,
+    "behavior_extractor": COMMON_KEYS | OPTIONAL_KEYS,
+    "lucim_environment_synthesizer": COMMON_KEYS | OPTIONAL_KEYS,
+    "lucim_scenario_synthesizer": COMMON_KEYS | OPTIONAL_KEYS,
     "plantuml_writer": COMMON_KEYS | OPTIONAL_KEYS,
     "plantuml_auditor": COMMON_KEYS | OPTIONAL_KEYS,
     "plantuml_corrector": COMMON_KEYS | OPTIONAL_KEYS,
@@ -257,14 +246,14 @@ def get_persona_file_paths(persona_set: str = DEFAULT_PERSONA_SET) -> Dict[str, 
     persona_dir = INPUT_PERSONA_DIR / persona_set
     
     return {
-        "syntax_parser": persona_dir / "PSN_1_NetLogoSyntaxParser.md",
-        "semantics_parser": persona_dir / "PSN_2_NetlogoSemanticsParser.md",
-        "messir_mapper": persona_dir / "PSN_3_MessirUCIConceptsMapper.md",
-        "scenario_writer": persona_dir / "PSN_4_MessirUCIScenarioWriter.md",
+        "netlogo_abstract_syntax_extractor": persona_dir / "PSN_1_NetLogoAbstractSyntaxExtractor.md",
+        "behavior_extractor": persona_dir / "PSN_2_NetlogoBehaviorExtractor.md",
+        "lucim_environment_synthesizer": persona_dir / "PSN_3_LUCIMEnvironmentSynthesizer.md",
+        "lucim_scenario_synthesizer": persona_dir / "PSN_4_LUCIMScenarioSynthesizer.md",
         "plantuml_writer": persona_dir / "PSN_5_PlantUMLWriter.md",
         "plantuml_auditor": persona_dir / "PSN_6_PlantUMLMessirAuditor.md",
         "plantuml_corrector": persona_dir / "PSN_7_PlantUMLMessirCorrector.md",
-        "messir_rules": persona_dir / "DSL_Target_MUCIM-full-definition-for-compliance.md",
+        "messir_rules": persona_dir / "DSL_Target_LUCIM-full-definition-for-compliance.md",
         "dsl_il_syn_description": persona_dir / "DSL_IL_SYN-description.md",
         "dsl_il_syn_mapping": persona_dir / "DSL_IL_SYN-mapping.md",
         "dsl_il_sem_description": persona_dir / "DSL_IL_SEM-description.md",

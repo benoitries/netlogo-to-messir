@@ -50,10 +50,10 @@ DEFAULT_OUTPUT_V005_DIR = REPO_ROOT / "output" / "v0.05"
 
 # Heuristics to recognize a "combination" run folder
 STAGE_DIR_PREFIXES = [
-    "01-syntax_parser",
-    "02-semantics_parser",
-    "03-messir_mapper",
-    "04-scenario_writer",
+    "01-netlogo_abstract_syntax_extractor",
+    "02-behavior_extractor",
+    "03-lucim_environment_synthesizer",
+    "04-lucim_scenario_synthesizer",
     "05-plantuml_writer",
     "06-plantuml_messir_auditor",
     "07-plantuml_messir_corrector",
@@ -168,7 +168,7 @@ CAUSE_PATTERNS = [
     ("PlantUML generation error", re.compile(r"plantuml|puml.*(error|fail)", re.I)),
     ("Compliance auditor non-compliant", re.compile(r"final auditor|compliance|non[- ]?compliant", re.I)),
     ("Mapper/semantics linking issue", re.compile(r"(mapper|semantics).*fail|unresolved (reference|mapping)", re.I)),
-    ("Syntax parser failed", re.compile(r"syntax parser.*(error|fail)", re.I)),
+    ("NetLogo Abstract Syntax Extractor failed", re.compile(r"netlogo abstract syntax extractor.*(error|fail)", re.I)),
 ]
 
 SUCCESS_PATTERNS = [
