@@ -17,8 +17,8 @@ from utils_config_constants import (
 
 from google.adk.agents import LlmAgent
 from openai import OpenAI
-from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens
-from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
+from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens, format_prompt_for_responses_api
+from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts, write_input_instructions_before_api, write_all_output_files
 from utils_config_constants import expected_keys_for_agent
 from utils_logging import write_reasoning_md_from_payload
 from utils_task_loader import load_task_instruction
@@ -101,11 +101,15 @@ class NetLogoBehaviorExtractorAgent(LlmAgent):
                 setattr(self, key, value)
 
     
-    def parse_from_ilsem_and_ui(self, ui_image_paths: List[str], base_name: str) -> Dict[str, Any]:
+    def parse_from_ilsem_and_ui(self, ui_image_paths: List[str], base_name: str, base_output_dir: str = None) -> Dict[str, Any]:
         """
         Build semantics using only IL-SEM mapping/description and two NetLogo interface images.
         This method is the canonical Stage 2 entry point (no AST, no raw code).
         """
+        # Resolve base output directory (per-agent if provided)
+        if base_output_dir is None:
+            base_output_dir = OUTPUT_DIR
+        
         # Base persona + IL-SEM references
         instructions_sections: List[str] = [persona]
         il_sem_info: List[str] = []
@@ -162,6 +166,12 @@ Filename: {base_name}
 4) If information is insufficient for a rich model, return a minimal, valid state machine schema with placeholders.
 """
 
+        # Create single system_prompt variable for both API call and file generation
+        system_prompt = f"{instructions}\n\n{input_text}"
+        
+        # Write input-instructions.md BEFORE API call for debugging
+        write_input_instructions_before_api(base_output_dir, system_prompt)
+
         exact_input_tokens = self.count_input_tokens(instructions, input_text)
         try:
             api_config = get_reasoning_config("behavior_extractor")
@@ -169,8 +179,8 @@ Filename: {base_name}
                 api_config["reasoning"]["effort"] = self.reasoning_effort
                 api_config["reasoning"]["summary"] = self.reasoning_summary
             api_config.update({
-                "instructions": instructions,
-                "input": input_text
+                "instructions": format_prompt_for_responses_api(system_prompt),
+                "input": [{"role": "user", "content": system_prompt}]
             })
 
             from utils_config_constants import AGENT_TIMEOUTS
@@ -325,97 +335,22 @@ Filename: {base_name}
             return estimated_tokens
     
     def save_results(self, results: Dict[str, Any], base_name: str, model_name: str, step_number = None, output_dir = None):
-        """Save parsing results to a single JSON file."""
+        """Save parsing results using unified output file generation."""
         if not WRITE_FILES:
             return
             
-        # New format: base-name_timestamp_AI-model_step_agent-name_version_reasoning-suffix_rest
-        agent_name = "netlogo_behavior_extractor"
-        # Use the agent's current reasoning level instead of global config
-        reasoning_suffix = f"reasoning-{self.reasoning_effort}-{self.reasoning_summary}"
-        
         # Resolve base output directory (per-agent if provided)
         base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
-        # Save complete response as single JSON file (simplified)
-        json_file = base_output_dir / "output-response.json"
         
-        # Create complete response structure
-        complete_response = {
-            "agent_type": "netlogo_behavior_extractor",
-            "model": self.model,
-            "timestamp": self.timestamp,
-            "base_name": base_name,
-            "step_number": step_number,
-            "reasoning_summary": results.get("reasoning_summary", "").replace("\\n", "\n"),
-            "data": results.get("data", ""),
-            "errors": results.get("errors", []),
-            "tokens_used": results.get("tokens_used", 0),
-            "input_tokens": results.get("input_tokens", 0),
-            "visible_output_tokens": results.get("visible_output_tokens", 0),
-            "reasoning_tokens": results.get("reasoning_tokens", 0),
-            "total_output_tokens": results.get("total_output_tokens", (results.get("visible_output_tokens", 0) or 0) + (results.get("reasoning_tokens", 0) or 0)),
-            "raw_response": results.get("raw_response")
-        }
-        
-        # Validate response before saving
-        validation_errors = validate_agent_response("netlogo_behavior_extractor", complete_response)
-        if validation_errors:
-            print(f"[WARNING] Validation errors in behavior extractor response: {validation_errors}")
-        
-        # Verify exact keys before saving
-        expected_keys = expected_keys_for_agent("netlogo_behavior_extractor")
-        ok, missing, extra = verify_exact_keys(complete_response, expected_keys)
-        # Debug logging to diagnose schema/key mismatches and write targets
-        try:
-            print(f"[DEBUG] netlogo_behavior_extractor.save_results WRITE_FILES={WRITE_FILES}")
-            print(f"[DEBUG] netlogo_behavior_extractor.save_results output_dir={base_output_dir}")
-            print(f"[DEBUG] netlogo_behavior_extractor.save_results base_name={base_name} model={self.model} step_number={step_number}")
-            print(f"[DEBUG] netlogo_behavior_extractor emitted keys: {sorted(list(complete_response.keys()))}")
-            print(f"[DEBUG] netlogo_behavior_extractor expected keys: {sorted(list(expected_keys))}")
-            if not ok:
-                print(f"[ERROR] netlogo_behavior_extractor missing keys: {sorted(list(missing))}")
-                print(f"[ERROR] netlogo_behavior_extractor extra keys: {sorted(list(extra))}")
-        except Exception as e:
-            print(f"[WARNING] Failed to print debug schema info (netlogo_behavior_extractor): {e}")
-        if not ok:
-            raise ValueError(f"response.json keys mismatch for netlogo_behavior_extractor. Missing: {sorted(missing)} Extra: {sorted(extra)}")
-
-        # Save complete response as JSON file
-        json_file.write_text(json.dumps(complete_response, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"OK: {base_name} -> output-response.json")
-        
-        # Save reasoning payload as markdown file (centralized writer)
-        payload = {
-            "reasoning": results.get("reasoning"),
-            "reasoning_summary": results.get("reasoning_summary"),
-            "tokens_used": results.get("tokens_used"),
-            "input_tokens": results.get("input_tokens"),
-            "visible_output_tokens": results.get("visible_output_tokens"),
-            "total_output_tokens": results.get("total_output_tokens"),
-            "reasoning_tokens": results.get("reasoning_tokens"),
-            "usage": results.get("raw_usage"),
-            "errors": results.get("errors"),
-        }
-        write_reasoning_md_from_payload(
+        # Use unified function to write all output files
+        write_all_output_files(
             output_dir=base_output_dir,
-            agent_name=agent_name,
+            results=results,
+            agent_type="netlogo_behavior_extractor",
             base_name=base_name,
             model=self.model,
             timestamp=self.timestamp,
             reasoning_effort=self.reasoning_effort,
-            step_number=step_number,
-            payload=payload,
+            step_number=step_number
         )
-        print(f"OK: {base_name} -> output-reasoning.md")
-        
-        # Save data field as separate file
-        data_file = base_output_dir / "output-data.json"
-        if results.get("data"):
-            data_file.write_text(json.dumps(results["data"], indent=2, ensure_ascii=False), encoding="utf-8")
-            print(f"OK: {base_name} -> output-data.json")
-        else:
-            print(f"WARNING: No data to save for {base_name}")
-
-        # Write minimal artifacts (non-breaking additions)
-        write_minimal_artifacts(base_output_dir, results.get("raw_response"))
 

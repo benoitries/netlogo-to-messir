@@ -12,8 +12,8 @@ import tiktoken
 from typing import Dict, Any, List
 from google.adk.agents import LlmAgent
 from openai import OpenAI
-from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens
-from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
+from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens, format_prompt_for_responses_api
+from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts, write_input_instructions_before_api, write_all_output_files
 from utils_config_constants import expected_keys_for_agent
 from utils_logging import write_reasoning_md_from_payload
 from utils_task_loader import load_task_instruction
@@ -131,7 +131,7 @@ class NetLogoLucimEnvironmentSynthesizerAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def synthesize_lucim_environment(self, state_machine: Dict[str, Any], filename: str, ast_data: Dict[str, Any] = None, messir_dsl_content: str = None, icrash_contents: List[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def synthesize_lucim_environment(self, state_machine: Dict[str, Any], filename: str, ast_data: Dict[str, Any] = None, lucim_dsl_content: str = None, icrash_contents: List[Dict[str, Any]] = None, output_dir: str = None) -> Dict[str, Any]:
         """
         Synthesize LUCIM environment concepts from NetLogo state machine using the LUCIM Environment Synthesizer persona.
         
@@ -139,7 +139,7 @@ class NetLogoLucimEnvironmentSynthesizerAgent(LlmAgent):
             state_machine: NetLogo state machine as dictionary (from Step 02)
             filename: Filename for reference (required)
             ast_data: Step 01 AST data (MANDATORY)
-            messir_dsl_content: LUCIM DSL full definition content (MANDATORY)
+            lucim_dsl_content: LUCIM DSL full definition content (MANDATORY)
             icrash_contents: Optional list of iCrash case study files for reference
             
         Returns:
@@ -156,7 +156,7 @@ class NetLogoLucimEnvironmentSynthesizerAgent(LlmAgent):
                 "output_tokens": 0
             }
         
-        if messir_dsl_content is None or messir_dsl_content.strip() == "":
+        if lucim_dsl_content is None or lucim_dsl_content.strip() == "":
             return {
                 "reasoning_summary": "MISSING MANDATORY INPUT: LUCIM DSL full definition content is required",
                 "data": None,
@@ -194,9 +194,18 @@ Step 02 State Machine:
 
 LUCIM DSL Full Definition:
 ```
-{messir_dsl_content}
+{lucim_dsl_content}
 ```{icrash_reference}
 """
+        
+        # Create single system_prompt variable for both API call and file generation
+        system_prompt = f"{instructions}\n\n{input_text}"
+        
+        # Resolve base output directory (per-agent if provided)
+        base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
+        
+        # Write input-instructions.md BEFORE API call for debugging
+        write_input_instructions_before_api(base_output_dir, system_prompt)
         
         # Count input tokens exactly
         exact_input_tokens = self.count_input_tokens(instructions, input_text)
@@ -209,8 +218,8 @@ LUCIM DSL Full Definition:
                 api_config["reasoning"]["effort"] = self.reasoning_effort
                 api_config["reasoning"]["summary"] = self.reasoning_summary
             api_config.update({
-                "instructions": instructions,
-                "input": input_text
+                "instructions": format_prompt_for_responses_api(system_prompt),
+                "input": [{"role": "user", "content": system_prompt}]
             })
             
             from utils_config_constants import AGENT_TIMEOUTS
@@ -308,83 +317,21 @@ LUCIM DSL Full Definition:
 
     
     def save_results(self, results: Dict[str, Any], base_name: str, model_name: str, step_number = None, output_dir = None):
-        """Save parsing results to a single JSON file."""
+        """Save parsing results using unified output file generation."""
         if not WRITE_FILES:
             return
             
-        # New format: base-name_timestamp_AI-model_step_agent-name_version_reasoning-suffix_rest
-        agent_name = "lucim_environment_synthesizer"
-        # Use the agent's current reasoning level instead of global config
-        reasoning_suffix = f"reasoning-{self.reasoning_effort}-{self.reasoning_summary}"
-        
         # Resolve base output directory (per-agent if provided)
         base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
-        # Save complete response as single JSON file (simplified)
-        json_file = base_output_dir / "output-response.json"
-        
-        # Create complete response structure
-        complete_response = {
-            "agent_type": "lucim_environment_synthesizer",
-            "model": self.model,
-            "timestamp": self.timestamp,
-            "base_name": base_name,
-            "step_number": step_number,
-            "reasoning_summary": results.get("reasoning_summary", "").replace("\\n", "\n"),
-            "data": results.get("data", ""),
-            "errors": results.get("errors", []),
-            "tokens_used": results.get("tokens_used", 0),
-            "input_tokens": results.get("input_tokens", 0),
-            "visible_output_tokens": results.get("visible_output_tokens", 0),
-            "reasoning_tokens": results.get("reasoning_tokens", 0),
-            "total_output_tokens": results.get("total_output_tokens", results.get("output_tokens", 0)),
-            "raw_response": results.get("raw_response")
-        }
-        
-        # Validate response before saving
-        validation_errors = validate_agent_response("lucim_environment_synthesizer", complete_response)
-        if validation_errors:
-            print(f"[WARNING] Validation errors in LUCIM environment synthesizer response: {validation_errors}")
-        
-        # Verify exact keys before saving
-        expected_keys = expected_keys_for_agent("lucim_environment_synthesizer")
-        ok, missing, extra = verify_exact_keys(complete_response, expected_keys)
-        if not ok:
-            raise ValueError(f"response.json keys mismatch for lucim_environment_synthesizer. Missing: {sorted(missing)} Extra: {sorted(extra)}")
-
-        # Save complete response as JSON file
-        json_file.write_text(json.dumps(complete_response, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"OK: {base_name} -> output-response.json")
-        
-        # Save reasoning payload as markdown file (centralized writer)
-        payload = {
-            "reasoning": results.get("reasoning"),
-            "reasoning_summary": results.get("reasoning_summary"),
-            "tokens_used": results.get("tokens_used"),
-            "input_tokens": results.get("input_tokens"),
-            "output_tokens": results.get("output_tokens"),
-            "reasoning_tokens": results.get("reasoning_tokens"),
-            "usage": results.get("raw_usage"),
-            "errors": results.get("errors"),
-        }
-        write_reasoning_md_from_payload(
+            
+        # Use unified function to write all output files
+        write_all_output_files(
             output_dir=base_output_dir,
-            agent_name=agent_name,
+            results=results,
+            agent_type="lucim_environment_synthesizer",
             base_name=base_name,
             model=self.model,
             timestamp=self.timestamp,
             reasoning_effort=self.reasoning_effort,
-            step_number=step_number,
-            payload=payload,
+            step_number=step_number
         )
-        print(f"OK: {base_name} -> output-reasoning.md")
-        
-        # Save data field as separate file
-        data_file = base_output_dir / "output-data.json"
-        if results.get("data"):
-            data_file.write_text(json.dumps(results["data"], indent=2, ensure_ascii=False), encoding="utf-8")
-            print(f"OK: {base_name} -> output-data.json")
-        else:
-            print(f"WARNING: No data to save for {base_name}")
-
-        # Write minimal artifacts (non-breaking additions)
-        write_minimal_artifacts(base_output_dir, results.get("raw_response"))

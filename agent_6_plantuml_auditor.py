@@ -9,11 +9,11 @@ import json
 import datetime
 import pathlib
 import tiktoken
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from google.adk.agents import LlmAgent
 from openai import OpenAI
-from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
-from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary
+from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts, write_all_output_files, write_input_instructions_before_api
+from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, format_prompt_for_responses_api
 from utils_config_constants import expected_keys_for_agent
 from utils_task_loader import load_task_instruction
 
@@ -130,18 +130,22 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def audit_plantuml_diagrams(self, puml_file_path: str, mucim_dsl_file_path: str, filename: str = "input") -> Dict[str, Any]:
+    def audit_plantuml_diagrams(self, puml_file_path: str, lucim_dsl_file_path: str, filename: str = "input", step: int = 6, output_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
         """
         Audit PlantUML sequence diagrams for LUCIM UCI compliance using the PlantUML Auditor persona.
 
         Args:
             puml_file_path: Path to the standalone .puml file from Step 5 (mandatory)
-            mucim_dsl_file_path: Path to the LUCIM DSL full definition file (mandatory)
+            lucim_dsl_file_path: Path to the LUCIM DSL full definition file (mandatory)
             filename: Optional filename for reference
+            step: Step number for task file selection (default: 6)
 
         Returns:
             Dictionary containing reasoning, non-compliant rules, and any errors
         """
+        # Resolve base output directory (use provided output_dir or fall back to OUTPUT_DIR)
+        base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
+        
         instructions = f"{combined_persona}"
         
         # Load TASK instruction using utility function
@@ -171,12 +175,12 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
         
         # Read LUCIM DSL file content
         try:
-            mucim_dsl_content = pathlib.Path(mucim_dsl_file_path).read_text(encoding="utf-8")
+            lucim_dsl_content = pathlib.Path(lucim_dsl_file_path).read_text(encoding="utf-8")
         except FileNotFoundError:
             return {
-                "reasoning_summary": f"Error: LUCIM DSL file not found at {mucim_dsl_file_path}",
+                "reasoning_summary": f"Error: LUCIM DSL file not found at {lucim_dsl_file_path}",
                 "data": None,
-                "errors": [f"Required LUCIM DSL file not found: {mucim_dsl_file_path}"],
+                "errors": [f"Required LUCIM DSL file not found: {lucim_dsl_file_path}"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
@@ -185,7 +189,7 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
             return {
                 "reasoning_summary": f"Error reading LUCIM DSL file: {e}",
                 "data": None,
-                "errors": [f"Failed to read LUCIM DSL file {mucim_dsl_file_path}: {e}"],
+                "errors": [f"Failed to read LUCIM DSL file {lucim_dsl_file_path}: {e}"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
@@ -203,9 +207,15 @@ Standalone PlantUML Source Code (.puml file):
 
 LUCIM DSL Full Definition:
 ```markdown
-{mucim_dsl_content}
+{lucim_dsl_content}
 ```
 """
+        
+        # Create single system_prompt variable for both API call and file generation
+        system_prompt = f"{instructions}\n\n{input_text}"
+        
+        # Write input-instructions.md BEFORE API call for debugging
+        write_input_instructions_before_api(base_output_dir, system_prompt)
         
         # Count input tokens exactly
         exact_input_tokens = self.count_input_tokens(instructions, input_text)
@@ -218,8 +228,8 @@ LUCIM DSL Full Definition:
                 api_config["reasoning"]["effort"] = self.reasoning_effort
                 api_config["reasoning"]["summary"] = self.reasoning_summary
             api_config.update({
-                "instructions": instructions,
-                "input": input_text
+                "instructions": format_prompt_for_responses_api(system_prompt),
+                "input": [{"role": "user", "content": system_prompt}]
             })
             
             # Use unified helper with configured timeout
@@ -318,90 +328,21 @@ LUCIM DSL Full Definition:
 
     
     def save_results(self, results: Dict[str, Any], base_name: str, model_name: str, step_number = None, output_dir = None):
-        """Save parsing results to a single JSON file."""
+        """Save parsing results using unified output file generation."""
         if not WRITE_FILES:
             return
             
-        # New format: base-name_timestamp_AI-model_step_agent-name_version_reasoning-suffix_rest
-        agent_name = "plantuml_auditor"
-        # Use the agent's current reasoning level instead of global config
-        reasoning_suffix = f"reasoning-{self.reasoning_effort}-{self.reasoning_summary}"
-        
         # Resolve base output directory (per-agent if provided)
         base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
-        # Save complete response as single JSON file (simplified)
-        json_file = base_output_dir / "output-response.json"
         
-        # Create complete response structure
-        complete_response = {
-            "agent_type": "plantuml_auditor",
-            "model": self.model,
-            "timestamp": self.timestamp,
-            "base_name": base_name,
-            "step_number": step_number,
-            "reasoning_summary": results.get("reasoning_summary", "").replace("\\n", "\n"),
-            "data": results.get("data", ""),
-            "errors": results.get("errors", []),
-            "tokens_used": results.get("tokens_used", 0),
-            "input_tokens": results.get("input_tokens", 0),
-            "visible_output_tokens": results.get("visible_output_tokens", 0),
-            "reasoning_tokens": results.get("reasoning_tokens", 0),
-            "total_output_tokens": results.get("total_output_tokens", (results.get("visible_output_tokens", 0) or 0) + (results.get("reasoning_tokens", 0) or 0)),
-            "raw_response": results.get("raw_response")
-        }
-        
-        # Validate response before saving
-        validation_errors = validate_agent_response("plantuml_auditor", complete_response)
-        if validation_errors:
-            print(f"[WARNING] Validation errors in plantuml auditor response: {validation_errors}")
-        
-        # Verify exact keys before saving
-        expected_keys = expected_keys_for_agent("plantuml_auditor")
-        ok, missing, extra = verify_exact_keys(complete_response, expected_keys)
-        if not ok:
-            raise ValueError(f"response.json keys mismatch for plantuml_auditor. Missing: {sorted(missing)} Extra: {sorted(extra)}")
-
-        # Save complete response as JSON file
-        json_file.write_text(json.dumps(complete_response, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"OK: {base_name} -> output-response.json")
-        
-        # Save reasoning summary as markdown file
-        reasoning_file = base_output_dir / "output-reasoning.md"
-        reasoning_content = f"""# Reasoning Summary - {agent_name.title().replace('_', ' ')}
-
-**Base Name:** {base_name}
-**Model:** {self.model}
-**Timestamp:** {self.timestamp}
-**Step Number:** {step_number if step_number else 'N/A'}
-**Reasoning Level:** {self.reasoning_effort}
-**Reasoning Summary:** {results.get("reasoning_summary") or "No explicit reasoning summary available."}
-
-## Token Usage
-
-- **Total Tokens:** {results.get("tokens_used", 0):,}
-- **Input Tokens:** {results.get("input_tokens", 0):,}
-- **Visible Output Tokens:** {results.get("output_tokens", 0):,}
-- **Reasoning Tokens:** {results.get("reasoning_tokens", 0):,}
-- **Total Output Tokens (reasoning + visible):** {(results.get('output_tokens', 0) or 0) + (results.get('reasoning_tokens', 0) or 0):,}
-
-## Reasoning Summary
-
-{results.get("reasoning_summary") or "No explicit reasoning summary available."}
-
-## Errors
-
-{chr(10).join(f"- {error}" for error in results.get("errors", [])) if results.get("errors") else "No errors"}
-"""
-        reasoning_file.write_text(reasoning_content, encoding="utf-8")
-        print(f"OK: {base_name} -> output-reasoning.md")
-        
-        # Save data field as separate file
-        data_file = base_output_dir / "output-data.json"
-        if results.get("data"):
-            data_file.write_text(json.dumps(results["data"], indent=2, ensure_ascii=False), encoding="utf-8")
-            print(f"OK: {base_name} -> output-data.json")
-        else:
-            print(f"WARNING: No data to save for {base_name}")
-        
-        # Write minimal artifacts (non-breaking additions)
-        write_minimal_artifacts(base_output_dir, results.get("raw_response"))
+        # Use unified function to write all output files
+        write_all_output_files(
+            output_dir=base_output_dir,
+            results=results,
+            agent_type="plantuml_auditor",
+            base_name=base_name,
+            model=self.model,
+            timestamp=self.timestamp,
+            reasoning_effort=self.reasoning_effort,
+            step_number=step_number
+        )

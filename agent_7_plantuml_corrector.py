@@ -12,8 +12,8 @@ import tiktoken
 from typing import Dict, Any, List
 from google.adk.agents import LlmAgent
 from openai import OpenAI
-from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
-from utils_openai_client import get_usage_tokens, create_and_wait, get_output_text, get_reasoning_summary
+from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts, write_all_output_files, write_input_instructions_before_api
+from utils_openai_client import get_usage_tokens, create_and_wait, get_output_text, get_reasoning_summary, format_prompt_for_responses_api
 from utils_config_constants import expected_keys_for_agent
 from utils_task_loader import load_task_instruction
 from utils_plantuml import process_plantuml_file
@@ -132,7 +132,7 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
             return estimated_tokens
         
     def correct_plantuml_diagrams(self, plantuml_diagrams: Dict[str, Any],
-                                 non_compliant_rules: List[str], lucim_dsl_content: str = None, filename: str = "input") -> Dict[str, Any]:
+                                 non_compliant_rules: List[str], lucim_dsl_content: str = None, filename: str = "input", output_dir: str = None) -> Dict[str, Any]:
         """
         Correct PlantUML sequence diagrams based on non-compliant rules using the PlantUML Corrector persona.
         
@@ -203,6 +203,15 @@ LUCIM DSL Full Definition:
 ```
 """
         
+        # Create single system_prompt variable for both API call and file generation
+        system_prompt = f"{instructions}\n\n{input_text}"
+        
+        # Resolve base output directory (per-agent if provided)
+        base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
+        
+        # Write input-instructions.md BEFORE API call for debugging
+        write_input_instructions_before_api(base_output_dir, system_prompt)
+        
         # Count input tokens exactly
         exact_input_tokens = self.count_input_tokens(instructions, input_text)
         
@@ -214,8 +223,8 @@ LUCIM DSL Full Definition:
                 api_config["reasoning"]["effort"] = self.reasoning_effort
                 api_config["reasoning"]["summary"] = self.reasoning_summary
             api_config.update({
-                "instructions": instructions,
-                "input": input_text
+                "instructions": format_prompt_for_responses_api(system_prompt),
+                "input": [{"role": "user", "content": system_prompt}]
             })
             
             # Use unified helper with configured timeout
@@ -313,118 +322,43 @@ LUCIM DSL Full Definition:
 
     
     def save_results(self, results: Dict[str, Any], base_name: str, model_name: str, step_number = None, output_dir = None):
-        """Save parsing results to a single JSON file."""
+        """Save parsing results using unified output file generation."""
         if not WRITE_FILES:
             return
             
-        # New format: base-name_timestamp_AI-model_step_agent-name_version_reasoning-suffix_rest
-        agent_name = "plantuml_corrector"
-        # Use the agent's current reasoning level instead of global config
-        reasoning_suffix = f"reasoning-{self.reasoning_effort}-{self.reasoning_summary}"
-        
         # Resolve base output directory (per-agent if provided)
         base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
-        # Save complete response as single JSON file (simplified)
-        json_file = base_output_dir / "output-response.json"
         
-        # Create complete response structure
-        complete_response = {
-            "agent_type": "plantuml_corrector",
-            "model": self.model,
-            "timestamp": self.timestamp,
-            "base_name": base_name,
-            "step_number": step_number,
-            "reasoning_summary": results.get("reasoning_summary", "").replace("\\n", "\n"),
-            "data": results.get("data", ""),
-            "errors": results.get("errors", []),
-            "tokens_used": results.get("tokens_used", 0),
-            "input_tokens": results.get("input_tokens", 0),
-            "visible_output_tokens": results.get("visible_output_tokens", 0),
-            "reasoning_tokens": results.get("reasoning_tokens", 0),
-            "total_output_tokens": results.get("total_output_tokens", (results.get("visible_output_tokens", 0) or 0) + (results.get("reasoning_tokens", 0) or 0)),
-            "raw_response": results.get("raw_response")
-        }
+        # Extract PlantUML diagram text for special file handling
+        diagram_text = self._extract_plantuml_text(results.get("data")) if results.get("data") else None
         
-        # Validate response before saving
-        validation_errors = validate_agent_response("plantuml_corrector", complete_response)
-        if validation_errors:
-            print(f"[WARNING] Validation errors in plantuml corrector response: {validation_errors}")
+        # Prepare special files for unified function
+        special_files = None
+        if diagram_text and "@startuml" in diagram_text and "@enduml" in diagram_text:
+            # Generate timestamp suffix for corrected file
+            timestamp_suffix = f"{self.timestamp}_{self.model.replace('-', '_')}"
+            special_files = {
+                "plantuml_diagram": diagram_text,
+                "corrected": True,
+                "timestamp_suffix": timestamp_suffix,
+                "post_process": True
+            }
+            # Surface the path for orchestrator logging/downstream use
+            corrected_filename = f"{base_name}_{timestamp_suffix}_plantuml_corrector_diagram.puml"
+            results["puml_file"] = str(base_output_dir / corrected_filename)
         
-        # Verify exact keys before saving
-        expected_keys = expected_keys_for_agent("plantuml_corrector")
-        ok, missing, extra = verify_exact_keys(complete_response, expected_keys)
-        if not ok:
-            raise ValueError(f"response.json keys mismatch for plantuml_corrector. Missing: {sorted(missing)} Extra: {sorted(extra)}")
-
-        # Save complete response as JSON file
-        json_file.write_text(json.dumps(complete_response, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"OK: {base_name} -> output-response.json")
-        
-        # Save reasoning summary as markdown file
-        reasoning_file = base_output_dir / "output-reasoning.md"
-        reasoning_content = f"""# Reasoning Summary - {agent_name.title().replace('_', ' ')}
-
-**Base Name:** {base_name}
-**Model:** {self.model}
-**Timestamp:** {self.timestamp}
-**Step Number:** {step_number if step_number else 'N/A'}
-**Reasoning Level:** {self.reasoning_effort}
-**Reasoning Summary:** {results.get("reasoning_summary") or "No explicit reasoning summary available."}
-
-## Token Usage
-
-- **Total Tokens:** {results.get("tokens_used", 0):,}
-- **Input Tokens:** {results.get("input_tokens", 0):,}
- - **Visible Output Tokens:** {results.get("visible_output_tokens", 0):,}
-- **Reasoning Tokens:** {results.get("reasoning_tokens", 0):,}
-- **Total Output Tokens (reasoning + visible):** {results.get("total_output_tokens", (results.get('visible_output_tokens', 0) or 0) + (results.get('reasoning_tokens', 0) or 0)):,}
-
-## Reasoning Summary
-
-{results.get("reasoning_summary") or "No explicit reasoning summary available."}
-
-## Errors
-
-{chr(10).join(f"- {error}" for error in results.get("errors", [])) if results.get("errors") else "No errors"}
-"""
-        reasoning_file.write_text(reasoning_content, encoding="utf-8")
-        print(f"OK: {base_name} -> output-reasoning.md")
-        
-        # Save data field as separate file
-        data_file = base_output_dir / "output-data.json"
-        if results.get("data"):
-            data_file.write_text(json.dumps(results["data"], indent=2, ensure_ascii=False), encoding="utf-8")
-            print(f"OK: {base_name} -> output-data.json")
-        else:
-            print(f"WARNING: No data to save for {base_name}")
-
-        # Write minimal artifacts (non-breaking additions)
-        write_minimal_artifacts(base_output_dir, results.get("raw_response"))
-
-        # Additionally, write a corrected standalone .puml file containing the diagram text (if available)
-        try:
-            diagram_text = self._extract_plantuml_text(results.get("data")) if results.get("data") else None
-            if diagram_text and "@startuml" in diagram_text and "@enduml" in diagram_text:
-                # Enforce canonical filename for Stage 07 corrected diagram
-                puml_file = base_output_dir / "diagram.puml"
-                puml_file.write_text(diagram_text, encoding="utf-8")
-                print(f"OK: {base_name} -> diagram.puml")
-                
-                # Post-process the corrected PlantUML file to clean escape characters
-                try:
-                    success = process_plantuml_file(puml_file)
-                    if success:
-                        print(f"✅ Post-processed corrected PlantUML file: {puml_file.name}")
-                    else:
-                        print(f"⚠️  Post-processing had issues for corrected: {puml_file.name}")
-                except Exception as e:
-                    print(f"[WARNING] Post-processing failed for corrected {puml_file.name}: {e}")
-                
-                results["puml_file"] = str(puml_file)
-            else:
-                print("WARNING: Could not extract valid PlantUML diagram text to write corrected .puml file")
-        except Exception as e:
-            print(f"[WARNING] Failed to write corrected .puml file: {e}")
+        # Use unified function to write all output files
+        write_all_output_files(
+            output_dir=base_output_dir,
+            results=results,
+            agent_type="plantuml_corrector",
+            base_name=base_name,
+            model=self.model,
+            timestamp=self.timestamp,
+            reasoning_effort=self.reasoning_effort,
+            step_number=step_number,
+            special_files=special_files
+        )
 
     def _extract_plantuml_text(self, data: Dict[str, Any]) -> str:
         if not isinstance(data, dict):

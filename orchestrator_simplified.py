@@ -338,21 +338,45 @@ class NetLogoOrchestratorSimplified:
             return {"error": f"Error reading code file: {e}", "results": {}}
 
         async def run_syntax():
+            # Create agent output directory for syntax parser
+            tv = None
+            if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
+                tv = self.agent_configs["netlogo_abstract_syntax_extractor"].get("text_verbosity")
+            reff = None
+            if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
+                reff = self.agent_configs["netlogo_abstract_syntax_extractor"].get("reasoning_effort")
+            run_dir = get_run_base_dir(self.timestamp, base_name, self.model, reff or "medium", tv or "medium")
+            agent_output_dir = run_dir / "01-netlogo_abstract_syntax_extractor"
+            agent_output_dir.mkdir(parents=True, exist_ok=True)
+            
             return await asyncio.to_thread(
                 self._execute_agent_with_tracking,
                 "netlogo_abstract_syntax_extractor",
                 self.netlogo_abstract_syntax_extractor_agent.parse_netlogo_code,
                 code_content,
-                f"{base_name}-netlogo-code.md"
+                f"{base_name}-netlogo-code.md",
+                agent_output_dir
             )
 
         async def run_semantics_direct():
+            # Create agent output directory for semantics parser
+            tv = None
+            if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
+                tv = self.agent_configs["netlogo_abstract_syntax_extractor"].get("text_verbosity")
+            reff = None
+            if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
+                reff = self.agent_configs["netlogo_abstract_syntax_extractor"].get("reasoning_effort")
+            run_dir = get_run_base_dir(self.timestamp, base_name, self.model, reff or "medium", tv or "medium")
+            agent_output_dir = run_dir / "02-behavior_extractor"
+            agent_output_dir.mkdir(parents=True, exist_ok=True)
+            
             return await asyncio.to_thread(
                 self._execute_agent_with_tracking,
                 "behavior_extractor",
                 self.behavior_extractor_agent.parse_from_ilsem_and_ui,
                 file_info["interface_images"],
-                base_name
+                base_name,
+                str(agent_output_dir)
             )
 
         # Fan-out: run both concurrently with an optional watchdog and heartbeat
@@ -485,8 +509,8 @@ class NetLogoOrchestratorSimplified:
         
         # Load common resources once for all sequential steps
         icrash_contents_list = self.fileio.load_icrash_contents()
-        # Convert iCrash list to string for scenario writer
-        icrash_contents = "\n\n".join([f"File: {item.get('filename', 'unknown')}\n{item.get('content', '')}" for item in icrash_contents_list])
+        # Convert iCrash list to string for scenario writer (empty since iCrash folder was removed)
+        icrash_contents = "\n\n".join([f"File: {item.get('filename', 'unknown')}\n{item.get('content', '')}" for item in icrash_contents_list]) if icrash_contents_list else "No iCrash reference files available (input-icrash folder was intentionally removed)."
         try:
             lucim_dsl_content = self.fileio.load_lucim_dsl_content()
         except FileNotFoundError as e:
@@ -528,7 +552,6 @@ class NetLogoOrchestratorSimplified:
                 lucim_environment_result["agent_type"] = "lucim_environment_synthesizer"
                 
                 # Save results using the LUCIM Environment Synthesizer agent's save method
-                agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 3, "lucim_environment_synthesizer")
                 self.lucim_environment_synthesizer_agent.save_results(lucim_environment_result, base_name, self.model, "3", output_dir=agent_output_dir)
                 
                 processed_results["lucim_environment_synthesizer"] = lucim_environment_result
@@ -550,6 +573,9 @@ class NetLogoOrchestratorSimplified:
             self.logger.info(f"Step 4: Running Scenario Writer agent for {base_name}...")
             
             try:
+                # Create agent output directory before the call
+                agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 4, "lucim_scenario_synthesizer")
+                
                 scenario_result = self._execute_agent_with_tracking(
                     "lucim_scenario_synthesizer",
                     self.lucim_scenario_synthesizer_agent.write_scenarios,
@@ -557,11 +583,11 @@ class NetLogoOrchestratorSimplified:
                     processed_results["lucim_environment_synthesizer"]["data"],  # LUCIM environment from step 3
                     lucim_dsl_content,  # LUCIM DSL full definition
                     icrash_contents,  # iCrash references
-                    base_name  # Filename
+                    base_name,  # Filename
+                    output_dir=agent_output_dir
                 )
                 
                 scenario_result["agent_type"] = "lucim_scenario_synthesizer"
-                agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 4, "lucim_scenario_synthesizer")
                 self.lucim_scenario_synthesizer_agent.save_results(scenario_result, base_name, self.model, "4", output_dir=agent_output_dir)
                 processed_results["lucim_scenario_synthesizer"] = scenario_result
                 
@@ -582,16 +608,19 @@ class NetLogoOrchestratorSimplified:
             self.logger.info(f"Step 5: Running PlantUML Writer agent for {base_name}...")
             
             try:
+                # Create agent output directory before the call
+                agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 5, "plantuml_writer")
+                
                 plantuml_result = self._execute_agent_with_tracking(
                     "plantuml_writer",
                     self.plantuml_writer_agent.generate_plantuml_diagrams,
                     processed_results["lucim_scenario_synthesizer"]["data"],  # Scenarios from step 4
                     base_name,
-                    messir_dsl_content
+                    lucim_dsl_content,
+                    output_dir=agent_output_dir
                 )
                 
                 plantuml_result["agent_type"] = "plantuml_writer"
-                agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 5, "plantuml_writer")
                 self.plantuml_writer_agent.save_results(plantuml_result, base_name, self.model, "5", output_dir=agent_output_dir)
                 processed_results["plantuml_writer"] = plantuml_result
                 
@@ -700,11 +729,18 @@ class NetLogoOrchestratorSimplified:
             
             if corrected_plantuml_file_path and self.fileio.validate_plantuml_file(corrected_plantuml_file_path):
                 try:
+                    # Create agent output directory before the call
+                    agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 8, "plantuml_lucim_final_auditor")
+                    
                     final_audit_result = self._execute_agent_with_tracking(
                         "plantuml_lucim_final_auditor",
                         self.plantuml_lucim_final_auditor_agent.audit_plantuml_diagrams,
                         corrected_plantuml_file_path,
                         str(LUCIM_RULES_FILE),  # Path to LUCIM DSL file (not content)
+                        base_name,
+                        8,  # step parameter for final audit
+                        output_dir=agent_output_dir
+                    )
                     
                     final_audit_result["agent_type"] = "plantuml_lucim_final_auditor"
                     self.plantuml_lucim_final_auditor_agent.save_results(final_audit_result, base_name, self.model, "8", output_dir=agent_output_dir)
@@ -744,6 +780,61 @@ class NetLogoOrchestratorSimplified:
         
         return processed_results
 
+    def _extract_compliance_from_results(self, processed_results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Extract compliance status from processed results.
+        
+        Args:
+            processed_results: Dictionary containing all agent results
+            
+        Returns:
+            Dictionary with compliance status, source, and details
+        """
+        # Try to get verdict from final auditor (step 8) first
+        final_auditor_result = processed_results.get("plantuml_lucim_final_auditor")
+        if final_auditor_result and isinstance(final_auditor_result, dict):
+            data = final_auditor_result.get("data")
+            if isinstance(data, dict) and "verdict" in data:
+                verdict = data.get("verdict")
+                if verdict == "compliant":
+                    return {
+                        "status": "VERIFIED",
+                        "source": "final_auditor",
+                        "details": {"verdict": verdict, "step": 8}
+                    }
+                elif verdict == "non-compliant":
+                    return {
+                        "status": "NON-COMPLIANT", 
+                        "source": "final_auditor",
+                        "details": {"verdict": verdict, "step": 8}
+                    }
+        
+        # Fallback to initial auditor (step 6)
+        initial_auditor_result = processed_results.get("plantuml_lucim_auditor")
+        if initial_auditor_result and isinstance(initial_auditor_result, dict):
+            data = initial_auditor_result.get("data")
+            if isinstance(data, dict) and "verdict" in data:
+                verdict = data.get("verdict")
+                if verdict == "compliant":
+                    return {
+                        "status": "VERIFIED",
+                        "source": "initial_auditor", 
+                        "details": {"verdict": verdict, "step": 6}
+                    }
+                elif verdict == "non-compliant":
+                    return {
+                        "status": "NON-COMPLIANT",
+                        "source": "initial_auditor",
+                        "details": {"verdict": verdict, "step": 6}
+                    }
+        
+        # No verdict found
+        return {
+            "status": "UNKNOWN",
+            "source": "none",
+            "details": {"reason": "no_auditor_verdict_found"}
+        }
+
     async def run(self, base_name: str) -> Dict[str, Any]:
         """
         Run the orchestrator for a given base name with simplified processing.
@@ -765,7 +856,7 @@ class NetLogoOrchestratorSimplified:
             self.timestamp,
             reasoning_effort=reff,
             text_verbosity=tv,
-            persona_set=self.selected_persona_set or "persona-v1",
+            persona_set=self.selected_persona_set or self.persona_set,
         )
         
         # Initialize orchestrator logger
@@ -851,11 +942,7 @@ class NetLogoOrchestratorSimplified:
         self.orchestrator_logger.log_pipeline_completion(successful_agents, total_agents)
         
         # Log compliance status
-        final_compliance = {
-            "status": "UNKNOWN",
-            "source": "none",
-            "details": {}
-        }
+        final_compliance = self._extract_compliance_from_results(final_result)
         self.orchestrator_logger.log_compliance_status(final_compliance)
         
         self.logger.info(f"{'='*60}")

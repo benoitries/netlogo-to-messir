@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 NetLogo LUCIM Scenario Synthesizer Agent using OpenAI models
-Synthesizes LUCIM scenarios from Messir concepts using OpenAI models.
+Synthesizes LUCIM scenarios from LUCIM concepts using OpenAI models.
 """
 
 import os
@@ -12,8 +12,8 @@ import tiktoken
 from typing import Dict, Any
 from google.adk.agents import LlmAgent
 from openai import OpenAI
-from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens
-from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
+from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens, format_prompt_for_responses_api
+from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts, write_all_output_files, write_input_instructions_before_api
 from utils_schema_loader import get_template_for_agent, validate_data_against_template
 from utils_config_constants import expected_keys_for_agent
 from utils_logging import write_reasoning_md_from_payload
@@ -27,7 +27,7 @@ from utils_config_constants import (
 PERSONA_FILE = PERSONA_LUCIM_SCENARIO_SYNTHESIZER
 WRITE_FILES = True
 
-# Load persona and Messir rules
+# Load persona and LUCIM rules
 persona = PERSONA_FILE.read_text(encoding="utf-8")
 lucim_rules = ""
 try:
@@ -132,13 +132,13 @@ class NetLogoLUCIMScenarioSynthesizerAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def write_scenarios(self, state_machine: Dict[str, Any], messir_concepts: Dict[str, Any], lucim_rules: str, icrash_refs: str, filename: str) -> Dict[str, Any]:
+    def write_scenarios(self, state_machine: Dict[str, Any], lucim_concepts: Dict[str, Any], lucim_rules: str, icrash_refs: str, filename: str, output_dir: str = None) -> Dict[str, Any]:
         """
         Synthesize LUCIM scenarios from mandatory inputs using the LUCIM Scenario Synthesizer persona.
         
         Args:
             state_machine: Step 02 state machine data (required)
-            messir_concepts: Step 03 Messir UCI concepts (required)
+            lucim_concepts: Step 03 LUCIM UCI concepts (required)
             lucim_rules: LUCIM DSL full definition (required)
             icrash_refs: iCrash references content (required)
             filename: Filename for reference (required)
@@ -157,11 +157,11 @@ class NetLogoLUCIMScenarioSynthesizerAgent(LlmAgent):
                 "output_tokens": 0
             }
         
-        if not messir_concepts:
+        if not lucim_concepts:
             return {
-                "reasoning_summary": "Missing mandatory input: Step 03 Messir concepts",
+                "reasoning_summary": "Missing mandatory input: Step 03 LUCIM concepts",
                 "data": None,
-                "errors": ["Step 03 Messir concepts are required but not provided"],
+                "errors": ["Step 03 LUCIM concepts are required but not provided"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
@@ -202,9 +202,9 @@ Step 02 State Machine:
 {json.dumps(state_machine, indent=2)}
 ```
 
-Step 03 Messir Concepts:
+Step 03 LUCIM Concepts:
 ```json
-{json.dumps(messir_concepts, indent=2)}
+{json.dumps(lucim_concepts, indent=2)}
 ```
 
 LUCIM DSL Full Definition:
@@ -213,6 +213,15 @@ LUCIM DSL Full Definition:
 iCrash References:
 {icrash_refs}
 """
+        
+        # Create single system_prompt variable for both API call and file generation
+        system_prompt = f"{instructions}\n\n{input_text}"
+        
+        # Resolve base output directory (per-agent if provided)
+        base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
+        
+        # Write input-instructions.md BEFORE API call for debugging
+        write_input_instructions_before_api(base_output_dir, system_prompt)
         
         # Count input tokens exactly
         exact_input_tokens = self.count_input_tokens(instructions, input_text)
@@ -225,8 +234,8 @@ iCrash References:
                 api_config["reasoning"]["effort"] = self.reasoning_effort
                 api_config["reasoning"]["summary"] = self.reasoning_summary
             api_config.update({
-                "instructions": instructions,
-                "input": input_text
+                "instructions": format_prompt_for_responses_api(system_prompt),
+                "input": [{"role": "user", "content": system_prompt}]
             })
             
             from utils_config_constants import AGENT_TIMEOUTS
@@ -324,94 +333,31 @@ iCrash References:
 
     
     def save_results(self, results: Dict[str, Any], base_name: str, model_name: str, step_number = None, output_dir = None):
-        """Save parsing results to a single JSON file."""
+        """Save parsing results using unified output file generation."""
         if not WRITE_FILES:
             return
             
-        # New format: base-name_timestamp_AI-model_step_agent-name_version_reasoning-suffix_rest
-        agent_name = "lucim_scenario_synthesizer"
-        # Use the agent's current reasoning level instead of global config
-        reasoning_suffix = f"reasoning-{self.reasoning_effort}-{self.reasoning_summary}"
-        
         # Resolve base output directory (per-agent if provided)
         base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
-        # Save complete response as single JSON file (simplified)
-        json_file = base_output_dir / "output-response.json"
-        
-        # Create complete response structure
-        complete_response = {
-            "agent_type": "lucim_scenario_synthesizer",
-            "model": self.model,
-            "timestamp": self.timestamp,
-            "base_name": base_name,
-            "step_number": step_number,
-            "reasoning_summary": results.get("reasoning_summary", "").replace("\\n", "\n"),
-            "data": results.get("data", ""),
-            "errors": results.get("errors", []),
-            "tokens_used": results.get("tokens_used", 0),
-            "input_tokens": results.get("input_tokens", 0),
-            "visible_output_tokens": results.get("visible_output_tokens", 0),
-            "reasoning_tokens": results.get("reasoning_tokens", 0),
-            "total_output_tokens": results.get("total_output_tokens", (results.get("visible_output_tokens", 0) or 0) + (results.get("reasoning_tokens", 0) or 0)),
-            "raw_response": results.get("raw_response")
-        }
-        
-        # Validate response before saving
-        validation_errors = validate_agent_response("lucim_scenario_synthesizer", complete_response)
-        if validation_errors:
-            print(f"[WARNING] Validation errors in LUCIM scenario synthesizer response: {validation_errors}")
-        
-        # Verify exact keys before saving
-        expected_keys = expected_keys_for_agent("lucim_scenario_synthesizer")
-        ok, missing, extra = verify_exact_keys(complete_response, expected_keys)
-        if not ok:
-            raise ValueError(f"response.json keys mismatch for lucim_scenario_synthesizer. Missing: {sorted(missing)} Extra: {sorted(extra)}")
-
-        # Save complete response as JSON file
-        json_file.write_text(json.dumps(complete_response, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"OK: {base_name} -> output-response.json")
-        
-        # Save reasoning payload as markdown file (centralized writer)
-        payload = {
-            "reasoning": results.get("reasoning"),
-            "reasoning_summary": results.get("reasoning_summary"),
-            "tokens_used": results.get("tokens_used"),
-            "input_tokens": results.get("input_tokens"),
-            "visible_output_tokens": results.get("visible_output_tokens"),
-            "total_output_tokens": results.get("total_output_tokens"),
-            "reasoning_tokens": results.get("reasoning_tokens"),
-            "usage": results.get("raw_usage"),
-            "errors": results.get("errors"),
-        }
-        write_reasoning_md_from_payload(
-            output_dir=base_output_dir,
-            agent_name=agent_name,
-            base_name=base_name,
-            model=self.model,
-            timestamp=self.timestamp,
-            reasoning_effort=self.reasoning_effort,
-            step_number=step_number,
-            payload=payload,
-        )
-        print(f"OK: {base_name} -> output-reasoning.md")
         
         # Optional: Validate data against persona template (shallow)
         try:
             template = get_template_for_agent("lucim_scenario_synthesizer")
             if template is not None:
-                report = validate_data_against_template(complete_response.get("data"), template)
+                report = validate_data_against_template(results.get("data"), template)
                 if report.get("missing_keys"):
                     print(f"[WARNING] Data is missing keys from persona template: {report['missing_keys']}")
         except Exception as e:
             print(f"[WARNING] Persona template validation failed (lucim_scenario_synthesizer): {e}")
-
-        # Save data field as separate file
-        data_file = base_output_dir / "output-data.json"
-        if results.get("data"):
-            data_file.write_text(json.dumps(results["data"], indent=2, ensure_ascii=False), encoding="utf-8")
-            print(f"OK: {base_name} -> output-data.json")
-        else:
-            print(f"WARNING: No data to save for {base_name}")
-
-        # Write minimal artifacts (non-breaking additions)
-        write_minimal_artifacts(base_output_dir, results.get("raw_response"))
+        
+        # Use unified function to write all output files
+        write_all_output_files(
+            output_dir=base_output_dir,
+            results=results,
+            agent_type="lucim_scenario_synthesizer",
+            base_name=base_name,
+            model=self.model,
+            timestamp=self.timestamp,
+            reasoning_effort=self.reasoning_effort,
+            step_number=step_number
+        )
