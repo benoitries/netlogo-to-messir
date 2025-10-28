@@ -102,7 +102,7 @@ def validate_case_folder(case_dir: Path) -> List[str]:
             errors.append(f"Missing PlantUML .puml file in {step5_dir} (expected diagram.puml or legacy *_plantuml_writer_diagram.puml)")
 
     # Ensure Step 7 produced a corrected standalone .puml file with canonical name
-    step7_dir = case_dir / "07-plantuml_messir_corrector"
+    step7_dir = case_dir / "07-plantuml_lucim_corrector"
     if step7_dir.exists() and step7_dir.is_dir():
         puml7 = step7_dir / "diagram.puml"
         if not puml7.exists():

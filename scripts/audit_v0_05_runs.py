@@ -2,7 +2,7 @@
 """
 Audit v0.05 Runs — Consolidated Markdown Report
 
-This script scans the `code-netlogo-to-messir/output/v0.05` directory to discover
+This script scans the `code-netlogo-to-lucim-agentic-workflow/output/v0.05` directory to discover
 experimental runs, invokes available validators to assess structure and content,
 and generates a single consolidated Markdown report:
 
@@ -55,9 +55,9 @@ STAGE_DIR_PREFIXES = [
     "03-lucim_environment_synthesizer",
     "04-lucim_scenario_synthesizer",
     "05-plantuml_writer",
-    "06-plantuml_messir_auditor",
-    "07-plantuml_messir_corrector",
-    "08-plantuml_messir_final_auditor",
+    "06-plantuml_lucim_auditor",
+    "07-plantuml_lucim_corrector",
+    "08-plantuml_lucim_final_auditor",
 ]
 
 
@@ -201,7 +201,7 @@ def classify_root_cause(raw_text: Optional[str], artifacts: Dict[str, int], verd
 def summarize_combination_folder(run_dir: Path, base_dir: Path) -> Dict[str, Optional[str]]:
     stages_present = [prefix for prefix in STAGE_DIR_PREFIXES if (run_dir / prefix).is_dir()]
     verdict: Optional[str] = None
-    final_auditor_dir = run_dir / "08-plantuml_messir_final_auditor"
+    final_auditor_dir = run_dir / "08-plantuml_lucim_final_auditor"
     if final_auditor_dir.is_dir():
         for candidate in sorted(final_auditor_dir.glob("*output-data.json")):
             try:

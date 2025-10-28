@@ -54,7 +54,7 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
         sanitized_name = sanitize_model_name(model_name)
         super().__init__(
             name=f"netlogo_plantuml_auditor_agent_{sanitized_name}",
-            description="PlantUML auditor agent for Messir UCI compliance checking"
+            description="PlantUML auditor agent for LUCIM UCI compliance checking"
         )
         self.model = model_name
         
@@ -131,7 +131,7 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
         
     def audit_plantuml_diagrams(self, puml_file_path: str, mucim_dsl_file_path: str, filename: str = "input") -> Dict[str, Any]:
         """
-        Audit PlantUML sequence diagrams for Messir UCI compliance using the PlantUML Auditor persona.
+        Audit PlantUML sequence diagrams for LUCIM UCI compliance using the PlantUML Auditor persona.
 
         Args:
             puml_file_path: Path to the standalone .puml file from Step 5 (mandatory)

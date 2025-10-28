@@ -20,8 +20,8 @@ This project implements an 8-step orchestration pipeline that transforms NetLogo
 
 For a concise overview of the orchestration flow, per-agent inputs/outputs, and known ambiguities/inconsistencies, see:
 
-- `code-netlogo-to-messir/docs/orchestration-flow.md` (detailed per-agent I/O and conditions)
-- `code-netlogo-to-messir/docs/orchestrator_workflow_summary.md` (findings and inconsistencies)
+- `code-netlogo-to-lucim/docs/orchestration-flow.md` (detailed per-agent I/O and conditions)
+- `code-netlogo-to-lucim/docs/orchestrator_workflow_summary.md` (findings and inconsistencies)
 
 ## 🏗️ Architecture
 
@@ -40,7 +40,7 @@ For a concise overview of the orchestration flow, per-agent inputs/outputs, and 
 
 - `NetLogoAbstractSyntaxExtractor` - Abstract syntax extraction
 - `NetLogoBehaviorExtractor` - Behavioral pattern extraction
-- `MessirMapper` - Concept mapping and translation
+- `LUCIMMapper` - Concept mapping and translation
 - `LUCIMScenarioSynthesizer` - LUCIM scenario synthesis
 - `PlantUMLWriter` - Diagram code generation
 - `PlantUMLAuditor` - Compliance validation
@@ -49,7 +49,7 @@ For a concise overview of the orchestration flow, per-agent inputs/outputs, and 
 ## 📁 Project Structure
 
 ```
-netlogo-to-messir/
+netlogo-to-lucim/
 ├── orchestrator.py                         # Main orchestration engine
 ├── agent_1_netlogo_abstract_syntax_extractor.py               # NetLogo Abstract Syntax Extractor agent
 ├── agent_2_netlogo_behavior_extractor.py  # Behavior extraction agent
@@ -80,9 +80,9 @@ netlogo-to-messir/
 │   ├── PSN_3_LUCIMEnvironmentSynthesizer-v3.md
 │   ├── PSN_4_LUCIMScenarioSynthesizer.md
 │   ├── PSN_5_PlantUMLWriter-v2.md
-│   ├── PSN_6_PlantUMLMessirAuditor-v6.md
-│   ├── PSN_7_PlantUMLMessirCorrector-v2.md
-│   └── messir-uci-compliance-rules-v2.md
+│   ├── PSN_6_PlantUMLLUCIMAuditor-v6.md
+│   ├── PSN_7_PlantUMLLUCIMCorrector-v2.md
+│   └── lucim-uci-compliance-rules-v2.md
 ├── input-icrash/                          # Reference materials
 ├── input-images/                          # Supporting images
 └── output/                                # Generated results (see Output Layout below)
@@ -100,8 +100,8 @@ netlogo-to-messir/
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/YOUR_USERNAME/netlogo-to-messir.git
-   cd netlogo-to-messir
+   git clone https://github.com/YOUR_USERNAME/netlogo-to-lucim.git
+   cd netlogo-to-lucim
    ```
 
 2. **Install dependencies:**
@@ -215,7 +215,7 @@ Compatibility notes:
 All artifacts are organized per run, case, and agent step to improve traceability and avoid collisions:
 
 ```
-code-netlogo-to-messir/
+code-netlogo-to-lucim/
   output/
     runs/
       YYYY-MM-DD/
@@ -226,9 +226,9 @@ code-netlogo-to-messir/
             03-lucim_environment_synthesizer/
             04-lucim_scenario_synthesizer/
             05-plantuml_writer/
-            06-plantuml_messir_auditor/
-            07-plantuml_messir_corrector/
-            08-plantuml_messir_final_auditor/
+            06-plantuml_lucim_auditor/
+            07-plantuml_lucim_corrector/
+            08-plantuml_lucim_final_auditor/
           <another-case>/
             ...
 ```
@@ -240,21 +240,21 @@ Each subfolder contains the agent’s files named with the existing prefix forma
 ### Validation
 
 Layout validated on 2025-09-24 16:58 (timestamp tag `20250924_1658`).
-Validation script: `code-netlogo-to-messir/validate_output_layout.py` (simulated structure + checks for all step folders and orchestrator log presence).
+Validation script: `code-netlogo-to-lucim/validate_output_layout.py` (simulated structure + checks for all step folders and orchestrator log presence).
 
 Success Criteria rule validation executed on 2025-09-25 09:45 (local time).
-Validation script: `code-netlogo-to-messir/validate_task_success_criteria.py` (checks checked criteria have end-of-line timestamps and unchecked ones do not).
+Validation script: `code-netlogo-to-lucim/validate_task_success_criteria.py` (checks checked criteria have end-of-line timestamps and unchecked ones do not).
 
-### Reference: Messir/UCI Rules Path (Consistency Check)
+### Reference: LUCIM/UCI Rules Path (Consistency Check)
 
-The canonical Messir/UCI compliance rules file is referenced through the `LUCIM_RULES_FILE` constant in `utils_config_constants.py` and must point to:
+The canonical LUCIM/UCI compliance rules file is referenced through the `LUCIM_RULES_FILE` constant in `utils_config_constants.py` and must point to:
 
-`code-netlogo-to-messir/input-persona/DSL_Target_LUCIM-full-definition-for-compliance.md`
+`code-netlogo-to-lucim/input-persona/DSL_Target_LUCIM-full-definition-for-compliance.md`
 
 Quick verification commands:
 
 ```bash
-rg -n "LUCIM_RULES_FILE" code-netlogo-to-messir
+rg -n "LUCIM_RULES_FILE" code-netlogo-to-lucim-agentic-workflow
 rg -n "DSL_Target_LUCIM-full-definition-for-compliance.md" .
 ```
 
@@ -304,11 +304,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 If you use this work in your research, please cite:
 
 ```bibtex
-@software{netlogo_to_messir_2025,
+@software{netlogo_to_lucim_2025,
   title={NetLogo to LUCIM Multi-Agent Orchestration System},
   author={Ries, Benoit},
   year={2025},
-  url={https://github.com/benoitries/netlogo-to-messir}
+  url={https://github.com/benoitries/netlogo-to-lucim}
 }
 ```
 

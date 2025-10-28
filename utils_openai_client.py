@@ -1,26 +1,11 @@
 """
-Shared helpers for working with the OpenAI 2.x Responses API.
+OpenAI client utilities for the NetLogo to LUCIM/UCI conversion pipeline.
 
-This module centralizes common, repeated logic across agents:
-- Creating responses and polling until completion
-- Extracting plain text output safely
-- Extracting optional reasoning summaries when available
-- Validating OpenAI API keys before orchestration starts
-
-Usage pattern in agents (example):
-
-from openai import OpenAI
-from .utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, validate_openai_key
-
-client = OpenAI()
-response = create_and_wait(client, api_config)
-text = get_output_text(response)
-reasoning_summary = get_reasoning_summary(response)
-
+This module provides unified functions for interacting with OpenAI's API,
+handling both legacy chat completions and the new Responses API.
 """
 
-from __future__ import annotations
-
+import json
 import time
 import os
 from typing import Any, Dict, Optional, Iterable, Tuple

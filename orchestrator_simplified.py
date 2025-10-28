@@ -24,7 +24,7 @@ from agent_7_plantuml_corrector import NetLogoPlantUMLLUCIMCorrectorAgent
 from utils_config_constants import (
     INPUT_NETLOGO_DIR, OUTPUT_DIR, INPUT_PERSONA_DIR,
     AGENT_CONFIGS, AVAILABLE_MODELS, DEFAULT_MODEL, ensure_directories,
-    validate_agent_response, LUCIM_RULES_FILE
+    validate_agent_response, LUCIM_RULES_FILE, get_persona_file_paths
 )
 from utils_logging import setup_orchestration_logger, format_parameter_bundle, attach_stdio_to_logger
 from utils_path import get_run_base_dir
@@ -503,6 +503,16 @@ class NetLogoOrchestratorSimplified:
             self.logger.info(f"Step 3: Running LUCIM Environment Synthesizer agent for {base_name}...")
             
             try:
+                # Debug logging for LUCIM Environment Synthesizer inputs
+                self.logger.info(f"[DEBUG] LUCIM Environment Synthesizer inputs:")
+                self.logger.info(f"[DEBUG] - semantics data: {type(processed_results['semantics']['data'])} - {len(str(processed_results['semantics']['data']))} chars")
+                self.logger.info(f"[DEBUG] - ast data: {type(processed_results['ast']['data'])} - {len(str(processed_results['ast']['data']))} chars")
+                self.logger.info(f"[DEBUG] - lucim_dsl_content: {len(lucim_dsl_content)} chars")
+                self.logger.info(f"[DEBUG] - icrash_contents_list: {len(icrash_contents_list)} items")
+                
+                # Create agent output directory before the call
+                agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 3, "lucim_environment_synthesizer")
+                
                 lucim_environment_result = self._execute_agent_with_tracking(
                     "lucim_environment_synthesizer",
                     self.lucim_environment_synthesizer_agent.synthesize_lucim_environment,
@@ -510,7 +520,8 @@ class NetLogoOrchestratorSimplified:
                     base_name,
                     processed_results["ast"]["data"],  # Step 01 AST data (MANDATORY)
                     lucim_dsl_content,  # LUCIM DSL content (MANDATORY)
-                    icrash_contents_list  # iCrash contents as list (for messir_mapper)
+                    icrash_contents_list,  # iCrash contents as list (for lucim_mapper)
+                    output_dir=agent_output_dir
                 )
                 
                 # Add agent type identifier
@@ -596,9 +607,9 @@ class NetLogoOrchestratorSimplified:
         else:
             self.logger.info(f"Skipping Step 5: PlantUML Writer agent for {base_name} (Scenario writing failed)")
         
-        # Step 6: PlantUML Messir Auditor Agent
+        # Step 6: PlantUML LUCIM Auditor Agent
         if processed_results.get("plantuml_writer", {}).get("data"):
-            self.logger.info(f"Step 6: Running PlantUML Messir Auditor agent for {base_name}...")
+            self.logger.info(f"Step 6: Running PlantUML LUCIM Auditor agent for {base_name}...")
             
             # Get PlantUML file path
             plantuml_file_path = self.fileio.get_plantuml_file_path(
@@ -607,114 +618,117 @@ class NetLogoOrchestratorSimplified:
             
             if plantuml_file_path and self.fileio.validate_plantuml_file(plantuml_file_path):
                 try:
+                    # Create agent output directory before the call
+                    agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 6, "plantuml_lucim_auditor")
+                    
                     audit_result = self._execute_agent_with_tracking(
-                        "plantuml_messir_auditor",
-                        self.plantuml_messir_auditor_agent.audit_plantuml_diagrams,
+                        "plantuml_lucim_auditor",
+                        self.plantuml_lucim_auditor_agent.audit_plantuml_diagrams,
                         plantuml_file_path,
                         str(LUCIM_RULES_FILE),  # Path to LUCIM DSL file (not content)
-                        base_name
+                        base_name,
+                        output_dir=agent_output_dir
                     )
                     
-                    audit_result["agent_type"] = "plantuml_messir_auditor"
-                    agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 6, "plantuml_messir_auditor")
-                    self.plantuml_messir_auditor_agent.save_results(audit_result, base_name, self.model, "6", output_dir=agent_output_dir)
-                    processed_results["plantuml_messir_auditor"] = audit_result
+                    audit_result["agent_type"] = "plantuml_lucim_auditor"
+                    self.plantuml_lucim_auditor_agent.save_results(audit_result, base_name, self.model, "6", output_dir=agent_output_dir)
+                    processed_results["plantuml_lucim_auditor"] = audit_result
                     
                 except Exception as e:
                     error_result = {
-                        "agent_type": "plantuml_messir_auditor",
+                        "agent_type": "plantuml_lucim_auditor",
                         "reasoning_summary": f"PlantUML audit failed: {str(e)}",
                         "data": None,
                         "errors": [f"PlantUML audit error: {str(e)}"]
                     }
-                    self.logger.error(f"✗ Step 6: PlantUML Messir Auditor agent failed for {base_name}: {str(e)}")
-                    processed_results["plantuml_messir_auditor"] = error_result
+                    self.logger.error(f"✗ Step 6: PlantUML LUCIM Auditor agent failed for {base_name}: {str(e)}")
+                    processed_results["plantuml_lucim_auditor"] = error_result
             else:
                 self.logger.error(f"✗ Step 6: PlantUML file not found or invalid for {base_name}")
-                processed_results["plantuml_messir_auditor"] = {
-                    "agent_type": "plantuml_messir_auditor",
+                processed_results["plantuml_lucim_auditor"] = {
+                    "agent_type": "plantuml_lucim_auditor",
                     "reasoning_summary": "PlantUML file not found or invalid",
                     "data": None,
                     "errors": ["PlantUML file not found or invalid"]
                 }
         else:
-            self.logger.info(f"Skipping Step 6: PlantUML Messir Auditor agent for {base_name} (PlantUML generation failed)")
+            self.logger.info(f"Skipping Step 6: PlantUML LUCIM Auditor agent for {base_name} (PlantUML generation failed)")
         
-        # Step 7: PlantUML Messir Corrector Agent (conditional)
-        if (processed_results.get("plantuml_messir_auditor", {}).get("data") and 
-            processed_results["plantuml_messir_auditor"].get("data", {}).get("verdict") == "non-compliant"):
+        # Step 7: PlantUML LUCIM Corrector Agent (conditional)
+        if (processed_results.get("plantuml_lucim_auditor", {}).get("data") and 
+            processed_results["plantuml_lucim_auditor"].get("data", {}).get("verdict") == "non-compliant"):
             
-            self.logger.info(f"Step 7: Running PlantUML Messir Corrector agent for {base_name}...")
+            self.logger.info(f"Step 7: Running PlantUML LUCIM Corrector agent for {base_name}...")
             
             try:
+                # Create agent output directory before the call
+                agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 7, "plantuml_lucim_corrector")
+                
                 corrector_result = self._execute_agent_with_tracking(
-                    "plantuml_messir_corrector",
-                    self.plantuml_messir_corrector_agent.correct_plantuml_diagrams,
+                    "plantuml_lucim_corrector",
+                    self.plantuml_lucim_corrector_agent.correct_plantuml_diagrams,
                     processed_results["plantuml_writer"]["data"],  # Original diagrams
-                    processed_results["plantuml_messir_auditor"]["data"],  # Audit results
-                    messir_dsl_content,
-                    base_name
+                    processed_results["plantuml_lucim_auditor"]["data"],  # Audit results
+                    lucim_dsl_content,
+                    base_name,
+                    output_dir=agent_output_dir
                 )
                 
-                corrector_result["agent_type"] = "plantuml_messir_corrector"
-                agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 7, "plantuml_messir_corrector")
-                self.plantuml_messir_corrector_agent.save_results(corrector_result, base_name, self.model, "7", output_dir=agent_output_dir)
-                processed_results["plantuml_messir_corrector"] = corrector_result
+                corrector_result["agent_type"] = "plantuml_lucim_corrector"
+                self.plantuml_lucim_corrector_agent.save_results(corrector_result, base_name, self.model, "7", output_dir=agent_output_dir)
+                processed_results["plantuml_lucim_corrector"] = corrector_result
                 
             except Exception as e:
                 error_result = {
-                    "agent_type": "plantuml_messir_corrector",
+                    "agent_type": "plantuml_lucim_corrector",
                     "reasoning_summary": f"PlantUML correction failed: {str(e)}",
                     "data": None,
                     "errors": [f"PlantUML correction error: {str(e)}"]
                 }
-                self.logger.error(f"✗ Step 7: PlantUML Messir Corrector agent failed for {base_name}: {str(e)}")
-                processed_results["plantuml_messir_corrector"] = error_result
+                self.logger.error(f"✗ Step 7: PlantUML LUCIM Corrector agent failed for {base_name}: {str(e)}")
+                processed_results["plantuml_lucim_corrector"] = error_result
         else:
-            self.logger.info(f"Skipping Step 7: PlantUML Messir Corrector agent for {base_name} (diagrams already compliant)")
+            self.logger.info(f"Skipping Step 7: PlantUML LUCIM Corrector agent for {base_name} (diagrams already compliant)")
         
-        # Step 8: PlantUML Messir Final Auditor Agent (conditional)
-        if processed_results.get("plantuml_messir_corrector", {}).get("data"):
-            self.logger.info(f"Step 8: Running PlantUML Messir Final Auditor agent for {base_name}...")
+        # Step 8: PlantUML LUCIM Final Auditor Agent (conditional)
+        if processed_results.get("plantuml_lucim_corrector", {}).get("data"):
+            self.logger.info(f"Step 8: Running PlantUML LUCIM Final Auditor agent for {base_name}...")
             
             # Get corrected PlantUML file path
-            corrector_output_dir = self.fileio.create_agent_output_directory(run_dir, 7, "plantuml_messir_corrector")
+            corrector_output_dir = self.fileio.create_agent_output_directory(run_dir, 7, "plantuml_lucim_corrector")
             corrected_plantuml_file_path = self.fileio.get_plantuml_file_path(corrector_output_dir)
             
             if corrected_plantuml_file_path and self.fileio.validate_plantuml_file(corrected_plantuml_file_path):
                 try:
                     final_audit_result = self._execute_agent_with_tracking(
-                        "plantuml_messir_final_auditor",
-                        self.plantuml_messir_final_auditor_agent.audit_plantuml_diagrams,
+                        "plantuml_lucim_final_auditor",
+                        self.plantuml_lucim_final_auditor_agent.audit_plantuml_diagrams,
                         corrected_plantuml_file_path,
                         str(LUCIM_RULES_FILE),  # Path to LUCIM DSL file (not content)
-                        base_name
-                    )
                     
-                    final_audit_result["agent_type"] = "plantuml_messir_final_auditor"
-                    agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 8, "plantuml_messir_final_auditor")
-                    self.plantuml_messir_final_auditor_agent.save_results(final_audit_result, base_name, self.model, "8", output_dir=agent_output_dir)
-                    processed_results["plantuml_messir_final_auditor"] = final_audit_result
+                    final_audit_result["agent_type"] = "plantuml_lucim_final_auditor"
+                    self.plantuml_lucim_final_auditor_agent.save_results(final_audit_result, base_name, self.model, "8", output_dir=agent_output_dir)
+                    processed_results["plantuml_lucim_final_auditor"] = final_audit_result
                     
                 except Exception as e:
                     error_result = {
-                        "agent_type": "plantuml_messir_final_auditor",
+                        "agent_type": "plantuml_lucim_final_auditor",
                         "reasoning_summary": f"Final audit failed: {str(e)}",
                         "data": None,
                         "errors": [f"Final audit error: {str(e)}"]
                     }
-                    self.logger.error(f"✗ Step 8: PlantUML Messir Final Auditor agent failed for {base_name}: {str(e)}")
-                    processed_results["plantuml_messir_final_auditor"] = error_result
+                    self.logger.error(f"✗ Step 8: PlantUML LUCIM Final Auditor agent failed for {base_name}: {str(e)}")
+                    processed_results["plantuml_lucim_final_auditor"] = error_result
             else:
                 self.logger.error(f"✗ Step 8: Corrected PlantUML file not found or invalid for {base_name}")
-                processed_results["plantuml_messir_final_auditor"] = {
-                    "agent_type": "plantuml_messir_final_auditor",
+                processed_results["plantuml_lucim_final_auditor"] = {
+                    "agent_type": "plantuml_lucim_final_auditor",
                     "reasoning_summary": "Corrected PlantUML file not found or invalid",
                     "data": None,
                     "errors": ["Corrected PlantUML file not found or invalid"]
                 }
         else:
-            self.logger.info(f"Skipping Step 8: PlantUML Messir Final Auditor agent for {base_name} (corrector was skipped or not required)")
+            self.logger.info(f"Skipping Step 8: PlantUML LUCIM Final Auditor agent for {base_name} (corrector was skipped or not required)")
         
         # Calculate total orchestration time
         total_orchestration_time = time.time() - total_orchestration_start_time
@@ -948,7 +962,7 @@ async def main():
     
     agent_keys = [
         "ast", "semantics", "lucim_environment_synthesizer", "lucim_scenario_synthesizer",
-        "plantuml_writer", "plantuml_messir_auditor", "plantuml_messir_corrector", "plantuml_messir_final_auditor"
+        "plantuml_writer", "plantuml_lucim_auditor", "plantuml_lucim_corrector", "plantuml_lucim_final_auditor"
     ]
     
     for result_key, result in all_results.items():

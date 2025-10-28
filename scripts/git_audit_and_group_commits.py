@@ -6,13 +6,13 @@ output/runs/<YYYY-MM-DD>/<HHMM>/overall/ (relative to the repository root).
 
 Usage examples:
   - Dry-run audit & plan only (no staging/committing):
-      python code-netlogo-to-messir/scripts/git_audit_and_group_commits.py --dry-run
+      python code-netlogo-to-lucim-agentic-workflow/scripts/git_audit_and_group_commits.py --dry-run
 
   - Propose groups by directory and ask for approval interactively:
-      python code-netlogo-to-messir/scripts/git_audit_and_group_commits.py --grouping directory
+      python code-netlogo-to-lucim-agentic-workflow/scripts/git_audit_and_group_commits.py --grouping directory
 
   - Auto-approve the proposed plan (non-interactive environments):
-      python code-netlogo-to-messir/scripts/git_audit_and_group_commits.py --yes
+      python code-netlogo-to-lucim-agentic-workflow/scripts/git_audit_and_group_commits.py --yes
 
 Notes:
   - Requires running inside a git repository with a clean index or with changes to audit.

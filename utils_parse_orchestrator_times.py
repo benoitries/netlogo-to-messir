@@ -19,7 +19,7 @@ STEP_ORDER = [
     ('lucim_environment_synthesizer', 3),
     ('lucim_scenario_synthesizer', 4),
     ('plantuml_writer', 5),
-    ('plantuml_messir_auditor', 6)
+    ('plantuml_lucim_auditor', 6)
 ]
 
 # Accept any model token (no hard-coded names); model part excludes underscores

@@ -28,11 +28,11 @@ def test_imports():
         from agent_5_plantuml_writer import NetLogoPlantUMLWriterAgent
         print("✅ NetLogoPlantUMLWriterAgent imported")
         
-        from agent_6_plantuml_auditor import NetLogoPlantUMLMessirAuditorAgent
-        print("✅ NetLogoPlantUMLMessirAuditorAgent imported")
+        from agent_6_plantuml_auditor import NetLogoPlantUMLLUCIMAuditorAgent
+        print("✅ NetLogoPlantUMLLUCIMAuditorAgent imported")
         
-        from agent_7_plantuml_corrector import NetLogoPlantUMLMessirCorrectorAgent
-        print("✅ NetLogoPlantUMLMessirCorrectorAgent imported")
+        from agent_7_plantuml_corrector import NetLogoPlantUMLLUCIMCorrectorAgent
+        print("✅ NetLogoPlantUMLLUCIMCorrectorAgent imported")
         
         # Test utility imports
         from utils_config_constants import DEFAULT_MODEL, AGENT_CONFIGS

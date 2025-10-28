@@ -12,7 +12,7 @@ The system implements an 8-stage pipeline with parallel execution for stages 01-
 
 **Output Structure:**
 ```
-code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<model>-reason-<X>-verb-<Y>/<NN-stage>/
+code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<model>-reason-<X>-verb-<Y>/<NN-stage>/
 ```
 
 ## Per-Agent I/O and Conditions
@@ -60,7 +60,7 @@ code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mod
 
 **Inputs:**
 - State machine from Stage 02: `../02-behavior_extractor/output-data.json`
-- Messir/UCI rules: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
+- LUCIM/UCI rules: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
 - Optional iCrash references: `input-icrash/*.pdf`
 - Persona instructions: `input-persona/<PERSONA_SET>/PSN_3_LUCIMEnvironmentSynthesizer.md`
 
@@ -99,7 +99,7 @@ code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mod
 
 **Inputs:**
 - Scenarios from Stage 04: `../04-lucim_scenario_synthesizer/output-data.json`
-- Messir/UCI rules: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
+- LUCIM/UCI rules: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
 - Persona instructions: `input-persona/<PERSONA_SET>/PSN_5_PlantUMLWriter.md`
 
 **Outputs:**
@@ -114,12 +114,12 @@ code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mod
 - If JSON payload lacks clear diagram field: falls back to extracting `@startuml...@enduml` blocks
 - Executes sequentially after stage 04 completion
 
-### 06 — PlantUML Messir Auditor (`agent_6_plantuml_auditor.py`)
+### 06 — PlantUML LUCIM Auditor (`agent_6_plantuml_auditor.py`)
 
 **Inputs:**
 - Standalone PlantUML file from Stage 05: `../05-plantuml_writer/diagram.puml` (MANDATORY)
 - LUCIM DSL definition: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md` (MANDATORY)
-- Persona instructions: `input-persona/<PERSONA_SET>/PSN_6_PlantUMLMessirAuditor.md`
+- Persona instructions: `input-persona/<PERSONA_SET>/PSN_6_PlantUMLLUCIMAuditor.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
@@ -133,13 +133,13 @@ code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mod
 - Executes sequentially after stage 05 completion
 - Uses manual polling style (divergent from centralized helper used by other agents)
 
-### 07 — PlantUML Messir Corrector (`agent_7_plantuml_corrector.py`)
+### 07 — PlantUML LUCIM Corrector (`agent_7_plantuml_corrector.py`)
 
 **Inputs:**
 - PlantUML diagrams from Stage 05: `../05-plantuml_writer/output-data.json` and/or `../05-plantuml_writer/diagram.puml`
-- Non-compliant rules from Stage 06: `../06-plantuml_messir_auditor/output-data.json` (MANDATORY)
+- Non-compliant rules from Stage 06: `../06-plantuml_lucim_auditor/output-data.json` (MANDATORY)
 - LUCIM DSL definition: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md` (MANDATORY)
-- Persona instructions: `input-persona/<PERSONA_SET>/PSN_7_PlantUMLMessirCorrector.md`
+- Persona instructions: `input-persona/<PERSONA_SET>/PSN_7_PlantUMLLUCIMCorrector.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
@@ -154,13 +154,13 @@ code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mod
 - If no non-compliance: stage is skipped
 - Uses manual polling style (divergent from centralized helper)
 
-### 08 — PlantUML Messir Final Auditor (`agent_6_plantuml_auditor.py`)
+### 08 — PlantUML LUCIM Final Auditor (`agent_6_plantuml_auditor.py`)
 
 **Inputs:**
-- Corrected diagrams from Stage 07: `../07-plantuml_messir_corrector/output-data.json` and/or corrected `.puml` file
+- Corrected diagrams from Stage 07: `../07-plantuml_lucim_corrector/output-data.json` and/or corrected `.puml` file
 - Scenarios from Stage 04: `../04-lucim_scenario_synthesizer/output-data.json` (MANDATORY)
 - LUCIM DSL definition: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md` (MANDATORY)
-- Persona instructions: `input-persona/<PERSONA_SET>/PSN_6_PlantUMLMessirAuditor.md`
+- Persona instructions: `input-persona/<PERSONA_SET>/PSN_6_PlantUMLLUCIMAuditor.md`
 
 **Outputs:**
 - `output-response.json` (agent response)

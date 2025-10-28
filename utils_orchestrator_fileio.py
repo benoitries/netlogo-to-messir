@@ -195,9 +195,9 @@ class OrchestratorFileIO:
             (3, "lucim_environment_synthesizer"),
             (4, "lucim_scenario_synthesizer"),
             (5, "plantuml_writer"),
-            (6, "plantuml_messir_auditor"),
-            (7, "plantuml_messir_corrector"),
-            (8, "plantuml_messir_final_auditor")
+            (6, "plantuml_lucim_auditor"),
+            (7, "plantuml_lucim_corrector"),
+            (8, "plantuml_lucim_final_auditor")
         ]
         
         for step_number, agent_name in step_agents:
@@ -266,11 +266,11 @@ class OrchestratorFileIO:
             file_info["pattern"] = f"{base_name}_{timestamp}_{model}_3_scenario_v1_*.md"
         elif agent_type == "plantuml_writer":
             file_info["pattern"] = f"{base_name}_{timestamp}_{model}_4_plantuml_*.json/md/.puml"
-        elif agent_type == "plantuml_messir_auditor":
-            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_5_messir_audit_*.json/md/.puml"
-        elif agent_type == "plantuml_messir_corrector":
-            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_7_messir_corrector_*.json/md/.puml"
-        elif agent_type == "plantuml_messir_final_auditor":
-            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_8_messir_final_auditor_*.json/md/.puml"
+        elif agent_type == "plantuml_lucim_auditor":
+            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_5_lucim_audit_*.json/md/.puml"
+        elif agent_type == "plantuml_lucim_corrector":
+            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_7_lucim_corrector_*.json/md/.puml"
+        elif agent_type == "plantuml_lucim_final_auditor":
+            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_8_lucim_final_auditor_*.json/md/.puml"
         
         return file_info

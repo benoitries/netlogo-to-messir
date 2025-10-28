@@ -2,16 +2,16 @@
 """
 Validate that recent agent outputs include a canonical reasoning_tokens value.
 
-This script scans output-response.json files under code-netlogo-to-messir/output/runs/
+This script scans output-response.json files under code-netlogo-to-lucim-agentic-workflow/output/runs/
 and checks that each JSON has an integer field reasoning_tokens (>= 0), and that
 usage was extracted consistently. It prints a summary report and a non-zero exit
 code if any violations are found.
 
 Usage:
-  python code-netlogo-to-messir/scripts/validate_reasoning_tokens_usage.py [--root <path>] [--limit N]
+  python code-netlogo-to-lucim-agentic-workflow/scripts/validate_reasoning_tokens_usage.py [--root <path>] [--limit N]
 
 Defaults:
-  --root defaults to code-netlogo-to-messir/output/runs
+  --root defaults to code-netlogo-to-lucim-agentic-workflow/output/runs
   --limit limits the number of files inspected (most recently modified)
 """
 

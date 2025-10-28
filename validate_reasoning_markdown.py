@@ -9,7 +9,7 @@ Rules:
 - Missing sections are allowed only when the corresponding data is absent.
 
 Usage:
-  python code-netlogo-to-messir/validate_reasoning_markdown.py --runs-root code-netlogo-to-messir/output/runs
+  python code-netlogo-to-lucim-agentic-workflow/validate_reasoning_markdown.py --runs-root code-netlogo-to-lucim-agentic-workflow/output/runs
 
 Exit codes:
   0: All validations passed
@@ -112,7 +112,7 @@ def validate_stage(stage_dir: Path) -> List[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate reasoning.md contains all available API reasoning fields")
-    parser.add_argument("--runs-root", required=True, help="Path to runs root directory (e.g., code-netlogo-to-messir/output/runs)")
+    parser.add_argument("--runs-root", required=True, help="Path to runs root directory (e.g., code-netlogo-to-lucim-agentic-workflow/output/runs)")
     args = parser.parse_args()
 
     runs_root = Path(args.runs_root)

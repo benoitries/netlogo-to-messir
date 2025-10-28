@@ -10,7 +10,7 @@ Checks for:
 - input-instructions.md
 
 Usage:
-  python code-netlogo-to-messir/scripts/validate_artifact_presence.py --runs-root code-netlogo-to-messir/output/runs
+  python code-netlogo-to-lucim-agentic-workflow/scripts/validate_artifact_presence.py --runs-root code-netlogo-to-lucim-agentic-workflow/output/runs
 """
 
 import argparse
@@ -58,7 +58,7 @@ def validate_stage(stage_dir: Path) -> List[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate presence of renamed artifacts per stage")
-    parser.add_argument("--runs-root", required=True, help="Path to runs root directory (e.g., code-netlogo-to-messir/output/runs)")
+    parser.add_argument("--runs-root", required=True, help="Path to runs root directory (e.g., code-netlogo-to-lucim-agentic-workflow/output/runs)")
     args = parser.parse_args()
 
     runs_root = Path(args.runs_root)

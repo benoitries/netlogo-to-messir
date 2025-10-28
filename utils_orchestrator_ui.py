@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
 Orchestrator UI Utilities
-Terminal UI interaction and user prompts for the NetLogo orchestrator.
+Terminal UI interaction and user prompts for the NetLogo to LUCIM orchestrator.
+
+Note: All references to "messir" have been updated to "lucim" for consistency
+with the LUCIM/UCI domain modeling approach.
 """
 
 from typing import List, Dict, Any, Tuple
@@ -424,9 +427,9 @@ class OrchestratorUI:
             total_runs += 1
             run_results = result["results"]
             
-            # Check step 6 (plantuml_messir_auditor) and step 8 (plantuml_messir_final_auditor)
-            step6_compliant = self._is_audit_compliant(run_results.get("plantuml_messir_auditor"))
-            step8_compliant = self._is_audit_compliant(run_results.get("plantuml_messir_final_auditor"))
+            # Check step 6 (plantuml_lucim_auditor) and step 8 (plantuml_lucim_final_auditor)
+            step6_compliant = self._is_audit_compliant(run_results.get("plantuml_lucim_auditor"))
+            step8_compliant = self._is_audit_compliant(run_results.get("plantuml_lucim_final_auditor"))
             
             # Run is successful if either step 6 OR step 8 is compliant
             if step6_compliant or step8_compliant:
@@ -434,7 +437,7 @@ class OrchestratorUI:
             
             # Count non-compliant rules for this run
             non_compliant_count = 0
-            for step_name in ["plantuml_messir_auditor", "plantuml_messir_final_auditor"]:
+            for step_name in ["plantuml_lucim_auditor", "plantuml_lucim_final_auditor"]:
                 step_result = run_results.get(step_name)
                 if step_result and isinstance(step_result, dict):
                     data = step_result.get("data", {})
@@ -581,8 +584,8 @@ class OrchestratorUI:
             "PSN_3_LUCIMEnvironmentSynthesizer.md",
             "PSN_4_LUCIMScenarioSynthesizer.md",
             "PSN_5_PlantUMLWriter.md",
-            "PSN_6_PlantUMLMessirAuditor.md",
-            "PSN_7_PlantUMLMessirCorrector.md",
+            "PSN_6_PlantUMLLUCIMAuditor.md",
+            "PSN_7_PlantUMLLUCIMCorrector.md",
             "DSL_Target_LUCIM-full-definition-for-compliance.md"
         ]
         

@@ -39,7 +39,7 @@ class TaskInfo:
 
 
 def find_repo_root() -> Path:
-    # scripts/ is under code-netlogo-to-messir/scripts, repo root is two levels up
+    # scripts/ is under code-netlogo-to-lucim-agentic-workflow/scripts, repo root is two levels up
     return Path(__file__).resolve().parents[2]
 
 

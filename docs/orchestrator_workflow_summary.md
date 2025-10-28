@@ -5,8 +5,8 @@ This document summarizes the current orchestration flow and highlights ambiguiti
 ---
 
 ## Pipeline Overview
-- Stages: 01 Syntax Parser + 02 Behavior Extractor (parallel) → 03 Messir Mapper → 04 LUCIM Scenario Synthesizer → 05 PlantUML Writer → 06 PlantUML Messir Auditor → 07 PlantUML Messir Corrector → 08 Final Auditor
-- Output root: `code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<model>-reason-<X>-verb-<Y>/<NN-stage>/`
+- Stages: 01 Syntax Parser + 02 Behavior Extractor (parallel) → 03 LUCIM Environment Synthesizer → 04 LUCIM Scenario Synthesizer → 05 PlantUML Writer → 06 PlantUML LUCIM Auditor → 07 PlantUML LUCIM Corrector → 08 Final Auditor
+- Output root: `code-netlogo-to-lucim-agentic-workflow/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<model>-reason-<X>-verb-<Y>/<NN-stage>/`
 - Each stage writes standardized artifacts: `output-response.json`, `output-reasoning.md`, `output-data.json` (+ optional `.puml` for diagram stages).
 
 ---
@@ -26,13 +26,13 @@ This document summarizes the current orchestration flow and highlights ambiguiti
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
 
 ### 03 — LUCIM Environment Synthesizer (`agent_3_lucim_environment_synthesizer.py`)
-- Agent-specific Input: State machine (from Step 02); optional iCrash PDF extracts; Messir/UCI rules.
+- Agent-specific Input: State machine (from Step 02); optional iCrash PDF extracts; LUCIM rules.
 - Agent-specific Output: `output-data.json` (LUCIM environment concepts).
 - Common Input: Persona instructions; configuration.
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
 
 ### 04 — LUCIM Scenario Synthesizer (`agent_4_lucim_scenario_synthesizer.py`)
-- Agent-specific Input: Step 02 state machine + Step 03 Messir concepts + LUCIM DSL full definition + iCrash references (all MANDATORY).
+- Agent-specific Input: Step 02 state machine + Step 03 LUCIM concepts + LUCIM DSL full definition + iCrash references (all MANDATORY).
 - Agent-specific Output: `output-data.json` (scenarios).
 - Common Input: Persona instructions; configuration.
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
@@ -40,26 +40,26 @@ This document summarizes the current orchestration flow and highlights ambiguiti
 ### 05 — PlantUML Writer (`agent_5_plantuml_writer.py`)
 - Agent-specific Input: Scenarios (from Step 04).
 - Agent-specific Output: `diagram.puml` (standalone); `output-data.json` (diagram payload incl. PlantUML text).
-- Common Input: Persona instructions; Messir/UCI rules; configuration.
+- Common Input: Persona instructions; LUCIM rules; configuration.
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
 
-### 06 — PlantUML Messir Auditor (`agent_6_plantuml_auditor.py`)
+### 06 — PlantUML LUCIM Auditor (`agent_6_plantuml_auditor.py`)
 - Agent-specific Input: standalone .puml file (from Step 05) and LUCIM DSL full definition (both mandatory).
 - Agent-specific Output: `output-data.json` (audit with non-compliant rules and verdict).
 - Common Input: Persona instructions; configuration.
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
 
-### 07 — PlantUML Messir Corrector (`agent_7_plantuml_corrector.py`)
+### 07 — PlantUML LUCIM Corrector (`agent_7_plantuml_corrector.py`)
 - Agent-specific Input: PlantUML diagrams (from Step 05), non-compliant rules (from Step 06), LUCIM DSL full definition. 
 - Agent-specific Output: `diagram.puml` (corrected standalone diagram); `output-data.json` (corrected diagram payload).
-- Common Input: Persona instructions; Messir/UCI rules; configuration.
+- Common Input: Persona instructions; LUCIM rules; configuration.
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
 
 ### 08 — Final Auditor
 - Agent-specific Input: Corrected diagrams (from Step 07) and prior artifacts as context.
 - Mandatory Inputs: Corrected PlantUML (.puml file) from Step 7; LUCIM DSL full definition file.
 - Agent-specific Output: `output-data.json` (final verdict).
-- Common Input: Persona instructions; Messir/UCI rules; configuration.
+- Common Input: Persona instructions; LUCIM rules; configuration.
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
 
 ---
