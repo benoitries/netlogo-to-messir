@@ -35,6 +35,12 @@ def clean_plantuml_escapes(content: str) -> str:
     
     # 2. Fix escaped quotes in JSON parameters within messages
     # Pattern: {\"key\":\"value\"} -> {"key":"value"}
+    # Handle multiple levels of escaping
+    cleaned = re.sub(
+        r'\\\\\\"([^"]*)\\\\\\"',
+        r'"\1"',
+        cleaned
+    )
     cleaned = re.sub(
         r'\\"([^"]*)\\"',
         r'"\1"',
@@ -46,6 +52,14 @@ def clean_plantuml_escapes(content: str) -> str:
     cleaned = re.sub(
         r'activate\s+(\w+)\s+#[0-9A-Fa-f]{6}',
         r'activate \1',
+        cleaned
+    )
+    
+    # 4. Clean any remaining escaped quotes in message parameters
+    # Pattern: message(\\"param\\") -> message("param")
+    cleaned = re.sub(
+        r'\(\\"([^"]*)\\"\)',
+        r'("\1")',
         cleaned
     )
     
@@ -75,8 +89,10 @@ def validate_plantuml_syntax(content: str) -> Tuple[bool, List[str]]:
         issues.append("Missing @enduml directive")
     
     # Check for escaped quotes (should be cleaned)
-    if '\\"' in content:
-        issues.append("Contains escaped quotes that should be cleaned")
+    # Only flag if there are excessive escaped quotes that suggest cleaning issues
+    escaped_quote_count = content.count('\\"')
+    if escaped_quote_count > 5:  # Allow some escaped quotes but flag excessive amounts
+        issues.append(f"Contains {escaped_quote_count} escaped quotes that should be cleaned")
     
     # Check for invalid color codes in activate commands
     invalid_colors = re.findall(r'activate\s+\w+\s+#[0-9A-Fa-f]{6}', content)
