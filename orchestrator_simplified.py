@@ -23,7 +23,7 @@ from agent_7_plantuml_corrector import NetLogoPlantUMLLUCIMCorrectorAgent
 
 from utils_config_constants import (
     INPUT_NETLOGO_DIR, OUTPUT_DIR, INPUT_PERSONA_DIR,
-    AGENT_CONFIGS, AVAILABLE_MODELS, DEFAULT_MODEL, ensure_directories,
+    AGENT_CONFIGS, AVAILABLE_MODELS, DEFAULT_MODEL, DEFAULT_PERSONA_SET, ensure_directories,
     validate_agent_response, LUCIM_RULES_FILE, get_persona_file_paths
 )
 from utils_logging import setup_orchestration_logger, format_parameter_bundle, attach_stdio_to_logger
@@ -40,7 +40,7 @@ ensure_directories()
 class NetLogoOrchestratorSimplified:
     """Simplified orchestrator for processing NetLogo files with a clean 8-stage pipeline."""
     
-    def __init__(self, model_name: str = DEFAULT_MODEL, persona_set: str = None):
+    def __init__(self, model_name: str = DEFAULT_MODEL, persona_set: str = DEFAULT_PERSONA_SET):
         """
         Initialize the NetLogo Orchestrator.
         
@@ -49,7 +49,7 @@ class NetLogoOrchestratorSimplified:
             persona_set: Optional persona set to use (bypasses interactive selection)
         """
         self.model = model_name
-        self.persona_set = persona_set
+        self.persona_set = persona_set or DEFAULT_PERSONA_SET
         # Format: YYYYMMDD_HHMM for better readability
         self.timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
         
@@ -106,9 +106,9 @@ class NetLogoOrchestratorSimplified:
         self.netlogo_abstract_syntax_extractor_agent = NetLogoAbstractSyntaxExtractorAgent(model_name, self.timestamp)
         # Pass IL-SYN file absolute paths to syntax parser agent
         try:
-            base_dir = pathlib.Path(__file__).resolve().parent
-            ilsyn_mapping_path = (base_dir / "input-persona" / "persona-v1" / "DSL_IL_SYN-mapping.md").resolve()
-            ilsyn_description_path = (base_dir / "input-persona" / "persona-v1" / "DSL_IL_SYN-description.md").resolve()
+            persona_paths = get_persona_file_paths(self.persona_set)
+            ilsyn_mapping_path = persona_paths["dsl_il_syn_mapping"]
+            ilsyn_description_path = persona_paths["dsl_il_syn_description"]
             if hasattr(self.netlogo_abstract_syntax_extractor_agent, "update_il_syn_inputs"):
                 self.netlogo_abstract_syntax_extractor_agent.update_il_syn_inputs(str(ilsyn_mapping_path), str(ilsyn_description_path))
             else:
@@ -123,8 +123,8 @@ class NetLogoOrchestratorSimplified:
         
         self.behavior_extractor_agent = NetLogoBehaviorExtractorAgent(model_name, self.timestamp)
         # Configure IL-SEM inputs for semantics agent (absolute paths)
-        il_sem_mapping = INPUT_PERSONA_DIR / "persona-v1" / "DSL_IL_SEM-mapping.md"
-        il_sem_description = INPUT_PERSONA_DIR / "persona-v1" / "DSL_IL_SEM-description.md"
+        il_sem_mapping = persona_paths["dsl_il_sem_mapping"]
+        il_sem_description = persona_paths["dsl_il_sem_description"]
         if hasattr(self.behavior_extractor_agent, "update_il_sem_inputs"):
             self.behavior_extractor_agent.update_il_sem_inputs(str(il_sem_mapping), str(il_sem_description))
         
