@@ -101,12 +101,18 @@ def validate_case_folder(case_dir: Path) -> List[str]:
         if not puml_candidates:
             errors.append(f"Missing PlantUML .puml file in {step5_dir} (expected diagram.puml or legacy *_plantuml_writer_diagram.puml)")
 
-    # Ensure Step 7 produced a corrected standalone .puml file with canonical name
+    # Ensure Step 7 produced a corrected standalone .puml file
     step7_dir = case_dir / "07-plantuml_lucim_corrector"
     if step7_dir.exists() and step7_dir.is_dir():
-        puml7 = step7_dir / "diagram.puml"
-        if not puml7.exists():
-            errors.append(f"Missing corrected PlantUML .puml file in {step7_dir} (expected diagram.puml)")
+        # Accept timestamped corrected filename or simplified name
+        puml7_candidates = list(step7_dir.glob("*_plantuml_corrector_diagram.puml"))
+        if not puml7_candidates:
+            puml7_candidates = list(step7_dir.glob("diagram.puml"))
+        if not puml7_candidates:
+            errors.append(
+                f"Missing corrected PlantUML .puml file in {step7_dir} "
+                f"(expected diagram.puml or *_plantuml_corrector_diagram.puml)"
+            )
 
     # New check: all *_reasoning.md files should have non-empty Reasoning Summary section
     for step_dir in case_dir.iterdir():
