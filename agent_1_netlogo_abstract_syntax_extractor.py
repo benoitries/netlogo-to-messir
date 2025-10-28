@@ -17,10 +17,7 @@ from utils_response_dump import serialize_response_to_dict, verify_exact_keys, w
 from utils_config_constants import expected_keys_for_agent
 from utils_logging import write_reasoning_md_from_payload
 
-from utils_config_constants import (
-    PERSONA_NETLOGO_ABSTRACT_SYNTAX_EXTRACTOR, OUTPUT_DIR, 
-    get_reasoning_config, validate_agent_response, AGENT_TIMEOUTS, DEFAULT_MODEL
-)
+from utils_task_loader import load_task_instruction
 
 # IL Syntax descriptor files (default absolute paths)
 IL_SYN_MAPPING_DEFAULT = (pathlib.Path(__file__).resolve().parent / "input-persona" / "DSL_IL_SYN-mapping.md").resolve()
@@ -182,8 +179,12 @@ class NetLogoAbstractSyntaxExtractorAgent(LlmAgent):
 
         instructions = f"{persona}{ilsyn_refs}"
         
+        # Load TASK instruction using utility function
+        task_content = load_task_instruction(1, "NetLogo Abstract Syntax Extractor")
+        
         input_text = f"""
 Filename: {filename}
+{task_content}
 Code:
 ```
 {code}

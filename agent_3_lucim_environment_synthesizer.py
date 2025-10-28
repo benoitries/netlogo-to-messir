@@ -16,6 +16,7 @@ from utils_openai_client import create_and_wait, get_output_text, get_reasoning_
 from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
 from utils_config_constants import expected_keys_for_agent
 from utils_logging import write_reasoning_md_from_payload
+from utils_task_loader import load_task_instruction
 
 from utils_config_constants import (
     PERSONA_LUCIM_ENVIRONMENT_SYNTHESIZER, OUTPUT_DIR, LUCIM_RULES_FILE,
@@ -166,6 +167,9 @@ class NetLogoLucimEnvironmentSynthesizerAgent(LlmAgent):
             }
         instructions = combined_persona
         
+        # Load TASK instruction using utility function
+        task_content = load_task_instruction(3, "LUCIM Environment Synthesizer")
+        
         # Prepare icrash reference text
         icrash_reference = ""
         if icrash_contents:
@@ -176,6 +180,7 @@ class NetLogoLucimEnvironmentSynthesizerAgent(LlmAgent):
         input_text = f"""
 
 Filename: {filename}
+{task_content}
 
 Step 01 AST Data:
 ```json

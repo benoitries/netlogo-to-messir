@@ -21,6 +21,7 @@ from utils_response_dump import serialize_response_to_dict, verify_exact_keys, w
 from utils_schema_loader import get_template_for_agent, validate_data_against_template
 from utils_config_constants import expected_keys_for_agent
 from utils_logging import write_reasoning_md_from_payload
+from utils_task_loader import load_task_instruction
 from utils_plantuml import process_plantuml_file
 
 # Configuration
@@ -150,10 +151,12 @@ class NetLogoPlantUMLWriterAgent(LlmAgent):
         """
         instructions = combined_persona
         
+        # Load TASK instruction using utility function
+        task_content = load_task_instruction(5, "PlantUML Writer")
+        
         # Build input text with optional non-compliant rules
         input_text = f"""
-Please generate PlantUML sequence diagrams from the following scenario data:
-
+{task_content}
 Filename: {filename}
 Scenarios Data:
 ```json

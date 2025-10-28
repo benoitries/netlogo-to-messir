@@ -15,6 +15,7 @@ from openai import OpenAI
 from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
 from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary
 from utils_config_constants import expected_keys_for_agent
+from utils_task_loader import load_task_instruction
 
 from utils_config_constants import (
     PERSONA_PLANTUML_AUDITOR, OUTPUT_DIR, LUCIM_RULES_FILE,
@@ -142,6 +143,9 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
             Dictionary containing reasoning, non-compliant rules, and any errors
         """
         instructions = f"{combined_persona}"
+        
+        # Load TASK instruction using utility function
+        task_content = load_task_instruction(step, f"PlantUML Auditor (step {step})")
 
         # Read .puml file content
         try:
@@ -190,6 +194,7 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
         input_text = f"""
         
 Filename: {filename}
+{task_content}
 
 Standalone PlantUML Source Code (.puml file):
 ```plantuml

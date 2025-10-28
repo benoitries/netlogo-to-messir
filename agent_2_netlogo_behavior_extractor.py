@@ -21,6 +21,7 @@ from utils_openai_client import create_and_wait, get_output_text, get_reasoning_
 from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts
 from utils_config_constants import expected_keys_for_agent
 from utils_logging import write_reasoning_md_from_payload
+from utils_task_loader import load_task_instruction
 
 # Configuration
 PERSONA_FILE = PERSONA_BEHAVIOR_EXTRACTOR
@@ -141,9 +142,13 @@ class NetLogoBehaviorExtractorAgent(LlmAgent):
             print("[WARNING] No UI images provided to semantics parser (expected two)")
         
         instructions = "\n\n".join(instructions_sections)
+        
+        # Load TASK instruction using utility function
+        task_content = load_task_instruction(2, "NetLogo Behavior Extractor")
+        
         input_text = f"""
 Filename: {base_name}
-
+{task_content}
 # Inputs Provided (Stage 2 canonical)
 - IL-SEM Mapping: {self.il_sem_mapping_path if self.il_sem_mapping_path else '(unset)'}
 - IL-SEM Description: {self.il_sem_description_path if self.il_sem_description_path else '(unset)'}

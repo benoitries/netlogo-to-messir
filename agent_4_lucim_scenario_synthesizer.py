@@ -17,6 +17,7 @@ from utils_response_dump import serialize_response_to_dict, verify_exact_keys, w
 from utils_schema_loader import get_template_for_agent, validate_data_against_template
 from utils_config_constants import expected_keys_for_agent
 from utils_logging import write_reasoning_md_from_payload
+from utils_task_loader import load_task_instruction
 
 from utils_config_constants import (
     PERSONA_LUCIM_SCENARIO_SYNTHESIZER, OUTPUT_DIR, LUCIM_RULES_FILE,
@@ -188,9 +189,13 @@ class NetLogoLUCIMScenarioSynthesizerAgent(LlmAgent):
         
         instructions = f"{combined_persona}"
         
+        # Load TASK instruction using utility function
+        task_content = load_task_instruction(4, "LUCIM Scenario Synthesizer")
+        
         input_text = f"""
 
 Filename: {filename}
+{task_content}
 
 Step 02 State Machine:
 ```json
