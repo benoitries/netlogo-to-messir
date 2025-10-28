@@ -110,9 +110,31 @@ netlogo-to-lucim/
    ```
 
 3. **Configure API keys:**
-   Set your OpenAI API key as an environment variable:
+   
+   The system automatically loads OpenAI API keys from `.env` files. Create a `.env` file in the project root:
+   
    ```bash
-   export OPENAI_API_KEY="your-api-key-here"
+   # Create .env file in project root
+   echo "OPENAI_API_KEY=your-api-key-here" > .env
+   ```
+   
+   The system will automatically search for `.env` files in multiple locations:
+   - Project root directory
+   - Code directory (`code-netlogo-to-lucim/`)
+   - Parent directories
+   
+   **Alternative methods:**
+   - Set environment variable: `export OPENAI_API_KEY="your-api-key-here"`
+   - Use the validation script: `python test_api_key_setup.py`
+   
+   **Validation:**
+   ```bash
+   # Test API key setup
+   python test_api_key_setup.py
+   
+   # Or validate from within the code directory
+   cd code-netlogo-to-lucim-agentic-workflow
+   python utils_api_key.py validate
    ```
 
 ## 🚀 Usage
@@ -123,10 +145,10 @@ Run the orchestrator with a single command using the default nano model, the fir
 
 ```bash
 export OPENAI_API_KEY="<YOUR_API_KEY>" && \
-python3 /Users/benoit.ries/Library/CloudStorage/OneDrive-UniversityofLuxembourg/cursor-workspace-individual/research.publi.reverse.engineering.netlogo.to.messir.ucid/code-netlogo-to-messir/scripts/run_default_nano.py | cat
+python3 /Users/benoit.ries/Library/CloudStorage/OneDrive-UniversityofLuxembourg/cursor-workspace-individual/research.publi.reverse.engineering.netlogo.to.messir.ucid/code-netlogo-to-lucim-agentic-workflow/scripts/run_default_nano.py | cat
 ```
 
-This will persist outputs under the canonical structure in `code-netlogo-to-messir/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>/`.
+This will persist outputs under the canonical structure in `code-netlogo-to-lucim-agentic-workflow/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>/`.
 
 ### Experimentation parameters
 
@@ -142,6 +164,24 @@ These parameters are supported through:
 ### OpenAI API Usage
 
 This project uses the OpenAI Responses API for all model inferences. There are no remaining usages of the legacy Chat Completions API.
+
+#### Automatic API Key Management
+
+The system includes automatic API key management with the following features:
+
+- **Automatic .env loading**: Searches for `.env` files in multiple locations
+- **Validation**: Tests API keys with meaningful error messages
+- **Centralized management**: Single utility (`utils_api_key.py`) for all API key operations
+- **Cursor rule integration**: Automatic guidance for developers
+
+**Key utilities:**
+- `utils_api_key.get_openai_api_key()`: Loads API key from .env files
+- `utils_api_key.validate_openai_key()`: Validates API key with test call
+- `utils_api_key.create_openai_client()`: Creates configured OpenAI client
+- `utils_openai_client.validate_openai_setup()`: Validates setup before operations
+
+**Error handling:**
+The system provides clear error messages when API keys are missing or invalid, including instructions for creating `.env` files.
 
 - Client: `from openai import OpenAI` with `client.responses.create(...)`
 - Reference: `https://platform.openai.com/docs/guides/latest-model#migrating-from-chat-completions-to-responses-api`

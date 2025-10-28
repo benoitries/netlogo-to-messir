@@ -9,11 +9,18 @@ import pathlib
 from pathlib import Path
 from typing import Dict, Set
 
+# Import API key utility for automatic .env loading
+from utils_api_key import get_openai_api_key
+
 # Base directory (parent of this file)
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 
-# OpenAI API configuration
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# OpenAI API configuration - automatically loads from .env files
+try:
+    OPENAI_API_KEY = get_openai_api_key()
+except ValueError as e:
+    print(f"Warning: {e}")
+    OPENAI_API_KEY = None
 
 # Input directories - use environment variables if set, otherwise use default paths
 INPUT_NETLOGO_DIR = Path(os.getenv("INPUT_NETLOGO_DIR", BASE_DIR / "input-netlogo"))

@@ -7,59 +7,48 @@ handling both legacy chat completions and the new Responses API.
 
 import json
 import time
-import os
-from typing import Any, Dict, Optional, Iterable, Tuple
-from utils_openai_error import with_retries
-
-try:
-    # Typed import for editors; at runtime we only rely on attributes used.
-    from openai import OpenAI  # type: ignore
-except Exception:  # pragma: no cover - allow module import even if SDK missing at analysis time
-    OpenAI = object  # type: ignore
+from typing import Any, Dict, Optional, Union
+from openai import OpenAI
+from utils_openai_error import with_retries, classify_error
+from utils_config_constants import get_reasoning_config
+from utils_api_key import create_openai_client, validate_openai_key
 
 
-def validate_openai_key() -> bool:
-    """Validate OpenAI API key by making a simple test call.
+def validate_openai_setup() -> bool:
+    """Validate OpenAI API setup before any operations.
     
-    This function should be called at the very beginning of orchestration
-    before any user interaction to ensure the API key is valid.
+    This function should be called at the beginning of any script
+    that uses OpenAI API to ensure proper configuration.
     
     Returns:
-        bool: True if key is valid and API is accessible, False otherwise
+        bool: True if setup is valid, False otherwise
+    """
+    print("🔍 Validating OpenAI API setup...")
+    return validate_openai_key()
+
+
+def get_openai_client() -> OpenAI:
+    """Get a configured OpenAI client with automatic API key loading.
+    
+    Returns:
+        OpenAI: Configured OpenAI client
         
     Raises:
-        SystemExit: If OPENAI_API_KEY environment variable is not set
+        ValueError: If API key is not found or invalid
     """
-    # Import centralized key from config
-    from utils_config_constants import OPENAI_API_KEY
+    return create_openai_client()
+
+
+def format_prompt_for_responses_api(prompt_text: str) -> str:
+    """Format prompt text for OpenAI Responses API.
     
-    # Check if API key is set
-    if not OPENAI_API_KEY:
-        print("ERROR: OPENAI_API_KEY environment variable is not set")
-        print("Please set your OpenAI API key:")
-        print("  export OPENAI_API_KEY='your-api-key-here'")
-        raise SystemExit(1)
-    
-    # Test the key with a simple API call
-    try:
-        client = OpenAI(api_key=OPENAI_API_KEY)
+    Args:
+        prompt_text: The prompt text as a string
         
-        # Make a minimal test call to validate the key
-        # Using a simple completion request that should work with any valid key
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": "test"}],
-            max_tokens=1
-        )
-        
-        # If we get here, the key is valid
-        print("✓ OpenAI API key validation successful")
-        return True
-        
-    except Exception as e:
-        print(f"ERROR: OpenAI API key validation failed: {e}")
-        print("Please check your API key and try again")
-        return False
+    Returns:
+        The prompt text directly (as it worked on Oct 9)
+    """
+    return prompt_text
 
 
 def create_and_wait(
@@ -68,177 +57,101 @@ def create_and_wait(
     poll_interval_seconds: float = 1.0,
     timeout_seconds: Optional[float] = None,
 ) -> Any:
-    """Create a responses job then poll until completion or failure.
-
-    Returns the final response object. Raises RuntimeError on failure/timeout.
+    """Create a response and wait for completion using OpenAI Responses API.
+    
+    Args:
+        client: OpenAI client instance
+        api_config: Configuration dictionary for the API call
+        poll_interval_seconds: Interval between polling attempts
+        timeout_seconds: Maximum time to wait (None for no timeout)
+        
+    Returns:
+        Completed response object
+        
+    Raises:
+        Exception: If the response fails or times out
     """
-    response = with_retries(lambda: client.responses.create(**api_config))
-
-    start_time = time.time()
-    while getattr(response, "status", None) not in ("completed", "failed", "cancelled"):
-        time.sleep(poll_interval_seconds)
-        response = with_retries(lambda: client.responses.retrieve(response.id))
-
-        if timeout_seconds is not None and (time.time() - start_time) > timeout_seconds:
-            raise RuntimeError("OpenAI response polling timed out")
-
-    status = getattr(response, "status", None)
-    if status != "completed":
-        raise RuntimeError(f"OpenAI response ended with status: {status}")
-
-    return response
+    try:
+        # Create the response
+        response = with_retries(lambda: client.responses.create(**api_config))
+        
+        # Wait for completion
+        start_time = time.time()
+        while response.status != "completed":
+            if timeout_seconds and (time.time() - start_time) > timeout_seconds:
+                raise TimeoutError(f"Response timed out after {timeout_seconds} seconds")
+            
+            time.sleep(poll_interval_seconds)
+            response = client.responses.retrieve(response.id)
+            
+            if response.status == "failed":
+                error_msg = getattr(response, "error", "Unknown error")
+                raise Exception(f"Response failed: {error_msg}")
+        
+        return response
+        
+    except Exception as e:
+        # Log the error category for debugging
+        error_category = classify_error(e)
+        print(f"OpenAI API error (category: {error_category}): {e}")
+        raise
 
 
 # Streaming helpers were removed as the project no longer persists streaming artifacts.
 
 
 def get_output_text(response: Any) -> str:
-    """Return best-effort plain text from a responses object.
-
-    Prefers the SDK helper `response.output_text` when available, with
-    a safe fallback to traverse `response.output` content parts.
+    """Extract plain text output from OpenAI Responses API response.
+    
+    Args:
+        response: OpenAI Responses API response object
+        
+    Returns:
+        Plain text content from the response
     """
-    # Preferred helper in 2.x SDK
-    text_attr = getattr(response, "output_text", None)
-    if isinstance(text_attr, str) and text_attr:
-        return text_attr
-
-    # Fallback: traverse structured output
-    text_chunks: list[str] = []
-    output = getattr(response, "output", None)
-    if isinstance(output, list):
-        for item in output:
-            # Typical shape: item.type == "message" with item.content parts
-            content = getattr(item, "content", None)
-            if isinstance(content, list):
-                for part in content:
-                    if getattr(part, "type", None) == "output_text":
-                        value = getattr(part, "text", None)
-                        if isinstance(value, str):
-                            text_chunks.append(value)
-                    # Some SDKs use generic text parts
-                    if getattr(part, "type", None) == "text":
-                        value = getattr(part, "text", None)
-                        if isinstance(value, str):
-                            text_chunks.append(value)
-
-    return "".join(text_chunks).strip()
+    try:
+        # For Responses API: response.output[1].content[0].text
+        if hasattr(response, 'output') and isinstance(response.output, list):
+            for output_item in response.output:
+                if hasattr(output_item, 'content') and isinstance(output_item.content, list):
+                    for content_item in output_item.content:
+                        if hasattr(content_item, 'text') and content_item.text:
+                            return content_item.text
+        
+        # Fallback for legacy chat completions API
+        if hasattr(response, 'choices') and response.choices:
+            return response.choices[0].message.content or ""
+        
+        return ""
+    except (AttributeError, IndexError, KeyError):
+        return ""
 
 
 def get_reasoning_summary(response: Any) -> str:
-    """Extract reasoning summary if present; else empty string.
-
-    This function is intentionally tolerant to schema variations across SDK/model versions.
-    It inspects several likely locations and shapes:
-    - response.reasoning.summary (string)
-    - content parts of type "reasoning" with either .text or .summary (list of items with .text)
-    - content parts of type "reasoning_summary" with .text
+    """Extract reasoning summary from OpenAI Responses API response.
+    
+    Args:
+        response: OpenAI Responses API response object
+        
+    Returns:
+        Reasoning summary text if available, empty string otherwise
     """
-    # 1) Root-level reasoning dict with a "summary" string
-    summary = getattr(response, "reasoning", None)
-    if isinstance(summary, dict):
-        value = summary.get("summary")
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-
-    # 2) Traverse output to find summaries in multiple shapes
-    output = getattr(response, "output", None)
-    # 2.a) New requirement: concatenate all elements of the array output.summary.text
-    # Handle when output is an object-like with a "summary" list of items each having "text"
     try:
-        output_summary = getattr(output, "summary", None) if output is not None else None
-        # Also support dict-like
-        if output_summary is None and isinstance(output, dict):
-            output_summary = output.get("summary")
-        if isinstance(output_summary, list) and output_summary:
-            chunks0: list[str] = []
-            for s in output_summary:
-                # Support object attributes or dicts with key "text"
-                s_text = getattr(s, "text", None)
-                if s_text is None and isinstance(s, dict):
-                    s_text = s.get("text")
-                if isinstance(s_text, str) and s_text.strip():
-                    chunks0.append(s_text.strip())
-            if chunks0:
-                return "\n".join(chunks0)
-    except Exception:
-        pass
-
-    # 2.b) When output is a list of items, inspect both per-item content and per-item summary
-    if isinstance(output, list):
-        for item in output:
-            # Prefer item.summary (array of {text}) if present
-            item_summary = getattr(item, "summary", None)
-            if item_summary is None and isinstance(item, dict):
-                item_summary = item.get("summary")
-            if isinstance(item_summary, list) and item_summary:
-                chunksx: list[str] = []
-                for s in item_summary:
-                    s_text = getattr(s, "text", None)
-                    if s_text is None and isinstance(s, dict):
-                        s_text = s.get("text")
-                    if isinstance(s_text, str) and s_text.strip():
-                        chunksx.append(s_text.strip())
-                if chunksx:
-                    return "\n".join(chunksx)
-
-            content = getattr(item, "content", None)
-            if not isinstance(content, list):
-                continue
-            for part in content:
-                part_type = getattr(part, "type", None)
-                # a) Explicit reasoning summary in text form
-                if part_type in ("reasoning_summary",):
-                    text_value = getattr(part, "text", None)
-                    if isinstance(text_value, str) and text_value.strip():
-                        return text_value.strip()
-                # b) Reasoning block which may contain nested summary items
-                if part_type == "reasoning":
-                    # Prefer direct text if provided
-                    text_value = getattr(part, "text", None)
-                    if isinstance(text_value, str) and text_value.strip():
-                        return text_value.strip()
-                    # Otherwise, aggregate from part.summary list
-                    summary_items = getattr(part, "summary", None)
-                    if isinstance(summary_items, list) and summary_items:
-                        chunks: list[str] = []
-                        for s in summary_items:
-                            s_text = getattr(s, "text", None)
-                            if isinstance(s_text, str) and s_text.strip():
-                                chunks.append(s_text.strip())
-                        if chunks:
-                            return "\n".join(chunks)
-
-    # 3) Some SDKs attach reasoning at the item level (not per-part)
-    if isinstance(output, list):
-        for item in output:
-            item_reasoning = getattr(item, "reasoning", None)
-            if isinstance(item_reasoning, dict):
-                # Accept either a string summary or list of items with .text
-                summ = item_reasoning.get("summary")
-                if isinstance(summ, str) and summ.strip():
-                    return summ.strip()
-                if isinstance(summ, list) and summ:
-                    chunks2: list[str] = []
-                    for s in summ:
-                        s_text = getattr(s, "text", None)
-                        if isinstance(s_text, str) and s_text.strip():
-                            chunks2.append(s_text.strip())
-                    if chunks2:
-                        return "\n".join(chunks2)
-
-    # 4) Final fallback: if usage indicates reasoning tokens, but no explicit summary was found
-    usage = getattr(response, "usage", None)
-    if usage is not None:
-        # Try common attributes
-        reasoning_tokens = getattr(getattr(usage, "output_tokens_details", None), "reasoning_tokens", None)
-        if isinstance(reasoning_tokens, int) and reasoning_tokens > 0:
-            # There was reasoning activity, but no explicit summary structure was found.
-            # Return empty string so downstream writers can decide how to represent absence.
-            return ""
-
-    # Nothing found
-    return ""
+        # For Responses API: look for reasoning blocks in output
+        if hasattr(response, 'output') and isinstance(response.output, list):
+            for output_item in response.output:
+                if hasattr(output_item, 'summary') and isinstance(output_item.summary, list):
+                    chunks = []
+                    for summary_item in output_item.summary:
+                        if hasattr(summary_item, 'text') and summary_item.text:
+                            chunks.append(summary_item.text.strip())
+                    if chunks:
+                        return "\n".join(chunks)
+        
+        # Fallback for legacy chat completions API
+        return ""
+    except (AttributeError, IndexError, KeyError):
+        return ""
 
 
 def get_usage_tokens(response: Any, exact_input_tokens: Optional[int] = None) -> Dict[str, int]:
@@ -293,9 +206,8 @@ def get_usage_tokens(response: Any, exact_input_tokens: Optional[int] = None) ->
             else:
                 output_tokens = 0
         else:
-            # Nothing better to do; leave zeros if API did not provide values
-            input_tokens = 0
-            output_tokens = 0
+            # Conservative fallback: assume all tokens are output tokens
+            output_tokens = tokens_used
 
     return {
         "total_tokens": tokens_used,
@@ -304,3 +216,141 @@ def get_usage_tokens(response: Any, exact_input_tokens: Optional[int] = None) ->
         "reasoning_tokens": reasoning_tokens,
     }
 
+
+def parse_json_response(text: str) -> Dict[str, Any]:
+    """Parse JSON response text, handling common formatting issues.
+    
+    Args:
+        text: Raw text response that should contain JSON
+        
+    Returns:
+        Parsed JSON as dictionary
+        
+    Raises:
+        ValueError: If JSON parsing fails
+    """
+    if not text.strip():
+        raise ValueError("Empty response text")
+    
+    # Try to parse as-is first
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    
+    # Try to extract JSON from markdown code blocks
+    if "```json" in text:
+        start = text.find("```json") + 7
+        end = text.find("```", start)
+        if end > start:
+            json_text = text[start:end].strip()
+            try:
+                return json.loads(json_text)
+            except json.JSONDecodeError:
+                pass
+    
+    # Try to extract JSON from code blocks without language
+    if "```" in text:
+        start = text.find("```") + 3
+        end = text.find("```", start)
+        if end > start:
+            json_text = text[start:end].strip()
+            try:
+                return json.loads(json_text)
+            except json.JSONDecodeError:
+                pass
+    
+    # Last resort: try to find JSON-like content
+    lines = text.split('\n')
+    json_lines = []
+    in_json = False
+    
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith('{') and not in_json:
+            in_json = True
+            json_lines.append(line)
+        elif in_json:
+            json_lines.append(line)
+            if stripped.endswith('}') and stripped.count('{') <= stripped.count('}'):
+                break
+    
+    if json_lines:
+        json_text = '\n'.join(json_lines)
+        try:
+            return json.loads(json_text)
+        except json.JSONDecodeError:
+            pass
+    
+    raise ValueError(f"Could not parse JSON from response: {text[:200]}...")
+
+
+def validate_openai_key() -> bool:
+    """Validate that OpenAI API key is properly configured.
+    
+    Returns:
+        True if API key is valid, False otherwise
+    """
+    try:
+        from openai import OpenAI
+        client = OpenAI()
+        # Try a simple API call to validate the key
+        client.models.list()
+        return True
+    except Exception:
+        return False
+
+
+def create_response_summary(
+    agent_type: str,
+    model: str,
+    timestamp: str,
+    base_name: str,
+    step_number: str,
+    reasoning_summary: str,
+    data: Optional[Dict[str, Any]],
+    errors: list[str],
+    tokens_used: int,
+    input_tokens: int,
+    visible_output_tokens: int,
+    reasoning_tokens: int,
+    total_output_tokens: int,
+    raw_response: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Create a standardized response summary.
+    
+    Args:
+        agent_type: Type of agent that processed the request
+        model: Model used for the request
+        timestamp: Timestamp of the request
+        base_name: Base name of the input file
+        step_number: Step number in the pipeline
+        reasoning_summary: Summary of the reasoning process
+        data: Parsed data from the response
+        errors: List of error messages
+        tokens_used: Total tokens used
+        input_tokens: Input tokens used
+        visible_output_tokens: Visible output tokens
+        reasoning_tokens: Reasoning tokens used
+        total_output_tokens: Total output tokens
+        raw_response: Raw response object
+        
+    Returns:
+        Standardized response summary dictionary
+    """
+    return {
+        "agent_type": agent_type,
+        "model": model,
+        "timestamp": timestamp,
+        "base_name": base_name,
+        "step_number": step_number,
+        "reasoning_summary": reasoning_summary,
+        "data": data,
+        "errors": errors,
+        "tokens_used": tokens_used,
+        "input_tokens": input_tokens,
+        "visible_output_tokens": visible_output_tokens,
+        "reasoning_tokens": reasoning_tokens,
+        "total_output_tokens": total_output_tokens,
+        "raw_response": raw_response,
+    }
