@@ -19,7 +19,7 @@ import subprocess
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from orchestrator import NetLogoOrchestrator  # noqa: E402
+from orchestrator_simplified import NetLogoOrchestratorSimplified  # noqa: E402
 from utils_config_constants import AGENT_CONFIGS, DEFAULT_MODEL, AGENT_TIMEOUTS, ORCHESTRATOR_PARALLEL_TIMEOUT  # noqa: E402
 from utils_logging import format_parameter_bundle  # noqa: E402
 
@@ -41,7 +41,7 @@ async def run_default(args: argparse.Namespace) -> None:
     model_name = DEFAULT_MODEL
     base_name = args.base
 
-    orchestrator = NetLogoOrchestrator(model_name=model_name)
+    orchestrator = NetLogoOrchestratorSimplified(model_name=model_name, persona_set=args.persona_set)
 
     # Apply requested configuration globally via unified API
     orchestrator.update_agent_configs(
