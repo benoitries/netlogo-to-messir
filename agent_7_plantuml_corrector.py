@@ -26,17 +26,6 @@ from utils_config_constants import (
 PERSONA_FILE = PERSONA_PLANTUML_CORRECTOR
 WRITE_FILES = True
 
-# Load persona and LUCIM rules
-persona = PERSONA_FILE.read_text(encoding="utf-8")
-lucim_rules = ""
-try:
-    lucim_rules = LUCIM_RULES_FILE.read_text(encoding="utf-8")
-except FileNotFoundError:
-    raise SystemExit(f"ERROR: Compliance rules file not found: {LUCIM_RULES_FILE}")
-
-# Concatenate persona and rules
-combined_persona = f"{persona}\n\n{lucim_rules}"
-
 
 def sanitize_model_name(model_name: str) -> str:
     """Sanitize model name by replacing hyphens with underscores for valid identifier."""
@@ -51,6 +40,10 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
     reasoning_effort: str = "medium"
     reasoning_summary: str = "auto"
     text_verbosity: str = "medium"
+    persona_path: str = ""
+    persona_text: str = ""
+    lucim_rules_path: str = ""
+    lucim_rules_text: str = ""
     
     def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
         sanitized_name = sanitize_model_name(model_name)
@@ -70,6 +63,17 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
         # Configure OpenAI client (assumes key already validated by orchestrator)
         from utils_config_constants import OPENAI_API_KEY
         self.client = OpenAI(api_key=OPENAI_API_KEY)
+        # Initialize persona and rules from defaults; orchestrator can override
+        try:
+            self.persona_path = str(PERSONA_FILE)
+            self.persona_text = pathlib.Path(self.persona_path).read_text(encoding="utf-8")
+        except Exception:
+            self.persona_text = ""
+        try:
+            self.lucim_rules_path = str(LUCIM_RULES_FILE)
+            self.lucim_rules_text = pathlib.Path(self.lucim_rules_path).read_text(encoding="utf-8")
+        except Exception:
+            self.lucim_rules_text = ""
     
     def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
         """
@@ -98,6 +102,26 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
             value = config.get(key)
             if value is not None:
                 setattr(self, key, value)
+    
+    def update_persona_path(self, persona_path: str) -> None:
+        if not persona_path:
+            return
+        self.persona_path = persona_path
+        try:
+            self.persona_text = pathlib.Path(persona_path).read_text(encoding="utf-8")
+        except Exception as e:
+            print(f"[WARNING] Failed to load persona file: {persona_path} ({e})")
+            self.persona_text = ""
+    
+    def update_lucim_rules_path(self, rules_path: str) -> None:
+        if not rules_path:
+            return
+        self.lucim_rules_path = rules_path
+        try:
+            self.lucim_rules_text = pathlib.Path(rules_path).read_text(encoding="utf-8")
+        except Exception as e:
+            print(f"[WARNING] Failed to load LUCIM rules file: {rules_path} ({e})")
+            self.lucim_rules_text = ""
     
     def count_input_tokens(self, instructions: str, input_text: str) -> int:
         """
@@ -177,32 +201,34 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
                 "output_tokens": 0
             }
         
-        instructions = f"{combined_persona}"
-        
         # Load TASK instruction using utility function
         task_content = load_task_instruction(7, "PlantUML Corrector")
-        
+
+        # Build canonical instructions order: task_content → persona → LUCIM rules
+        instructions = f"{task_content}\n\n{self.persona_text}\n\n{lucim_dsl_content}"
+
+        # Extract PlantUML text best-effort from provided diagrams
+        original_puml = self._extract_plantuml_text(plantuml_diagrams) if plantuml_diagrams else ""
+
+        # Build input text with required tagged sections
         input_text = f"""
+<CASE-STUDY-NAME>
+{filename}
+</CASE-STUDY-NAME>
 
-Filename: {filename}
-{task_content}
-
-Original PlantUML Diagrams:
-```json
-{json.dumps(plantuml_diagrams, indent=2)}
+<PLANTUML-DIAGRAM>
+```plantuml
+{original_puml}
 ```
+</PLANTUML-DIAGRAM>
 
-Non-compliant Rules to Fix:
+<LUCIM-NONCOMPLIANCE-REPORT>
 ```json
 {json.dumps(non_compliant_rules, indent=2)}
 ```
-
-LUCIM DSL Full Definition:
-```
-{lucim_dsl_content}
-```
+</LUCIM-NONCOMPLIANCE-REPORT>
 """
-        
+
         # Create single system_prompt variable for both API call and file generation
         system_prompt = f"{instructions}\n\n{input_text}"
         

@@ -25,17 +25,6 @@ from utils_config_constants import (
 PERSONA_FILE = PERSONA_PLANTUML_AUDITOR
 WRITE_FILES = True
 
-# Load persona and LUCIM rules
-persona = PERSONA_FILE.read_text(encoding="utf-8")
-lucim_rules = ""
-try:
-    lucim_rules = LUCIM_RULES_FILE.read_text(encoding="utf-8")
-except FileNotFoundError:
-    raise SystemExit(f"ERROR: Compliance rules file not found: {LUCIM_RULES_FILE}")
-
-# Concatenate persona and rules
-combined_persona = f"{persona}\n\n{lucim_rules}"
-
 
 def sanitize_model_name(model_name: str) -> str:
     """Sanitize model name by replacing hyphens with underscores for valid identifier."""
@@ -50,6 +39,10 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
     reasoning_effort: str = "medium"
     reasoning_summary: str = "auto"
     text_verbosity: str = "medium"
+    persona_path: str = ""
+    persona_text: str = ""
+    lucim_rules_path: str = ""
+    lucim_rules_text: str = ""
     
     def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
         sanitized_name = sanitize_model_name(model_name)
@@ -69,6 +62,17 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
         # Configure OpenAI client (assumes key already validated by orchestrator)
         from utils_config_constants import OPENAI_API_KEY
         self.client = OpenAI(api_key=OPENAI_API_KEY)
+        # Initialize persona and rules from defaults; orchestrator can override
+        try:
+            self.persona_path = str(PERSONA_FILE)
+            self.persona_text = pathlib.Path(self.persona_path).read_text(encoding="utf-8")
+        except Exception:
+            self.persona_text = ""
+        try:
+            self.lucim_rules_path = str(LUCIM_RULES_FILE)
+            self.lucim_rules_text = pathlib.Path(self.lucim_rules_path).read_text(encoding="utf-8")
+        except Exception:
+            self.lucim_rules_text = ""
     
     def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
         """
@@ -97,6 +101,26 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
             value = config.get(key)
             if value is not None:
                 setattr(self, key, value)
+    
+    def update_persona_path(self, persona_path: str) -> None:
+        if not persona_path:
+            return
+        self.persona_path = persona_path
+        try:
+            self.persona_text = pathlib.Path(persona_path).read_text(encoding="utf-8")
+        except Exception as e:
+            print(f"[WARNING] Failed to load persona file: {persona_path} ({e})")
+            self.persona_text = ""
+    
+    def update_lucim_rules_path(self, rules_path: str) -> None:
+        if not rules_path:
+            return
+        self.lucim_rules_path = rules_path
+        try:
+            self.lucim_rules_text = pathlib.Path(rules_path).read_text(encoding="utf-8")
+        except Exception as e:
+            print(f"[WARNING] Failed to load LUCIM rules file: {rules_path} ({e})")
+            self.lucim_rules_text = ""
     
     def count_input_tokens(self, instructions: str, input_text: str) -> int:
         """
@@ -146,10 +170,11 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
         # Resolve base output directory (use provided output_dir or fall back to OUTPUT_DIR)
         base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
         
-        instructions = f"{combined_persona}"
-        
         # Load TASK instruction using utility function
         task_content = load_task_instruction(step, f"PlantUML Auditor (step {step})")
+
+        # Build canonical instructions order: task_content → persona → LUCIM rules (use instance values)
+        instructions = f"{task_content}\n\n{self.persona_text}\n\n{self.lucim_rules_text}"
 
         # Read .puml file content
         try:
@@ -195,20 +220,17 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
                 "output_tokens": 0
             }
         
+        # Build input text with required tagged sections
         input_text = f"""
-        
-Filename: {filename}
-{task_content}
+<CASE-STUDY-NAME>
+{filename}
+</CASE-STUDY-NAME>
 
-Standalone PlantUML Source Code (.puml file):
+<PLANTUML-DIAGRAM>
 ```plantuml
 {puml_content}
 ```
-
-LUCIM DSL Full Definition:
-```markdown
-{lucim_dsl_content}
-```
+</PLANTUML-DIAGRAM>
 """
         
         # Create single system_prompt variable for both API call and file generation

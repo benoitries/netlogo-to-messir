@@ -104,7 +104,7 @@ def main() -> None:
     parser.add_argument("--reasoning", choices=["low", "medium", "high"], default="medium", help="Reasoning effort")
     parser.add_argument("--summary", choices=["auto", "manual"], default="auto", help="Reasoning summary mode")
     parser.add_argument("--verbosity", choices=["low", "medium", "high"], default="low", help="Text verbosity level")
-    parser.add_argument("--persona-set", type=str, default=None, help="Persona set to use (bypasses interactive selection)")
+    parser.add_argument("--persona-set", type=str, default="persona-v2-after-ng-meeting", help="Persona set to use (default: persona-v2-after-ng-meeting). Remove or set to empty to enable interactive selection")
     args = parser.parse_args()
     asyncio.run(run_default(args))
 

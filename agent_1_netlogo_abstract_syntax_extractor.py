@@ -27,9 +27,6 @@ IL_SYN_DESCRIPTION_DEFAULT = (pathlib.Path(__file__).resolve().parent / "input-p
 PERSONA_FILE = PERSONA_NETLOGO_ABSTRACT_SYNTAX_EXTRACTOR
 WRITE_FILES = True
 
-# Load persona
-persona = PERSONA_FILE.read_text(encoding="utf-8")
-
 
 def sanitize_model_name(model_name: str) -> str:
     """Sanitize model name by replacing hyphens with underscores for valid identifier."""
@@ -47,6 +44,8 @@ class NetLogoAbstractSyntaxExtractorAgent(LlmAgent):
     # IL-SYN reference inputs (absolute paths set by orchestrator)
     il_syn_mapping_path: Optional[str] = None
     il_syn_description_path: Optional[str] = None
+    persona_path: Optional[str] = None
+    persona_text: str = ""
     
     def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
         sanitized_name = sanitize_model_name(model_name)
@@ -66,6 +65,12 @@ class NetLogoAbstractSyntaxExtractorAgent(LlmAgent):
         # Configure OpenAI client (assumes key already validated by orchestrator)
         from utils_config_constants import OPENAI_API_KEY
         self.client = OpenAI(api_key=OPENAI_API_KEY)
+        # Initialize persona from default, can be overridden by orchestrator later
+        try:
+            self.persona_path = str(PERSONA_FILE)
+            self.persona_text = pathlib.Path(self.persona_path).read_text(encoding="utf-8")
+        except Exception:
+            self.persona_text = ""
     
     def update_il_syn_inputs(self, mapping_path: Optional[str], description_path: Optional[str]):
         """Configure IL-SYN external reference file paths.
@@ -88,6 +93,17 @@ class NetLogoAbstractSyntaxExtractorAgent(LlmAgent):
                     print(f"[WARNING] IL-SYN description file not found: {description_path}")
         except Exception as e:
             print(f"[WARNING] Failed to validate IL-SYN paths: {e}")
+
+    def update_persona_path(self, persona_path: Optional[str]) -> None:
+        """Update the persona file path and reload its content."""
+        if not persona_path:
+            return
+        self.persona_path = persona_path
+        try:
+            self.persona_text = pathlib.Path(persona_path).read_text(encoding="utf-8")
+        except Exception as e:
+            print(f"[WARNING] Failed to load persona file: {persona_path} ({e})")
+            self.persona_text = ""
     
     def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
         """
@@ -162,7 +178,7 @@ class NetLogoAbstractSyntaxExtractorAgent(LlmAgent):
         # Resolve base output directory (use provided output_dir or fall back to OUTPUT_DIR)
         base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
         
-        # Compose instructions: persona + explicit IL-SYN references as separate context files
+        # Compose instructions: task_content → persona → IL-SYN references
         ilsyn_refs = ""
         try:
             # Allow orchestrator to provide absolute paths via instance attributes
@@ -170,7 +186,7 @@ class NetLogoAbstractSyntaxExtractorAgent(LlmAgent):
             description_path = pathlib.Path(getattr(self, "il_syn_description_path", IL_SYN_DESCRIPTION_DEFAULT))
             mapping_txt = mapping_path.read_text(encoding="utf-8") if mapping_path.exists() else ""
             description_txt = description_path.read_text(encoding="utf-8") if description_path.exists() else ""
-            ilsyn_refs = f"\n\n[REFERENCE: DSL_IL_SYN-description.md]\n{description_txt}\n\n[REFERENCE: DSL_IL_SYN-mapping.md]\n{mapping_txt}\n"
+            ilsyn_refs = f"\n\n{description_txt}\n\n{mapping_txt}\n"
             # Log reference ingestion status similarly to semantics agent
             if mapping_path and not mapping_txt:
                 print(f"[WARNING] IL-SYN mapping file not found: {mapping_path}")
@@ -181,18 +197,21 @@ class NetLogoAbstractSyntaxExtractorAgent(LlmAgent):
         except Exception as e:
             print(f"[WARNING] Failed to load IL-SYN references: {e}")
 
-        instructions = f"{persona}{ilsyn_refs}"
-        
         # Load TASK instruction using utility function
         task_content = load_task_instruction(1, "NetLogo Abstract Syntax Extractor")
-        
+
+        instructions = f"{task_content}\n\n{self.persona_text}{ilsyn_refs}"
+
         input_text = f"""
-Filename: {filename}
-{task_content}
-Code:
-```
+<CASE-STUDY-NAME>
+{filename}
+</CASE-STUDY-NAME>
+
+<NETLOGO-SOURCE-CODE>
+```text
 {code}
 ```
+</NETLOGO-SOURCE-CODE>
 """
         
         # Create single system_prompt variable for both API call and file generation

@@ -27,16 +27,7 @@ from utils_config_constants import (
 PERSONA_FILE = PERSONA_LUCIM_SCENARIO_SYNTHESIZER
 WRITE_FILES = True
 
-# Load persona and LUCIM rules
-persona = PERSONA_FILE.read_text(encoding="utf-8")
-lucim_rules = ""
-try:
-    lucim_rules = LUCIM_RULES_FILE.read_text(encoding="utf-8")
-except FileNotFoundError:
-    raise SystemExit(f"ERROR: Compliance rules file not found: {LUCIM_RULES_FILE}")
-
-# Concatenate persona and rules
-combined_persona = f"{persona}\n\n{lucim_rules}"
+# Load persona and LUCIM rules (instance-level will be set in __init__)
 
 
 def sanitize_model_name(model_name: str) -> str:
@@ -52,6 +43,8 @@ class NetLogoLUCIMScenarioSynthesizerAgent(LlmAgent):
     reasoning_effort: str = "medium"
     reasoning_summary: str = "auto"  # Add client field
     text_verbosity: str = "medium"
+    persona_path: str = ""
+    persona_text: str = ""
     
     def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
         sanitized_name = sanitize_model_name(model_name)
@@ -71,6 +64,12 @@ class NetLogoLUCIMScenarioSynthesizerAgent(LlmAgent):
         # Configure OpenAI client (assumes key already validated by orchestrator)
         from utils_config_constants import OPENAI_API_KEY
         self.client = OpenAI(api_key=OPENAI_API_KEY)
+        # Initialize persona from default; orchestrator may override
+        try:
+            self.persona_path = str(PERSONA_FILE)
+            self.persona_text = pathlib.Path(self.persona_path).read_text(encoding="utf-8")
+        except Exception:
+            self.persona_text = ""
     
     def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
         """
@@ -86,6 +85,16 @@ class NetLogoLUCIMScenarioSynthesizerAgent(LlmAgent):
     def update_text_config(self, text_verbosity: str):
         """Update text verbosity configuration for this agent."""
         self.text_verbosity = text_verbosity
+    
+    def update_persona_path(self, persona_path: str) -> None:
+        if not persona_path:
+            return
+        self.persona_path = persona_path
+        try:
+            self.persona_text = pathlib.Path(persona_path).read_text(encoding="utf-8")
+        except Exception as e:
+            print(f"[WARNING] Failed to load persona file: {persona_path} ({e})")
+            self.persona_text = ""
     
     def apply_config(self, config: Dict[str, Any]) -> None:
         """Apply a unified configuration bundle to this agent.
@@ -132,7 +141,7 @@ class NetLogoLUCIMScenarioSynthesizerAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def write_scenarios(self, state_machine: Dict[str, Any], lucim_concepts: Dict[str, Any], lucim_rules: str, icrash_refs: str, filename: str, output_dir: str = None) -> Dict[str, Any]:
+    def write_scenarios(self, state_machine: Dict[str, Any], lucim_concepts: Dict[str, Any], lucim_rules: str, filename: str = "", output_dir: str = None) -> Dict[str, Any]:
         """
         Synthesize LUCIM scenarios from mandatory inputs using the LUCIM Scenario Synthesizer persona.
         
@@ -140,8 +149,7 @@ class NetLogoLUCIMScenarioSynthesizerAgent(LlmAgent):
             state_machine: Step 02 state machine data (required)
             lucim_concepts: Step 03 LUCIM UCI concepts (required)
             lucim_rules: LUCIM DSL full definition (required)
-            icrash_refs: iCrash references content (required)
-            filename: Filename for reference (required)
+            filename: Filename for reference (optional)
             
         Returns:
             Dictionary containing reasoning, scenarios, and any errors
@@ -177,44 +185,33 @@ class NetLogoLUCIMScenarioSynthesizerAgent(LlmAgent):
                 "output_tokens": 0
             }
         
-        if not icrash_refs or icrash_refs.strip() == "":
-            return {
-                "reasoning_summary": "Missing mandatory input: iCrash references",
-                "data": None,
-                "errors": ["iCrash references are required but not provided"],
-                "tokens_used": 0,
-                "input_tokens": 0,
-                "output_tokens": 0
-            }
-        
-        instructions = f"{combined_persona}"
-        
         # Load TASK instruction using utility function
         task_content = load_task_instruction(4, "LUCIM Scenario Synthesizer")
-        
+
+        # Build canonical instructions order: task_content → persona → LUCIM rules
+        instructions = f"{task_content}\n\n{self.persona_text}\n\n{lucim_rules}"
+
+        # Build input blocks with required tagged sections (without repeating instructions)
         input_text = f"""
+<CASE-STUDY-NAME>
+{filename}
+</CASE-STUDY-NAME>
 
-Filename: {filename}
-{task_content}
-
-Step 02 State Machine:
+<ABSTRACT-BEHAVIOR>
 ```json
 {json.dumps(state_machine, indent=2)}
 ```
+</ABSTRACT-BEHAVIOR>
 
-Step 03 LUCIM Concepts:
+<LUCIM-ENVIRONMENT-MODEL>
 ```json
 {json.dumps(lucim_concepts, indent=2)}
 ```
+</LUCIM-ENVIRONMENT-MODEL>
 
-LUCIM DSL Full Definition:
-{lucim_rules}
-
-iCrash References:
-{icrash_refs}
 """
-        
-        # Create single system_prompt variable for both API call and file generation
+
+        # Build system_prompt with required tagged blocks and inputs
         system_prompt = f"{instructions}\n\n{input_text}"
         
         # Resolve base output directory (per-agent if provided)

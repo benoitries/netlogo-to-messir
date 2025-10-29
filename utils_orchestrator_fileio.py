@@ -38,10 +38,12 @@ class OrchestratorFileIO:
         code_file = next((p for p in candidate_files if p.exists()), None)
         
         if code_file is not None:
-            # Find corresponding interface images
+            # Find interface images for the case
             interface_images = []
-            for img_file in INPUT_NETLOGO_DIR.glob(f"{base_name}-netlogo-interface-*.png"):
-                interface_images.append(str(img_file))
+            for i in [1, 2]:
+                image_file = INPUT_NETLOGO_DIR / f"{base_name}-netlogo-interface-{i}.png"
+                if image_file.exists():
+                    interface_images.append(str(image_file))
             
             files.append({
                 "code_file": code_file,
@@ -65,25 +67,9 @@ class OrchestratorFileIO:
             return lucim_dsl_content
         except FileNotFoundError:
             raise FileNotFoundError(f"MANDATORY INPUT MISSING: LUCIM DSL file not found: {LUCIM_RULES_FILE}")
-    
-    def load_icrash_contents(self) -> List[Dict[str, str]]:
-        """
-        Load all iCrash file contents.
-        
-        Returns:
-            List of iCrash file content dictionaries
-        """
-        icrash_files = self.find_icrash_files()
-        icrash_contents = []
-        
-        for icrash_file in icrash_files:
-            icrash_content = self.read_icrash_file_content(icrash_file)
-            icrash_contents.append(icrash_content)
-        
-        return icrash_contents
-    
+       
     def create_run_directory(self, timestamp: str, base_name: str, model: str, 
-                           reasoning_effort: str, text_verbosity: str) -> pathlib.Path:
+                           reasoning_effort: str, text_verbosity: str, persona_set: str = "persona-v1") -> pathlib.Path:
         """
         Create the run directory for a specific orchestration.
         
@@ -97,7 +83,7 @@ class OrchestratorFileIO:
         Returns:
             Path to the created run directory
         """
-        run_dir = get_run_base_dir(timestamp, base_name, model, reasoning_effort, text_verbosity)
+        run_dir = get_run_base_dir(timestamp, base_name, model, reasoning_effort, text_verbosity, persona_set)
         run_dir.mkdir(parents=True, exist_ok=True)
         return run_dir
     
@@ -162,24 +148,21 @@ class OrchestratorFileIO:
             validation_results["valid"] = False
             validation_results["errors"].append(f"MANDATORY INPUT MISSING: LUCIM DSL file not found: {LUCIM_RULES_FILE}")
         
-        # iCrash files are no longer used
         
         return validation_results
     
     def get_interface_images(self, base_name: str) -> List[str]:
         """
         Get interface images for a base name.
+        Note: input-images folder has been intentionally removed.
         
         Args:
             base_name: Base name to get images for
             
         Returns:
-            List of interface image file paths
+            Empty list since input-images folder was removed
         """
-        interface_images = []
-        for img_file in INPUT_NETLOGO_DIR.glob(f"{base_name}-netlogo-interface-*.png"):
-            interface_images.append(str(img_file))
-        return interface_images
+        return []
     
     def ensure_output_directories(self, run_dir: pathlib.Path) -> None:
         """

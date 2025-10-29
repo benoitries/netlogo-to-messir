@@ -63,6 +63,23 @@ def clean_plantuml_escapes(content: str) -> str:
         cleaned
     )
     
+    # 5. Fix common @enduml typos
+    # Pattern: e@enduml -> @enduml (common LLM error)
+    cleaned = re.sub(
+        r'^e@enduml$',
+        r'@enduml',
+        cleaned,
+        flags=re.MULTILINE
+    )
+    
+    # Pattern: @enduml with extra characters -> @enduml (preserve content before @enduml)
+    cleaned = re.sub(
+        r'^([^@]*?)@enduml.*$',
+        r'\1@enduml',
+        cleaned,
+        flags=re.MULTILINE
+    )
+    
     return cleaned
 
 
@@ -87,6 +104,14 @@ def validate_plantuml_syntax(content: str) -> Tuple[bool, List[str]]:
     
     if "@enduml" not in content:
         issues.append("Missing @enduml directive")
+    
+    # Check for common @enduml typos
+    if "e@enduml" in content:
+        issues.append("Found 'e@enduml' instead of '@enduml' - common LLM error")
+    
+    # Check for @enduml with extra characters
+    if re.search(r'^.*@enduml.*$', content, re.MULTILINE) and not re.search(r'^@enduml$', content, re.MULTILINE):
+        issues.append("Found @enduml with extra characters - should be just '@enduml'")
     
     # Check for escaped quotes (should be cleaned)
     # Only flag if there are excessive escaped quotes that suggest cleaning issues

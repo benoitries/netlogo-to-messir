@@ -31,11 +31,11 @@ INPUT_PERSONA_DIR = Path(os.getenv("INPUT_PERSONA_DIR", BASE_DIR / "input-person
 OUTPUT_DIR = BASE_DIR / "output"
 
 # Default persona set
-DEFAULT_PERSONA_SET = "persona-v1"
+DEFAULT_PERSONA_SET = "persona-v2-after-ng-meeting"
 
 # Persona files (default to DEFAULT_PERSONA_SET)
 PERSONA_NETLOGO_ABSTRACT_SYNTAX_EXTRACTOR = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_1_NetLogoAbstractSyntaxExtractor.md"
-PERSONA_BEHAVIOR_EXTRACTOR = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_2_NetlogoBehaviorExtractor.md"
+PERSONA_BEHAVIOR_EXTRACTOR = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_2b_NetlogoBehaviorExtractor.md"
 PERSONA_LUCIM_ENVIRONMENT_SYNTHESIZER = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_3_LUCIMEnvironmentSynthesizer.md"
 PERSONA_LUCIM_SCENARIO_SYNTHESIZER = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_4_LUCIMScenarioSynthesizer.md"
 PERSONA_PLANTUML_WRITER = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_5_PlantUMLWriter.md"
@@ -67,6 +67,12 @@ AGENT_CONFIGS = {
     "netlogo_abstract_syntax_extractor": {
         "model": DEFAULT_MODEL,
         "reasoning_effort": "medium",  # Increased for better parsing accuracy
+        "reasoning_summary": "auto",
+        "text_verbosity": "medium"
+    },
+    "netlogo_interface_image_analyzer": {
+        "model": DEFAULT_MODEL,
+        "reasoning_effort": "medium",
         "reasoning_summary": "auto",
         "text_verbosity": "medium"
     },
@@ -113,6 +119,7 @@ AGENT_CONFIGS = {
 # Default: None (no timeout) for all agents; CLI can override via presets
 AGENT_TIMEOUTS = {
     "netlogo_abstract_syntax_extractor": None,
+    "netlogo_interface_image_analyzer": None,
     "behavior_extractor": None,
     "lucim_environment_synthesizer": None,
     "lucim_scenario_synthesizer": None,
@@ -192,6 +199,10 @@ def validate_agent_response(agent_type: str, response: dict) -> list:
     for field, field_type in AGENT_RESPONSE_SCHEMA["common_fields"].items():
         if field not in response:
             errors.append(f"Missing required field: {field}")
+        # Special case: agent 2a (netlogo_interface_image_analyzer) returns data as array
+        elif field == "data" and agent_type == "netlogo_interface_image_analyzer":
+            if not isinstance(response[field], (list, dict, type(None))):
+                errors.append(f"Field {field} must be of type (list, dict, NoneType) for {agent_type}")
         # If schema permits multiple types, isinstance handles tuple typing
         elif not isinstance(response[field], field_type):
             errors.append(f"Field {field} must be of type {field_type}")
@@ -225,6 +236,7 @@ OPTIONAL_KEYS = {"raw_response"}
 
 AGENT_KEYS: Dict[str, Set[str]] = {
     "netlogo_abstract_syntax_extractor": COMMON_KEYS | OPTIONAL_KEYS,
+    "netlogo_interface_image_analyzer": COMMON_KEYS | OPTIONAL_KEYS,
     "behavior_extractor": COMMON_KEYS | OPTIONAL_KEYS,
     "lucim_environment_synthesizer": COMMON_KEYS | OPTIONAL_KEYS,
     "lucim_scenario_synthesizer": COMMON_KEYS | OPTIONAL_KEYS,
@@ -254,11 +266,14 @@ def get_persona_file_paths(persona_set: str = DEFAULT_PERSONA_SET) -> Dict[str, 
     
     return {
         "netlogo_abstract_syntax_extractor": persona_dir / "PSN_1_NetLogoAbstractSyntaxExtractor.md",
-        "behavior_extractor": persona_dir / "PSN_2_NetlogoBehaviorExtractor.md",
+        "netlogo_interface_image_analyzer": persona_dir / "PSN_2a_NetlogoInterfaceImageAnalyzer.md",
+        "behavior_extractor": persona_dir / "PSN_2b_NetlogoBehaviorExtractor.md",
         "lucim_environment_synthesizer": persona_dir / "PSN_3_LUCIMEnvironmentSynthesizer.md",
         "lucim_scenario_synthesizer": persona_dir / "PSN_4_LUCIMScenarioSynthesizer.md",
         "plantuml_writer": persona_dir / "PSN_5_PlantUMLWriter.md",
         "plantuml_auditor": persona_dir / "PSN_6_PlantUMLLUCIMAuditor.md",
+        # Final auditor reuses the same persona as the initial auditor
+        "plantuml_final_auditor": persona_dir / "PSN_6_PlantUMLLUCIMAuditor.md",
         "plantuml_corrector": persona_dir / "PSN_7_PlantUMLLUCIMCorrector.md",
         "lucim_rules": persona_dir / "DSL_Target_LUCIM-full-definition-for-compliance.md",
         "dsl_il_syn_description": persona_dir / "DSL_IL_SYN-description.md",

@@ -518,10 +518,7 @@ class OrchestratorUI:
             print("❌ No persona sets found in input-persona directory")
             return "persona-v1"  # Fallback to default
         
-        if len(available_persona_sets) == 1:
-            selected = available_persona_sets[0]
-            print(f"✅ Only one persona set available: {selected}")
-            return selected
+        # Always ask even if only one persona set is available, to enforce explicit confirmation
         
         # Interactive selection
         print(f"\n🎭 Available Persona Sets:")
@@ -530,14 +527,16 @@ class OrchestratorUI:
         for i, persona_set in enumerate(available_persona_sets, 1):
             print(f"  {i}. {persona_set}")
         
-        print(f"\nDefault: persona-v1 (press Enter to use default)")
+        # Prefer persona-v2-after-ng-meeting as default if available, otherwise fallback to persona-v1
+        default_persona = "persona-v2-after-ng-meeting" if "persona-v2-after-ng-meeting" in available_persona_sets else "persona-v1"
+        print(f"\nDefault: {default_persona} (press Enter to use default)")
         
         while True:
             try:
                 choice = input(f"\nSelect persona set (1-{len(available_persona_sets)}) or press Enter for default: ").strip()
                 
                 if not choice:  # Empty input - use default
-                    return "persona-v1"
+                    return default_persona
                 
                 choice_num = int(choice)
                 if 1 <= choice_num <= len(available_persona_sets):
@@ -578,19 +577,24 @@ class OrchestratorUI:
         Returns:
             True if the directory contains required persona files
         """
+        # Backward-compatible validation: accept either LUCIM or legacy MUCIM rules filename
         required_files = [
             "PSN_1_NetLogoAbstractSyntaxExtractor.md",
-            "PSN_2_NetlogoBehaviorExtractor.md", 
+            "PSN_2a_NetlogoInterfaceImageAnalyzer.md",
+            "PSN_2b_NetlogoBehaviorExtractor.md",
             "PSN_3_LUCIMEnvironmentSynthesizer.md",
             "PSN_4_LUCIMScenarioSynthesizer.md",
             "PSN_5_PlantUMLWriter.md",
             "PSN_6_PlantUMLLUCIMAuditor.md",
             "PSN_7_PlantUMLLUCIMCorrector.md",
-            "DSL_Target_LUCIM-full-definition-for-compliance.md"
         ]
-        
         for required_file in required_files:
             if not (persona_dir / required_file).exists():
                 return False
+        # Rules file can be either new LUCIM name or older MUCIM name
+        lucim_rules = persona_dir / "DSL_Target_LUCIM-full-definition-for-compliance.md"
+        mucim_rules = persona_dir / "DSL_Target_MUCIM-full-definition-for-compliance.md"
+        if not (lucim_rules.exists() or mucim_rules.exists()):
+            return False
         
         return True

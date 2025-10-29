@@ -9,7 +9,7 @@ import json
 import datetime
 import pathlib
 import tiktoken
-from typing import Dict, Any, List
+from typing import Dict, Any
 from google.adk.agents import LlmAgent
 from openai import OpenAI
 from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens, format_prompt_for_responses_api
@@ -27,15 +27,7 @@ PERSONA_FILE = PERSONA_LUCIM_ENVIRONMENT_SYNTHESIZER
 WRITE_FILES = True
 
 # Load persona and (optionally) compliance rules reference
-persona = PERSONA_FILE.read_text(encoding="utf-8")
-lucim_rules = ""
-try:
-    lucim_rules = LUCIM_RULES_FILE.read_text(encoding="utf-8")
-except FileNotFoundError:
-    print(f"[WARNING] Compliance rules file not found: {LUCIM_RULES_FILE}")
-
-# Combine persona with compliance rules reference (as guidance context)
-combined_persona = f"{persona}\n\n{lucim_rules}" if lucim_rules else persona
+# (Instance-level values will be initialized in __init__ and may be overridden by orchestrator.)
 
 
 def sanitize_model_name(model_name: str) -> str:
@@ -51,6 +43,10 @@ class NetLogoLucimEnvironmentSynthesizerAgent(LlmAgent):
     reasoning_effort: str = "medium"
     reasoning_summary: str = "auto"  # Add client field
     text_verbosity: str = "medium"
+    persona_path: str = ""
+    persona_text: str = ""
+    lucim_rules_path: str = ""
+    lucim_rules_text: str = ""
     
     def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
         sanitized_name = sanitize_model_name(model_name)
@@ -70,6 +66,17 @@ class NetLogoLucimEnvironmentSynthesizerAgent(LlmAgent):
         # Configure OpenAI client (assumes key already validated by orchestrator)
         from utils_config_constants import OPENAI_API_KEY
         self.client = OpenAI(api_key=OPENAI_API_KEY)
+        # Initialize persona and rules from defaults; orchestrator can override
+        try:
+            self.persona_path = str(PERSONA_FILE)
+            self.persona_text = pathlib.Path(self.persona_path).read_text(encoding="utf-8")
+        except Exception:
+            self.persona_text = ""
+        try:
+            self.lucim_rules_path = str(LUCIM_RULES_FILE)
+            self.lucim_rules_text = pathlib.Path(self.lucim_rules_path).read_text(encoding="utf-8")
+        except Exception:
+            self.lucim_rules_text = ""
     
     def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
         """
@@ -85,6 +92,26 @@ class NetLogoLucimEnvironmentSynthesizerAgent(LlmAgent):
     def update_text_config(self, text_verbosity: str):
         """Update text verbosity configuration for this agent."""
         self.text_verbosity = text_verbosity
+    
+    def update_persona_path(self, persona_path: str) -> None:
+        if not persona_path:
+            return
+        self.persona_path = persona_path
+        try:
+            self.persona_text = pathlib.Path(persona_path).read_text(encoding="utf-8")
+        except Exception as e:
+            print(f"[WARNING] Failed to load persona file: {persona_path} ({e})")
+            self.persona_text = ""
+    
+    def update_lucim_rules_path(self, rules_path: str) -> None:
+        if not rules_path:
+            return
+        self.lucim_rules_path = rules_path
+        try:
+            self.lucim_rules_text = pathlib.Path(rules_path).read_text(encoding="utf-8")
+        except Exception as e:
+            print(f"[WARNING] Failed to load LUCIM rules file: {rules_path} ({e})")
+            self.lucim_rules_text = ""
     
     def apply_config(self, config: Dict[str, Any]) -> None:
         """Apply a unified configuration bundle to this agent.
@@ -131,7 +158,7 @@ class NetLogoLucimEnvironmentSynthesizerAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def synthesize_lucim_environment(self, state_machine: Dict[str, Any], filename: str, ast_data: Dict[str, Any] = None, lucim_dsl_content: str = None, icrash_contents: List[Dict[str, Any]] = None, output_dir: str = None) -> Dict[str, Any]:
+    def synthesize_lucim_environment(self, state_machine: Dict[str, Any], filename: str, ast_data: Dict[str, Any] = None, lucim_dsl_content: str = None, output_dir: str = None) -> Dict[str, Any]:
         """
         Synthesize LUCIM environment concepts from NetLogo state machine using the LUCIM Environment Synthesizer persona.
         
@@ -165,39 +192,31 @@ class NetLogoLucimEnvironmentSynthesizerAgent(LlmAgent):
                 "input_tokens": 0,
                 "output_tokens": 0
             }
-        instructions = combined_persona
-        
         # Load TASK instruction using utility function
         task_content = load_task_instruction(3, "LUCIM Environment Synthesizer")
-        
-        # Prepare icrash reference text
-        icrash_reference = ""
-        if icrash_contents:
-            icrash_reference = "\n\niCrash Case Study Reference Files:\n"
-            for icrash_file in icrash_contents:
-                icrash_reference += f"- {icrash_file['filename']}: {icrash_file['content']}\n"
-        
+
+        # Build canonical instructions order: task_content → persona → LUCIM rules
+        instructions = f"{task_content}\n\n{self.persona_text}\n\n{lucim_dsl_content}"
+
+        # Build input blocks with required tagged sections
         input_text = f"""
+<CASE-STUDY-NAME>
+{filename}
+</CASE-STUDY-NAME>
 
-Filename: {filename}
-{task_content}
-
-Step 01 AST Data:
+<ABSTRACT-SYNTAX>
 ```json
 {json.dumps(ast_data, indent=2)}
 ```
+</ABSTRACT-SYNTAX>
 
-Step 02 State Machine:
+<ABSTRACT-BEHAVIOR>
 ```json
 {json.dumps(state_machine, indent=2)}
 ```
-
-LUCIM DSL Full Definition:
-```
-{lucim_dsl_content}
-```{icrash_reference}
+</ABSTRACT-BEHAVIOR>
 """
-        
+
         # Create single system_prompt variable for both API call and file generation
         system_prompt = f"{instructions}\n\n{input_text}"
         

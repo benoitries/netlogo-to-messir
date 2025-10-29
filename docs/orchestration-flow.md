@@ -42,7 +42,7 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mode
 - IL-SEM mapping file: `input-persona/<PERSONA_SET>/DSL_IL_SEM-mapping.md`
 - IL-SEM description file: `input-persona/<PERSONA_SET>/DSL_IL_SEM-description.md`
 - UI interface images: `input-netlogo/<case>-netlogo-interface-1.png`, `input-netlogo/<case>-netlogo-interface-2.png`
-- Persona instructions: `input-persona/<PERSONA_SET>/PSN_2_NetlogoBehaviorExtractor.md`
+- Persona instructions: `input-persona/<PERSONA_SET>/PSN_2b_NetlogoBehaviorExtractor.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
@@ -61,7 +61,6 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mode
 **Inputs:**
 - State machine from Stage 02: `../02-behavior_extractor/output-data.json`
 - LUCIM/UCI rules: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
-- Optional iCrash references: `input-icrash/*.pdf`
 - Persona instructions: `input-persona/<PERSONA_SET>/PSN_3_LUCIMEnvironmentSynthesizer.md`
 
 **Outputs:**
@@ -73,7 +72,7 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mode
 
 **Conditions:**
 - Executes sequentially after stages 01-02 completion
-- If iCrash references are missing: processing continues without them
+- No iCrash references are required or expected
 
 ### 04 — LUCIM Scenario Synthesizer (`agent_4_lucim_scenario_synthesizer.py`)
 
@@ -81,7 +80,7 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mode
 - State machine from Stage 02: `../02-behavior_extractor/output-data.json`
 - LUCIM environment from Stage 03: `../03-lucim_environment_synthesizer/output-data.json`
 - LUCIM DSL definition: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
-- iCrash references: `input-icrash/*.pdf` (MANDATORY)
+- iCrash references: removed
 - Persona instructions: `input-persona/<PERSONA_SET>/PSN_4_LUCIMScenarioSynthesizer.md`
 
 **Outputs:**
@@ -157,10 +156,9 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mode
 ### 08 — PlantUML LUCIM Final Auditor (`agent_6_plantuml_auditor.py`)
 
 **Inputs:**
-- Corrected diagrams from Stage 07: `../07-plantuml_lucim_corrector/output-data.json` and/or corrected `.puml` file
-- Scenarios from Stage 04: `../04-lucim_scenario_synthesizer/output-data.json` (MANDATORY)
-- LUCIM DSL definition: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md` (MANDATORY)
-- Persona instructions: `input-persona/<PERSONA_SET>/PSN_6_PlantUMLLUCIMAuditor.md`
+- Persona Auditor: `input-persona/<PERSONA_SET>/PSN_6_PlantUMLLUCIMAuditor.md`
+- LUCIM DSL full definition: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
+- Corrected PlantUML diagram from Stage 07: `.puml` file
 
 **Outputs:**
 - `output-response.json` (agent response)

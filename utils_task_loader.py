@@ -26,8 +26,18 @@ def load_task_instruction(step: int, agent_name: str = None) -> str:
         # This assumes the utility is imported from an agent file
         current_dir = pathlib.Path(__file__).parent
         
-        # Construct task file path
-        task_file = current_dir / "input-task" / f"step-{step}-task"
+        # Special handling for step 2 agents (2a and 2b)
+        if step == 2 and agent_name:
+            if agent_name == "interface_image_analyzer":
+                task_file = current_dir / "input-task" / "step-2a-task"
+            elif agent_name == "behavior_extractor":
+                task_file = current_dir / "input-task" / "step-2b-task"
+            else:
+                # Fallback to standard naming
+                task_file = current_dir / "input-task" / f"step-{step}-task"
+        else:
+            # Standard task file naming
+            task_file = current_dir / "input-task" / f"step-{step}-task"
         
         if task_file.exists():
             task_content = task_file.read_text(encoding="utf-8").strip()

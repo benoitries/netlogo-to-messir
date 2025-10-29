@@ -26,13 +26,13 @@ This document summarizes the current orchestration flow and highlights ambiguiti
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
 
 ### 03 — LUCIM Environment Synthesizer (`agent_3_lucim_environment_synthesizer.py`)
-- Agent-specific Input: State machine (from Step 02); optional iCrash PDF extracts; LUCIM rules.
+- Agent-specific Input: State machine (from Step 02); LUCIM rules.
 - Agent-specific Output: `output-data.json` (LUCIM environment concepts).
 - Common Input: Persona instructions; configuration.
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
 
 ### 04 — LUCIM Scenario Synthesizer (`agent_4_lucim_scenario_synthesizer.py`)
-- Agent-specific Input: Step 02 state machine + Step 03 LUCIM concepts + LUCIM DSL full definition + iCrash references (all MANDATORY).
+- Agent-specific Input: Step 02 state machine + Step 03 LUCIM concepts + LUCIM DSL full definition.
 - Agent-specific Output: `output-data.json` (scenarios).
 - Common Input: Persona instructions; configuration.
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
@@ -56,10 +56,8 @@ This document summarizes the current orchestration flow and highlights ambiguiti
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
 
 ### 08 — Final Auditor
-- Agent-specific Input: Corrected diagrams (from Step 07) and prior artifacts as context.
-- Mandatory Inputs: Corrected PlantUML (.puml file) from Step 7; LUCIM DSL full definition file.
+- Agent-specific Input: Persona Auditor file (`PSN_6_PlantUMLLUCIMAuditor.md`), corrected PlantUML `.puml` from Step 07, and the LUCIM DSL full definition file.
 - Agent-specific Output: `output-data.json` (final verdict).
-- Common Input: Persona instructions; LUCIM rules; configuration.
 - Common Output: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md`.
 
 ---

@@ -11,10 +11,11 @@ import datetime
 import pathlib
 import time
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from agent_1_netlogo_abstract_syntax_extractor import NetLogoAbstractSyntaxExtractorAgent
-from agent_2_netlogo_behavior_extractor import NetLogoBehaviorExtractorAgent
+from agent_2a_netlogo_interface_image_analyzer import NetLogoInterfaceImageAnalyzerAgent
+from agent_2b_netlogo_behavior_extractor import NetLogoBehaviorExtractorAgent
 from agent_3_lucim_environment_synthesizer import NetLogoLucimEnvironmentSynthesizerAgent
 from agent_4_lucim_scenario_synthesizer import NetLogoLUCIMScenarioSynthesizerAgent
 from agent_5_plantuml_writer import NetLogoPlantUMLWriterAgent
@@ -40,7 +41,7 @@ ensure_directories()
 class NetLogoOrchestratorSimplified:
     """Simplified orchestrator for processing NetLogo files with a clean 8-stage pipeline."""
     
-    def __init__(self, model_name: str = DEFAULT_MODEL, persona_set: str = DEFAULT_PERSONA_SET):
+    def __init__(self, model_name: str = DEFAULT_MODEL, persona_set: Optional[str] = None):
         """
         Initialize the NetLogo Orchestrator.
         
@@ -49,7 +50,8 @@ class NetLogoOrchestratorSimplified:
             persona_set: Optional persona set to use (bypasses interactive selection)
         """
         self.model = model_name
-        self.persona_set = persona_set or DEFAULT_PERSONA_SET
+        # Do not force a default persona here; let the UI handle interactive selection when None
+        self.persona_set = persona_set
         # Format: YYYYMMDD_HHMM for better readability
         self.timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
         
@@ -65,6 +67,7 @@ class NetLogoOrchestratorSimplified:
         self.execution_times = {
             "total_orchestration": 0,
             "netlogo_abstract_syntax_extractor": 0,
+            "netlogo_interface_image_analyzer": 0,
             "behavior_extractor": 0,
             "lucim_environment_synthesizer": 0,
             "lucim_scenario_synthesizer": 0,
@@ -77,6 +80,7 @@ class NetLogoOrchestratorSimplified:
         # Token usage tracking
         self.token_usage = {
             "netlogo_abstract_syntax_extractor": {"used": 0},
+            "netlogo_interface_image_analyzer": {"used": 0},
             "behavior_extractor": {"used": 0},
             "lucim_environment_synthesizer": {"used": 0},
             "lucim_scenario_synthesizer": {"used": 0},
@@ -89,6 +93,7 @@ class NetLogoOrchestratorSimplified:
         # Detailed timing tracking with start/end timestamps
         self.detailed_timing = {
             "netlogo_abstract_syntax_extractor": {"start": 0, "end": 0, "duration": 0},
+            "netlogo_interface_image_analyzer": {"start": 0, "end": 0, "duration": 0},
             "behavior_extractor": {"start": 0, "end": 0, "duration": 0},
             "lucim_environment_synthesizer": {"start": 0, "end": 0, "duration": 0},
             "lucim_scenario_synthesizer": {"start": 0, "end": 0, "duration": 0},
@@ -104,29 +109,10 @@ class NetLogoOrchestratorSimplified:
         
         # Initialize agents
         self.netlogo_abstract_syntax_extractor_agent = NetLogoAbstractSyntaxExtractorAgent(model_name, self.timestamp)
-        # Pass IL-SYN file absolute paths to syntax parser agent
-        try:
-            persona_paths = get_persona_file_paths(self.persona_set)
-            ilsyn_mapping_path = persona_paths["dsl_il_syn_mapping"]
-            ilsyn_description_path = persona_paths["dsl_il_syn_description"]
-            if hasattr(self.netlogo_abstract_syntax_extractor_agent, "update_il_syn_inputs"):
-                self.netlogo_abstract_syntax_extractor_agent.update_il_syn_inputs(str(ilsyn_mapping_path), str(ilsyn_description_path))
-            else:
-                # Backward compatibility: set attributes directly if method unavailable
-                self.netlogo_abstract_syntax_extractor_agent.il_syn_mapping_path = str(ilsyn_mapping_path)
-                self.netlogo_abstract_syntax_extractor_agent.il_syn_description_path = str(ilsyn_description_path)
-            if self.orchestrator_logger:
-                self.orchestrator_logger.log_config_success("Configured IL-SYN reference paths for syntax parser")
-        except Exception as e:
-            if self.orchestrator_logger:
-                self.orchestrator_logger.log_config_warning(f"Unable to set IL-SYN paths for syntax parser: {e}")
-        
+        # Defer IL-SYN path configuration until persona set is selected (post-initialize_persona_set)
+        self.netlogo_interface_image_analyzer_agent = NetLogoInterfaceImageAnalyzerAgent(model_name, self.timestamp)
         self.behavior_extractor_agent = NetLogoBehaviorExtractorAgent(model_name, self.timestamp)
-        # Configure IL-SEM inputs for semantics agent (absolute paths)
-        il_sem_mapping = persona_paths["dsl_il_sem_mapping"]
-        il_sem_description = persona_paths["dsl_il_sem_description"]
-        if hasattr(self.behavior_extractor_agent, "update_il_sem_inputs"):
-            self.behavior_extractor_agent.update_il_sem_inputs(str(il_sem_mapping), str(il_sem_description))
+        # Defer IL-SEM inputs configuration until persona set is selected
         
         self.lucim_environment_synthesizer_agent = NetLogoLucimEnvironmentSynthesizerAgent(model_name, self.timestamp)
         self.lucim_scenario_synthesizer_agent = NetLogoLUCIMScenarioSynthesizerAgent(model_name, self.timestamp)
@@ -164,6 +150,10 @@ class NetLogoOrchestratorSimplified:
         if hasattr(self.netlogo_abstract_syntax_extractor_agent, 'update_persona_path'):
             self.netlogo_abstract_syntax_extractor_agent.update_persona_path(str(persona_paths["netlogo_abstract_syntax_extractor"]))
         
+        # Update interface image analyzer (2a)
+        if hasattr(self.netlogo_interface_image_analyzer_agent, 'update_persona_path'):
+            self.netlogo_interface_image_analyzer_agent.update_persona_path(str(persona_paths["netlogo_interface_image_analyzer"]))
+        
         # Update behavior extractor agent with new persona paths
         if hasattr(self.behavior_extractor_agent, 'update_persona_path'):
             self.behavior_extractor_agent.update_persona_path(str(persona_paths["behavior_extractor"]))
@@ -179,6 +169,17 @@ class NetLogoOrchestratorSimplified:
         ]:
             if hasattr(agent, 'update_persona_path'):
                 agent.update_persona_path(str(persona_paths[agent_name]))
+        # Update LUCIM rules path for agents that require it
+        for agent in [
+            self.lucim_environment_synthesizer_agent,
+            self.lucim_scenario_synthesizer_agent,
+            self.plantuml_writer_agent,
+            self.plantuml_lucim_auditor_agent,
+            self.plantuml_lucim_corrector_agent,
+            self.plantuml_lucim_final_auditor_agent,
+        ]:
+            if hasattr(agent, 'update_lucim_rules_path'):
+                agent.update_lucim_rules_path(str(persona_paths["lucim_rules"]))
         
         # Update IL-SYN and IL-SEM paths for syntax and behavior extractors
         if hasattr(self.netlogo_abstract_syntax_extractor_agent, "update_il_syn_inputs"):
@@ -317,8 +318,8 @@ class NetLogoOrchestratorSimplified:
 
     async def process_netlogo_file_parallel_first_stage(self, file_info: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Run Step 1 (syntax) and an independent semantics derivation in parallel.
-        (No AST-based re-run; Stage 2 uses only IL-SEM + UI images.)
+        Run Step 1 (syntax) in parallel with Steps 2a+2b (interface analysis + behavior extraction).
+        Step 1 runs independently, while Steps 2a and 2b run sequentially (2a → 2b).
         Mirrors the OpenAI Cookbook fan-out/fan-in pattern via asyncio.gather.
         """
         base_name = file_info["base_name"]
@@ -326,7 +327,7 @@ class NetLogoOrchestratorSimplified:
         # Create run directory
         tv = self.agent_configs["netlogo_abstract_syntax_extractor"].get("text_verbosity", "medium")
         reff = self.agent_configs["netlogo_abstract_syntax_extractor"].get("reasoning_effort", "medium")
-        run_dir = self.fileio.create_run_directory(self.timestamp, base_name, self.model, reff, tv)
+        run_dir = self.fileio.create_run_directory(self.timestamp, base_name, self.model, reff, tv, self.selected_persona_set)
         
         total_orchestration_start_time = time.time()
         self.orchestrator_logger.log_agent_start(f"Parallel first stage for {base_name} (syntax + semantics)")
@@ -345,7 +346,7 @@ class NetLogoOrchestratorSimplified:
             reff = None
             if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
                 reff = self.agent_configs["netlogo_abstract_syntax_extractor"].get("reasoning_effort")
-            run_dir = get_run_base_dir(self.timestamp, base_name, self.model, reff or "medium", tv or "medium")
+            run_dir = get_run_base_dir(self.timestamp, base_name, self.model, reff or "medium", tv or "medium", self.selected_persona_set)
             agent_output_dir = run_dir / "01-netlogo_abstract_syntax_extractor"
             agent_output_dir.mkdir(parents=True, exist_ok=True)
             
@@ -358,26 +359,57 @@ class NetLogoOrchestratorSimplified:
                 agent_output_dir
             )
 
-        async def run_semantics_direct():
-            # Create agent output directory for semantics parser
+        async def run_interface_analysis_and_behavior_extraction():
+            """Run 2a (interface analysis) then 2b (behavior extraction) sequentially."""
+            # Step 2a: Interface Image Analysis
             tv = None
             if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
                 tv = self.agent_configs["netlogo_abstract_syntax_extractor"].get("text_verbosity")
             reff = None
             if isinstance(self.agent_configs, dict) and "netlogo_abstract_syntax_extractor" in self.agent_configs:
                 reff = self.agent_configs["netlogo_abstract_syntax_extractor"].get("reasoning_effort")
-            run_dir = get_run_base_dir(self.timestamp, base_name, self.model, reff or "medium", tv or "medium")
-            agent_output_dir = run_dir / "02-behavior_extractor"
-            agent_output_dir.mkdir(parents=True, exist_ok=True)
+            run_dir = get_run_base_dir(self.timestamp, base_name, self.model, reff or "medium", tv or "medium", self.selected_persona_set)
             
-            return await asyncio.to_thread(
+            # Create agent output directory for 2a
+            agent_2a_output_dir = run_dir / "02a-interface_image_analyzer"
+            agent_2a_output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Run 2a
+            interface_result = await asyncio.to_thread(
                 self._execute_agent_with_tracking,
-                "behavior_extractor",
-                self.behavior_extractor_agent.parse_from_ilsem_and_ui,
+                "netlogo_interface_image_analyzer",
+                self.netlogo_interface_image_analyzer_agent.analyze_interface_images,
                 file_info["interface_images"],
                 base_name,
-                str(agent_output_dir)
+                str(agent_2a_output_dir)
             )
+            
+            # Check if 2a succeeded and extract widgets
+            if isinstance(interface_result, Exception) or not interface_result.get("widgets"):
+                self.logger.error(f"Interface analysis failed: {interface_result}")
+                return {
+                    "agent_type": "behavior_extractor",
+                    "reasoning_summary": "Interface analysis failed, cannot proceed with behavior extraction",
+                    "data": None,
+                    "errors": ["Interface analysis failed"]
+                }
+            
+            # Step 2b: Behavior Extraction using 2a results
+            agent_2b_output_dir = run_dir / "02b-behavior_extractor"
+            agent_2b_output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Run 2b with interface widgets from 2a
+            behavior_result = await asyncio.to_thread(
+                self._execute_agent_with_tracking,
+                "behavior_extractor",
+                self.behavior_extractor_agent.parse_from_ilsem_and_interface_description,
+                interface_result["widgets"],
+                base_name,
+                str(agent_2b_output_dir)
+            )
+            
+            # Return behavior result (2b is the main output for downstream stages)
+            return behavior_result
 
         # Fan-out: run both concurrently with an optional watchdog and heartbeat
         from utils_config_constants import HEARTBEAT_SECONDS
@@ -394,33 +426,33 @@ class NetLogoOrchestratorSimplified:
         hb = asyncio.create_task(heartbeat_task())
         try:
             syntax_coro = run_syntax()
-            sem_coro = run_semantics_direct()
+            behavior_coro = run_interface_analysis_and_behavior_extraction()
             syntax_task = asyncio.create_task(syntax_coro)
-            sem_task = asyncio.create_task(sem_coro)
+            behavior_task = asyncio.create_task(behavior_coro)
             
             # If orchestrator parallel timeout is configured (not None), wrap with wait_for
             orchestrator_timeout = getattr(cfg, "ORCHESTRATOR_PARALLEL_TIMEOUT", None)
             if orchestrator_timeout is not None:
                 await asyncio.wait_for(
-                    asyncio.gather(syntax_task, sem_task, return_exceptions=True),
+                    asyncio.gather(syntax_task, behavior_task, return_exceptions=True),
                     timeout=orchestrator_timeout
                 )
             else:
                 # No watchdog timeout: wait indefinitely for both tasks
-                await asyncio.gather(syntax_task, sem_task, return_exceptions=True)
+                await asyncio.gather(syntax_task, behavior_task, return_exceptions=True)
             syntax_result = await syntax_task
-            semantics_result_direct = await sem_task
+            behavior_result = await behavior_task
         except asyncio.TimeoutError:
             self.logger.error(f"Parallel first stage timed out after {getattr(cfg, 'ORCHESTRATOR_PARALLEL_TIMEOUT', 'N/A')}s for {base_name}")
             # Cancel any still-running task
-            for t in [locals().get('syntax_task'), locals().get('sem_task')]:
+            for t in [locals().get('syntax_task'), locals().get('behavior_task')]:
                 try:
                     if t and not t.done():
                         t.cancel()
                 except Exception:
                     pass
             syntax_result = syntax_result if 'syntax_result' in locals() else RuntimeError("netlogo_abstract_syntax_extractor timed out")
-            semantics_result_direct = semantics_result_direct if 'semantics_result_direct' in locals() else RuntimeError("behavior_extractor (direct) timed out")
+            behavior_result = behavior_result if 'behavior_result' in locals() else RuntimeError("behavior_extractor (2a+2b) timed out")
         finally:
             hb.cancel()
 
@@ -441,21 +473,18 @@ class NetLogoOrchestratorSimplified:
             self.netlogo_abstract_syntax_extractor_agent.save_results(syntax_result, base_name, self.model, "1", output_dir=agent_output_dir)
             processed_results["ast"] = syntax_result
 
-        # Handle semantics direct result
-        if isinstance(semantics_result_direct, Exception):
-            self.logger.error(f"Semantics Parser (direct) failed in parallel path: {semantics_result_direct}")
+        # Handle behavior extraction result (2a+2b)
+        if isinstance(behavior_result, Exception):
+            self.logger.error(f"Behavior extraction (2a+2b) failed in parallel path: {behavior_result}")
             processed_results["semantics"] = {
                 "agent_type": "behavior_extractor",
-                "reasoning_summary": f"Semantics Parser direct failed: {semantics_result_direct}",
+                "reasoning_summary": f"Behavior extraction (2a+2b) failed: {behavior_result}",
                 "data": None,
-                "errors": [f"Semantics Parser direct error: {semantics_result_direct}"]
+                "errors": [f"Behavior extraction (2a+2b) error: {behavior_result}"]
             }
         else:
-            semantics_result = semantics_result_direct
-            semantics_result["agent_type"] = "behavior_extractor"
-            agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 2, "behavior_extractor")
-            self.behavior_extractor_agent.save_results(semantics_result, base_name, self.model, "2", output_dir=agent_output_dir)
-            processed_results["semantics"] = semantics_result
+            behavior_result["agent_type"] = "behavior_extractor"
+            processed_results["semantics"] = behavior_result
 
         # Total timing
         total_orchestration_time = time.time() - total_orchestration_start_time
@@ -484,7 +513,7 @@ class NetLogoOrchestratorSimplified:
         # Create run directory
         tv = self.agent_configs["netlogo_abstract_syntax_extractor"].get("text_verbosity", "medium")
         reff = self.agent_configs["netlogo_abstract_syntax_extractor"].get("reasoning_effort", "medium")
-        run_dir = self.fileio.create_run_directory(self.timestamp, base_name, self.model, reff, tv)
+        run_dir = self.fileio.create_run_directory(self.timestamp, base_name, self.model, reff, tv, self.selected_persona_set)
         
         # Start timing the total orchestration
         total_orchestration_start_time = time.time()
@@ -507,10 +536,7 @@ class NetLogoOrchestratorSimplified:
         # Start with parallel results if provided
         processed_results = parallel_results.copy() if parallel_results else {}
         
-        # Load common resources once for all sequential steps
-        icrash_contents_list = self.fileio.load_icrash_contents()
-        # Convert iCrash list to string for scenario writer (empty since iCrash folder was removed)
-        icrash_contents = "\n\n".join([f"File: {item.get('filename', 'unknown')}\n{item.get('content', '')}" for item in icrash_contents_list]) if icrash_contents_list else "No iCrash reference files available (input-icrash folder was intentionally removed)."
+        # Load common resources once for all sequential steps (no iCrash)
         try:
             lucim_dsl_content = self.fileio.load_lucim_dsl_content()
         except FileNotFoundError as e:
@@ -532,7 +558,6 @@ class NetLogoOrchestratorSimplified:
                 self.logger.info(f"[DEBUG] - semantics data: {type(processed_results['semantics']['data'])} - {len(str(processed_results['semantics']['data']))} chars")
                 self.logger.info(f"[DEBUG] - ast data: {type(processed_results['ast']['data'])} - {len(str(processed_results['ast']['data']))} chars")
                 self.logger.info(f"[DEBUG] - lucim_dsl_content: {len(lucim_dsl_content)} chars")
-                self.logger.info(f"[DEBUG] - icrash_contents_list: {len(icrash_contents_list)} items")
                 
                 # Create agent output directory before the call
                 agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 3, "lucim_environment_synthesizer")
@@ -544,7 +569,6 @@ class NetLogoOrchestratorSimplified:
                     base_name,
                     processed_results["ast"]["data"],  # Step 01 AST data (MANDATORY)
                     lucim_dsl_content,  # LUCIM DSL content (MANDATORY)
-                    icrash_contents_list,  # iCrash contents as list (for lucim_mapper)
                     output_dir=agent_output_dir
                 )
                 
@@ -582,7 +606,6 @@ class NetLogoOrchestratorSimplified:
                     processed_results["semantics"]["data"],  # State machine from step 2
                     processed_results["lucim_environment_synthesizer"]["data"],  # LUCIM environment from step 3
                     lucim_dsl_content,  # LUCIM DSL full definition
-                    icrash_contents,  # iCrash references
                     base_name,  # Filename
                     output_dir=agent_output_dir
                 )
@@ -808,6 +831,14 @@ class NetLogoOrchestratorSimplified:
                         "source": "final_auditor",
                         "details": {"verdict": verdict, "step": 8}
                     }
+            # Check for errors in final auditor - treat as non-compliant
+            errors = final_auditor_result.get("errors", [])
+            if errors:
+                return {
+                    "status": "NON-COMPLIANT",
+                    "source": "final_auditor",
+                    "details": {"reason": "auditor_errors", "errors": errors, "step": 8}
+                }
         
         # Fallback to initial auditor (step 6)
         initial_auditor_result = processed_results.get("plantuml_lucim_auditor")
@@ -827,8 +858,16 @@ class NetLogoOrchestratorSimplified:
                         "source": "initial_auditor",
                         "details": {"verdict": verdict, "step": 6}
                     }
+            # Check for errors in initial auditor - treat as non-compliant
+            errors = initial_auditor_result.get("errors", [])
+            if errors:
+                return {
+                    "status": "NON-COMPLIANT",
+                    "source": "initial_auditor",
+                    "details": {"reason": "auditor_errors", "errors": errors, "step": 6}
+                }
         
-        # No verdict found
+        # No verdict found and no errors - this should be rare
         return {
             "status": "UNKNOWN",
             "source": "none",
@@ -961,7 +1000,15 @@ class NetLogoOrchestratorSimplified:
 
 async def main():
     """Main execution function - simplified version."""
-    
+    # Ensure input directories point to experimentation single source of truth when running directly
+    try:
+        repo_root = pathlib.Path(__file__).resolve().parents[1]
+        os.environ.setdefault("INPUT_PERSONA_DIR", str(repo_root / "experimentation" / "input" / "input-persona"))
+        os.environ.setdefault("INPUT_NETLOGO_DIR", str(repo_root / "experimentation" / "input" / "input-netlogo"))
+        os.environ.setdefault("INPUT_VALID_EXAMPLES_DIR", str(repo_root / "experimentation" / "input" / "input-valid-examples"))
+    except Exception:
+        pass
+
     # Initialize UI utilities
     ui = OrchestratorUI()
     

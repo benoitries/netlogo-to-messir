@@ -16,7 +16,10 @@ def test_imports():
         from agent_1_netlogo_abstract_syntax_extractor import NetLogoAbstractSyntaxExtractorAgent
         print("✅ NetLogoAbstractSyntaxExtractorAgent imported")
         
-        from agent_2_netlogo_behavior_extractor import NetLogoBehaviorExtractorAgent
+        from agent_2a_netlogo_interface_image_analyzer import NetLogoInterfaceImageAnalyzerAgent
+        print("✅ NetLogoInterfaceImageAnalyzerAgent imported")
+        
+        from agent_2b_netlogo_behavior_extractor import NetLogoBehaviorExtractorAgent
         print("✅ NetLogoBehaviorExtractorAgent imported")
         
         from agent_3_lucim_environment_synthesizer import NetLogoLucimEnvironmentSynthesizerAgent
