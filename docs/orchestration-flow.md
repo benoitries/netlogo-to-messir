@@ -12,7 +12,7 @@ The system implements an 8-stage pipeline with parallel execution for stages 01-
 
 **Output Structure:**
 ```
-code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<model>-reason-<X>-verb-<Y>/<NN-stage>/
+code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<case>-<model>-reason-<X>-verb-<Y>/<NN-stage>/
 ```
 
 ## Per-Agent I/O and Conditions
@@ -21,9 +21,9 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mode
 
 **Inputs:**
 - NetLogo code content (string from `input-netlogo/<case>-netlogo-code.md`)
-- IL-SYN mapping file: `input-persona/<PERSONA_SET>/DSL_IL_SYN-mapping.md`
-- IL-SYN description file: `input-persona/<PERSONA_SET>/DSL_IL_SYN-description.md`
-- Persona instructions: `input-persona/<PERSONA_SET>/PSN_1_NetLogoAbstractSyntaxExtractor.md`
+- IL-SYN mapping file: `input-persona/<PERSONA-SET>/DSL_IL_SYN-mapping.md`
+- IL-SYN description file: `input-persona/<PERSONA-SET>/DSL_IL_SYN-description.md`
+- Persona instructions: `input-persona/<PERSONA-SET>/PSN_1_NetLogoAbstractSyntaxExtractor.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
@@ -39,10 +39,10 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mode
 ### 02 — Behavior Extractor (`agent_2_netlogo_behavior_extractor.py`)
 
 **Inputs:**
-- IL-SEM mapping file: `input-persona/<PERSONA_SET>/DSL_IL_SEM-mapping.md`
-- IL-SEM description file: `input-persona/<PERSONA_SET>/DSL_IL_SEM-description.md`
+- IL-SEM mapping file: `input-persona/<PERSONA-SET>/DSL_IL_SEM-mapping.md`
+- IL-SEM description file: `input-persona/<PERSONA-SET>/DSL_IL_SEM-description.md`
 - UI interface images: `input-netlogo/<case>-netlogo-interface-1.png`, `input-netlogo/<case>-netlogo-interface-2.png`
-- Persona instructions: `input-persona/<PERSONA_SET>/PSN_2b_NetlogoBehaviorExtractor.md`
+- Persona instructions: `input-persona/<PERSONA-SET>/PSN_2b_NetlogoBehaviorExtractor.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
@@ -60,8 +60,8 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mode
 
 **Inputs:**
 - State machine from Stage 02: `../02-behavior_extractor/output-data.json`
-- LUCIM/UCI rules: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
-- Persona instructions: `input-persona/<PERSONA_SET>/PSN_3_LUCIMEnvironmentSynthesizer.md`
+- LUCIM/UCI rules: `input-persona/<PERSONA-SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
+- Persona instructions: `input-persona/<PERSONA-SET>/PSN_3_LUCIMEnvironmentSynthesizer.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
@@ -79,9 +79,9 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mode
 **Inputs:**
 - State machine from Stage 02: `../02-behavior_extractor/output-data.json`
 - LUCIM environment from Stage 03: `../03-lucim_environment_synthesizer/output-data.json`
-- LUCIM DSL definition: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
+- LUCIM DSL definition: `input-persona/<PERSONA-SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
 - iCrash references: removed
-- Persona instructions: `input-persona/<PERSONA_SET>/PSN_4_LUCIMScenarioSynthesizer.md`
+- Persona instructions: `input-persona/<PERSONA-SET>/PSN_4_LUCIMScenarioSynthesizer.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
@@ -98,8 +98,8 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mode
 
 **Inputs:**
 - Scenarios from Stage 04: `../04-lucim_scenario_synthesizer/output-data.json`
-- LUCIM/UCI rules: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
-- Persona instructions: `input-persona/<PERSONA_SET>/PSN_5_PlantUMLWriter.md`
+- LUCIM/UCI rules: `input-persona/<PERSONA-SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
+- Persona instructions: `input-persona/<PERSONA-SET>/PSN_5_PlantUMLWriter.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
@@ -117,8 +117,8 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mode
 
 **Inputs:**
 - Standalone PlantUML file from Stage 05: `../05-plantuml_writer/diagram.puml` (MANDATORY)
-- LUCIM DSL definition: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md` (MANDATORY)
-- Persona instructions: `input-persona/<PERSONA_SET>/PSN_6_PlantUMLLUCIMAuditor.md`
+- LUCIM DSL definition: `input-persona/<PERSONA-SET>/DSL_Target_LUCIM-full-definition-for-compliance.md` (MANDATORY)
+- Persona instructions: `input-persona/<PERSONA-SET>/PSN_6_PlantUMLLUCIMAuditor.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
@@ -137,8 +137,8 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mode
 **Inputs:**
 - PlantUML diagrams from Stage 05: `../05-plantuml_writer/output-data.json` and/or `../05-plantuml_writer/diagram.puml`
 - Non-compliant rules from Stage 06: `../06-plantuml_lucim_auditor/output-data.json` (MANDATORY)
-- LUCIM DSL definition: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md` (MANDATORY)
-- Persona instructions: `input-persona/<PERSONA_SET>/PSN_7_PlantUMLLUCIMCorrector.md`
+- LUCIM DSL definition: `input-persona/<PERSONA-SET>/DSL_Target_LUCIM-full-definition-for-compliance.md` (MANDATORY)
+- Persona instructions: `input-persona/<PERSONA-SET>/PSN_7_PlantUMLLUCIMCorrector.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
@@ -156,8 +156,8 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<mode
 ### 08 — PlantUML LUCIM Final Auditor (`agent_6_plantuml_auditor.py`)
 
 **Inputs:**
-- Persona Auditor: `input-persona/<PERSONA_SET>/PSN_6_PlantUMLLUCIMAuditor.md`
-- LUCIM DSL full definition: `input-persona/<PERSONA_SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
+- Persona Auditor: `input-persona/<PERSONA-SET>/PSN_6_PlantUMLLUCIMAuditor.md`
+- LUCIM DSL full definition: `input-persona/<PERSONA-SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
 - Corrected PlantUML diagram from Stage 07: `.puml` file
 
 **Outputs:**

@@ -158,22 +158,31 @@ class NetLogoLucimEnvironmentSynthesizerAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def synthesize_lucim_environment(self, state_machine: Dict[str, Any], filename: str, ast_data: Dict[str, Any] = None, lucim_dsl_content: str = None, output_dir: str = None) -> Dict[str, Any]:
+    def synthesize_lucim_environment(
+        self,
+        abstract_behavior: Dict[str, Any],
+        abstract_syntax: Dict[str, Any] = None,
+        lucim_dsl_definition: str = None,
+        output_dir: str = None,
+        il_sem_description: str = None,
+        il_syn_description: str = None,
+    ) -> Dict[str, Any]:
         """
         Synthesize LUCIM environment concepts from NetLogo state machine using the LUCIM Environment Synthesizer persona.
         
         Args:
-            state_machine: NetLogo state machine as dictionary (from Step 02)
-            filename: Filename for reference (required)
-            ast_data: Step 01 AST data (MANDATORY)
-            lucim_dsl_content: LUCIM DSL full definition content (MANDATORY)
-            icrash_contents: Optional list of iCrash case study files for reference
-            
+            abstract_behavior: NetLogo behavior/state machine as dictionary (from Step 02)
+            abstract_syntax: Step 01 AST model (MANDATORY)
+            lucim_dsl_definition: LUCIM DSL full definition content (MANDATORY)
+            output_dir: Optional output directory for generated files
+            il_sem_description: Optional intermediate-level semantic description
+            il_syn_description: Optional intermediate-level syntactic description
+
         Returns:
             Dictionary containing reasoning, LUCIM environment concepts, and any errors
         """
         # Validate mandatory inputs
-        if ast_data is None:
+        if abstract_syntax is None:
             return {
                 "reasoning_summary": "MISSING MANDATORY INPUT: Step 01 AST data is required",
                 "data": None,
@@ -183,36 +192,22 @@ class NetLogoLucimEnvironmentSynthesizerAgent(LlmAgent):
                 "output_tokens": 0
             }
         
-        if lucim_dsl_content is None or lucim_dsl_content.strip() == "":
-            return {
-                "reasoning_summary": "MISSING MANDATORY INPUT: LUCIM DSL full definition content is required",
-                "data": None,
-                "errors": ["MANDATORY INPUT MISSING: LUCIM DSL full definition content must be provided"],
-                "tokens_used": 0,
-                "input_tokens": 0,
-                "output_tokens": 0
-            }
-        # Load TASK instruction using utility function
+         # Load TASK instruction using utility function
         task_content = load_task_instruction(3, "LUCIM Environment Synthesizer")
 
-        # Build canonical instructions order: task_content → persona → LUCIM rules
-        instructions = f"{task_content}\n\n{self.persona_text}\n\n{lucim_dsl_content}"
+        instructions = f"{task_content}\n\n{self.persona_text}\n\n{lucim_dsl_definition}\n\n{il_sem_description}\n\n{il_syn_description}"
 
         # Build input blocks with required tagged sections
         input_text = f"""
-<CASE-STUDY-NAME>
-{filename}
-</CASE-STUDY-NAME>
-
 <ABSTRACT-SYNTAX>
 ```json
-{json.dumps(ast_data, indent=2)}
+{json.dumps(abstract_syntax, indent=2)}
 ```
 </ABSTRACT-SYNTAX>
 
 <ABSTRACT-BEHAVIOR>
 ```json
-{json.dumps(state_machine, indent=2)}
+{json.dumps(abstract_behavior, indent=2)}
 ```
 </ABSTRACT-BEHAVIOR>
 """

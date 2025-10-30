@@ -154,15 +154,15 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def audit_plantuml_diagrams(self, puml_file_path: str, lucim_dsl_file_path: str, filename: str = "input", step: int = 6, output_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
+    def audit_plantuml_diagrams(self, plantuml_diagram_file_path: str, lucim_dsl_file_path: str, step: int = 6, output_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
         """
         Audit PlantUML sequence diagrams for LUCIM UCI compliance using the PlantUML Auditor persona.
 
         Args:
-            puml_file_path: Path to the standalone .puml file from Step 5 (mandatory)
+            plantuml_diagram_file_path: Path to the standalone .puml file from Step 5 (mandatory)
             lucim_dsl_file_path: Path to the LUCIM DSL full definition file (mandatory)
-            filename: Optional filename for reference
             step: Step number for task file selection (default: 6)
+            output_dir: Optional output directory for results
 
         Returns:
             Dictionary containing reasoning, non-compliant rules, and any errors
@@ -178,12 +178,12 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
 
         # Read .puml file content
         try:
-            puml_content = pathlib.Path(puml_file_path).read_text(encoding="utf-8")
+            puml_content = pathlib.Path(plantuml_diagram_file_path).read_text(encoding="utf-8")
         except FileNotFoundError:
             return {
-                "reasoning_summary": f"Error: .puml file not found at {puml_file_path}",
+                "reasoning_summary": f"Error: .puml file not found at {plantuml_diagram_file_path}",
                 "data": None,
-                "errors": [f"Required .puml file not found: {puml_file_path}"],
+                "errors": [f"Required .puml file not found: {plantuml_diagram_file_path}"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
@@ -192,7 +192,7 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
             return {
                 "reasoning_summary": f"Error reading .puml file: {e}",
                 "data": None,
-                "errors": [f"Failed to read .puml file {puml_file_path}: {e}"],
+                "errors": [f"Failed to read .puml file {plantuml_diagram_file_path}: {e}"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
@@ -222,10 +222,6 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
         
         # Build input text with required tagged sections
         input_text = f"""
-<CASE-STUDY-NAME>
-{filename}
-</CASE-STUDY-NAME>
-
 <PLANTUML-DIAGRAM>
 ```plantuml
 {puml_content}
@@ -317,7 +313,7 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
                 return {
                     "reasoning_summary": reasoning_summary,
                     "data": audit_results,
-                    "errors": [],
+                    "errors": errors,
                     "tokens_used": tokens_used,
                     "input_tokens": input_tokens,
                     "visible_output_tokens": visible_output_tokens,

@@ -6,7 +6,7 @@ This document summarizes the current orchestration flow and highlights ambiguiti
 
 ## Pipeline Overview
 - Stages: 01 Syntax Parser + 02 Behavior Extractor (parallel) → 03 LUCIM Environment Synthesizer → 04 LUCIM Scenario Synthesizer → 05 PlantUML Writer → 06 PlantUML LUCIM Auditor → 07 PlantUML LUCIM Corrector → 08 Final Auditor
-- Output root: `code-netlogo-to-lucim-agentic-workflow/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>-<model>-reason-<X>-verb-<Y>/<NN-stage>/`
+- Output root: `code-netlogo-to-lucim-agentic-workflow/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<case>-<model>-reason-<X>-verb-<Y>/<NN-stage>/`
 - Each stage writes standardized artifacts: `output-response.json`, `output-reasoning.md`, `output-data.json` (+ optional `.puml` for diagram stages).
 
 ---

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Validate output layout under output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<combination>/.
+Validate output layout under output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<combination>/.
 Where <combination> is <case>-<model-name>-reason-<reasoning-value>-verb-<verbosity-value>.
 
 - Picks the latest run by date/time unless --run <path> is provided
 - Checks presence of at least one combination folder
-- Checks agent step subfolders match pattern NN-<agent_id>
+- Checks agent step subfolders match pattern NN-<agent-id>
 - Checks at least one orchestrator log file exists in the combination folder root
 Exits with non-zero code on validation failure.
 """

@@ -203,6 +203,10 @@ def validate_agent_response(agent_type: str, response: dict) -> list:
         elif field == "data" and agent_type == "netlogo_interface_image_analyzer":
             if not isinstance(response[field], (list, dict, type(None))):
                 errors.append(f"Field {field} must be of type (list, dict, NoneType) for {agent_type}")
+        # Special case: stage 4 and 5 also emit collections in data
+        elif field == "data" and agent_type in ("lucim_scenario_synthesizer", "plantuml_writer"):
+            if not isinstance(response[field], (list, dict, type(None))):
+                errors.append(f"Field {field} must be of type (list, dict, NoneType) for {agent_type}")
         # If schema permits multiple types, isinstance handles tuple typing
         elif not isinstance(response[field], field_type):
             errors.append(f"Field {field} must be of type {field_type}")

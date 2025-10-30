@@ -141,41 +141,29 @@ class NetLogoLUCIMScenarioSynthesizerAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def write_scenarios(self, state_machine: Dict[str, Any], lucim_concepts: Dict[str, Any], lucim_rules: str, filename: str = "", output_dir: str = None) -> Dict[str, Any]:
+    def write_scenarios(self, lucim_environment_model: Dict[str, Any], lucim_dsl_definition: str, output_dir: str = None) -> Dict[str, Any]:
         """
         Synthesize LUCIM scenarios from mandatory inputs using the LUCIM Scenario Synthesizer persona.
         
         Args:
-            state_machine: Step 02 state machine data (required)
-            lucim_concepts: Step 03 LUCIM UCI concepts (required)
-            lucim_rules: LUCIM DSL full definition (required)
-            filename: Filename for reference (optional)
+            lucim_environment_model: Step 03 LUCIM environment model (required)
+            lucim_dsl_definition: LUCIM DSL full definition (required)
             
         Returns:
             Dictionary containing reasoning, scenarios, and any errors
         """
         # Validate mandatory inputs
-        if not state_machine:
+        if not lucim_environment_model:
             return {
-                "reasoning_summary": "Missing mandatory input: Step 02 state machine",
+                "reasoning_summary": "Missing mandatory input: LUCIM environment model",
                 "data": None,
-                "errors": ["Step 02 state machine is required but not provided"],
+                "errors": ["LUCIM environment model is required but not provided"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
             }
         
-        if not lucim_concepts:
-            return {
-                "reasoning_summary": "Missing mandatory input: Step 03 LUCIM concepts",
-                "data": None,
-                "errors": ["Step 03 LUCIM concepts are required but not provided"],
-                "tokens_used": 0,
-                "input_tokens": 0,
-                "output_tokens": 0
-            }
-        
-        if not lucim_rules or lucim_rules.strip() == "":
+        if not lucim_dsl_definition or lucim_dsl_definition.strip() == "":
             return {
                 "reasoning_summary": "Missing mandatory input: LUCIM DSL full definition",
                 "data": None,
@@ -189,23 +177,13 @@ class NetLogoLUCIMScenarioSynthesizerAgent(LlmAgent):
         task_content = load_task_instruction(4, "LUCIM Scenario Synthesizer")
 
         # Build canonical instructions order: task_content → persona → LUCIM rules
-        instructions = f"{task_content}\n\n{self.persona_text}\n\n{lucim_rules}"
+        instructions = f"{task_content}\n\n{self.persona_text}\n\n{lucim_dsl_definition}"
 
         # Build input blocks with required tagged sections (without repeating instructions)
         input_text = f"""
-<CASE-STUDY-NAME>
-{filename}
-</CASE-STUDY-NAME>
-
-<ABSTRACT-BEHAVIOR>
-```json
-{json.dumps(state_machine, indent=2)}
-```
-</ABSTRACT-BEHAVIOR>
-
 <LUCIM-ENVIRONMENT-MODEL>
 ```json
-{json.dumps(lucim_concepts, indent=2)}
+{json.dumps(lucim_environment_model, indent=2)}
 ```
 </LUCIM-ENVIRONMENT-MODEL>
 
@@ -275,14 +253,59 @@ class NetLogoLUCIMScenarioSynthesizerAgent(LlmAgent):
                 print(f"[DEBUG] Successfully parsed response as JSON")
                 
                 # Extract and normalize fields from JSON response.
-                # Always save under 'data': if no 'data' key present, wrap top-level object.
-                scenarios = {}
+                # Always save under 'data' as a LIST of scenario objects:
+                # {
+                #   "data": [ { "scenario": { name, description, messages[] } }, ... ],
+                #   "errors": []
+                # }
+                normalized_data_list: list = []
+                errors = []
                 if isinstance(response_data, dict):
-                    if "data" in response_data and isinstance(response_data["data"], dict):
-                        scenarios = response_data["data"]
+                    # Capture errors if present
+                    if isinstance(response_data.get("errors"), list):
+                        errors = response_data.get("errors", [])
+
+                    # Preferred: response_data["data"] is a list of items containing {"scenario": {...}}
+                    data_node = response_data.get("data")
+                    if isinstance(data_node, list):
+                        for item in data_node:
+                            if isinstance(item, dict):
+                                if isinstance(item.get("scenario"), dict):
+                                    normalized_data_list.append({"scenario": item["scenario"]})
+                                elif all(k in item for k in ("name", "description", "messages")):
+                                    normalized_data_list.append({"scenario": {
+                                        "name": item.get("name"),
+                                        "description": item.get("description"),
+                                        "messages": item.get("messages", [])
+                                    }})
+                                else:
+                                    # Keep as-is for legacy, wrapped under scenario if possible later
+                                    normalized_data_list.append(item)
+                    elif isinstance(data_node, dict):
+                        # If dict: check for nested scenario or direct fields; then wrap into list
+                        if isinstance(data_node.get("scenario"), dict):
+                            normalized_data_list = [{"scenario": data_node["scenario"]}]
+                        elif all(k in data_node for k in ("name", "description", "messages")):
+                            normalized_data_list = [{"scenario": data_node}]
+                        else:
+                            normalized_data_list = [data_node]
                     else:
-                        scenarios = response_data
-                errors = response_data.get("errors", []) if isinstance(response_data, dict) else []
+                        # No top-level data: check for direct scenario or direct fields
+                        if isinstance(response_data.get("scenario"), dict):
+                            normalized_data_list = [{"scenario": response_data["scenario"]}]
+                        elif all(k in response_data for k in ("name", "description", "messages")):
+                            normalized_data_list = [{"scenario": {
+                                "name": response_data.get("name"),
+                                "description": response_data.get("description"),
+                                "messages": response_data.get("messages", [])
+                            }}]
+                        else:
+                            # Fallback: keep entire dict (legacy producers)
+                            normalized_data_list = [response_data]
+                else:
+                    # If the response was not a dict, surface a parsing error
+                    errors = ["Unexpected response shape: expected JSON object"]
+                    normalized_data_list = None
 
                 # Extract token usage from response (centralized helper)
                 usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
@@ -296,8 +319,8 @@ class NetLogoLUCIMScenarioSynthesizerAgent(LlmAgent):
 
                 return {
                     "reasoning_summary": reasoning_summary,
-                    "data": scenarios,
-                    "errors": [],
+                    "data": normalized_data_list,
+                    "errors": errors or [],
                     "tokens_used": tokens_used,
                     "input_tokens": input_tokens,
                     "visible_output_tokens": visible_output_tokens,

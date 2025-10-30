@@ -171,7 +171,7 @@ class NetLogoAbstractSyntaxExtractorAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def parse_netlogo_code(self, code: str, filename: str, output_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
+    def parse_netlogo_code(self, netlogo_source_code: str, filename: str, output_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
         if not filename or not isinstance(filename, str):
             raise ValueError("filename is required and must be a non-empty string")
         
@@ -203,14 +203,8 @@ class NetLogoAbstractSyntaxExtractorAgent(LlmAgent):
         instructions = f"{task_content}\n\n{self.persona_text}{ilsyn_refs}"
 
         input_text = f"""
-<CASE-STUDY-NAME>
-{filename}
-</CASE-STUDY-NAME>
-
 <NETLOGO-SOURCE-CODE>
-```text
-{code}
-```
+{netlogo_source_code}
 </NETLOGO-SOURCE-CODE>
 """
         

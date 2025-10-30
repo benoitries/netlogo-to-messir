@@ -108,21 +108,20 @@ class NetLogoInterfaceImageAnalyzerAgent(LlmAgent):
             print(f"[WARNING] Failed to load persona file: {persona_path} ({e})")
             self.persona_text = ""
 
-    def analyze_interface_images(self, ui_image_paths: List[str], base_name: str, base_output_dir: str = None) -> Dict[str, Any]:
+    def analyze_interface_images(self, ui_image_paths: List[str], output_dir: str = None) -> Dict[str, Any]:
         """
         Analyze NetLogo interface images to extract widget information.
         
         Args:
             ui_image_paths: List of image file paths (initial and simulation interfaces)
-            base_name: Base name for output files
-            base_output_dir: Base output directory (per-agent if provided)
+            output_dir: Output directory (per-agent if provided)
             
         Returns:
             Dictionary with analysis results and metadata
         """
         # Resolve base output directory (per-agent if provided)
-        if base_output_dir is None:
-            base_output_dir = OUTPUT_DIR
+        if output_dir is None:
+            output_dir = OUTPUT_DIR
         
         # Load task instruction
         task_instruction = load_task_instruction(2, "interface_image_analyzer")
@@ -148,10 +147,6 @@ class NetLogoInterfaceImageAnalyzerAgent(LlmAgent):
         ui_images_text = "\n".join(ui_entries) if ui_entries else "- (none provided)"
 
         input_text = f"""
-<CASE-STUDY-NAME>
-{base_name}
-</CASE-STUDY-NAME>
-
 <NETLOGO-INTERFACE-IMAGES>
 {ui_images_text}
 </NETLOGO-INTERFACE-IMAGES>
@@ -162,7 +157,7 @@ class NetLogoInterfaceImageAnalyzerAgent(LlmAgent):
 
         # Write input-instructions.md BEFORE API call for debugging
         if WRITE_FILES:
-            write_input_instructions_before_api(base_output_dir, system_prompt)
+            write_input_instructions_before_api(output_dir, system_prompt)
         
         # Load and encode images for API
         encoded_images = self._load_and_encode_images(ui_image_paths)
@@ -225,10 +220,10 @@ class NetLogoInterfaceImageAnalyzerAgent(LlmAgent):
             if WRITE_FILES:
                 from pathlib import Path as _P
                 write_all_output_files(
-                    output_dir=_P(base_output_dir),
+                    output_dir=_P(output_dir),
                     results=unified_results,
                     agent_type="netlogo_interface_image_analyzer",
-                    base_name=base_name,
+                    base_name="input",
                     model=self.model,
                     timestamp=self.timestamp,
                     reasoning_effort=self.reasoning_effort,
@@ -255,10 +250,10 @@ class NetLogoInterfaceImageAnalyzerAgent(LlmAgent):
                     "raw_response": {"error": error_msg},
                 }
                 write_all_output_files(
-                    output_dir=_P(base_output_dir),
+                    output_dir=_P(output_dir),
                     results=error_results,
                     agent_type="netlogo_interface_image_analyzer",
-                    base_name=base_name,
+                    base_name="input",
                     model=self.model,
                     timestamp=self.timestamp,
                     reasoning_effort=self.reasoning_effort,
@@ -364,7 +359,7 @@ def main():
     agent = NetLogoInterfaceImageAnalyzerAgent()
     
     # Analyze images
-    result = agent.analyze_interface_images(image_paths, "test_analysis", output_dir)
+    result = agent.analyze_interface_images(image_paths, output_dir)
     
     print("Analysis complete!")
     print(f"Detected {len(result.get('widgets', []))} widgets")

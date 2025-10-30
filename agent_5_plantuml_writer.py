@@ -46,7 +46,7 @@ class NetLogoPlantUMLWriterAgent(LlmAgent):
     persona_path: str = ""
     persona_text: str = ""
     lucim_rules_path: str = ""
-    lucim_rules_text: str = ""
+    lucim_dsl_definition: str = ""
     
     def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
         sanitized_name = sanitize_model_name(model_name)
@@ -74,9 +74,9 @@ class NetLogoPlantUMLWriterAgent(LlmAgent):
             self.persona_text = ""
         try:
             self.lucim_rules_path = str(LUCIM_RULES_FILE)
-            self.lucim_rules_text = pathlib.Path(self.lucim_rules_path).read_text(encoding="utf-8")
+            self.lucim_dsl_definition = pathlib.Path(self.lucim_rules_path).read_text(encoding="utf-8")
         except Exception:
-            self.lucim_rules_text = ""
+            self.lucim_dsl_definition = ""
     
     def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
         """
@@ -121,10 +121,10 @@ class NetLogoPlantUMLWriterAgent(LlmAgent):
             return
         self.lucim_rules_path = rules_path
         try:
-            self.lucim_rules_text = pathlib.Path(rules_path).read_text(encoding="utf-8")
+            self.lucim_dsl_definition = pathlib.Path(rules_path).read_text(encoding="utf-8")
         except Exception as e:
             print(f"[WARNING] Failed to load LUCIM rules file: {rules_path} ({e})")
-            self.lucim_rules_text = ""
+            self.lucim_dsl_definition = ""
     
     def count_input_tokens(self, instructions: str, input_text: str) -> int:
         """
@@ -158,17 +158,17 @@ class NetLogoPlantUMLWriterAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def generate_plantuml_diagrams(self, scenarios_data: Dict[str, Any], filename: str = "input", non_compliant_rules: list = None, output_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
+    def generate_plantuml_diagrams(self, lucim_scenario: Dict[str, Any], non_compliant_rules: list = None, output_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
         """
         Generate PlantUML sequence diagrams from scenario JSON data using the PlantUML Writer persona.
         
         Args:
-            scenarios_data: Scenarios JSON data containing one typical scenario
-            filename: Optional filename for reference
-            non_compliant_rules: Optional list of non-compliant rules from previous audit
-            
+            lucim_scenario (Dict[str, Any]): Scenario JSON data containing one typical scenario.
+            non_compliant_rules (list, optional): Optional list of non-compliant rules from previous audit.
+            output_dir (Optional[pathlib.Path], optional): Optional output directory for file outputs. Defaults to None.
+        
         Returns:
-            Dictionary containing reasoning, PlantUML diagrams, and any errors
+            Dict[str, Any]: Dictionary containing reasoning, PlantUML diagrams, and any errors.
         """
         # Resolve base output directory (use provided output_dir or fall back to OUTPUT_DIR)
         base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
@@ -176,18 +176,33 @@ class NetLogoPlantUMLWriterAgent(LlmAgent):
         # Load TASK instruction using utility function
         task_content = load_task_instruction(5, "PlantUML Writer")
 
-        # Build canonical instructions order: task_content → persona → LUCIM rules
-        instructions = f"{task_content}\n\n{self.persona_text}\n\n{self.lucim_rules_text}"
+        # Build canonical instructions order: task_content → persona → LUCIM DSL definition
+        instructions = f"{task_content}\n\n{self.persona_text}\n\n{self.lucim_dsl_definition}"
 
+        # Normalize input to handle list of scenarios or single scenario.
+        # Expected final block to send to the model: { "scenario": { ... } }
+        normalized_input = lucim_scenario
+        # Unwrap top-level {"data": ...}
+        if isinstance(normalized_input, dict) and "data" in normalized_input:
+            normalized_input = normalized_input["data"]
+        # If list, take the first item (typical scenario)
+        first_item = None
+        if isinstance(normalized_input, list) and len(normalized_input) > 0:
+            first_item = normalized_input[0]
+        elif isinstance(normalized_input, dict):
+            first_item = normalized_input
+        # Derive scenario block
+        scenario_block = None
+        if isinstance(first_item, dict):
+            if isinstance(first_item.get("scenario"), dict):
+                scenario_block = first_item.get("scenario")
+            elif all(k in first_item for k in ("name", "description", "messages")):
+                scenario_block = first_item
         # Build input text with required tagged sections
         input_text = f"""
-<CASE-STUDY-NAME>
-{filename}
-</CASE-STUDY-NAME>
-
 <LUCIM-SCENARIO>
 ```json
-{json.dumps(scenarios_data, indent=2)}
+{json.dumps({"scenario": scenario_block} if scenario_block is not None else normalized_input, indent=2)}
 ```
 </LUCIM-SCENARIO>
 """
@@ -279,29 +294,60 @@ class NetLogoPlantUMLWriterAgent(LlmAgent):
                 print(f"[DEBUG] Successfully parsed response as JSON")
                 
                 # Extract and normalize fields from JSON response.
-                # Always save under 'data': if no 'data' key present, wrap top-level object.
-                plantuml_diagrams = {}
+                # Normalize to list of {"diagram": {...}} under 'data'.
+                plantuml_diagrams_obj = {}
+                data_list: list = []
                 if isinstance(response_data, dict):
-                    if "data" in response_data and isinstance(response_data["data"], dict):
-                        plantuml_diagrams = response_data["data"]
+                    if "data" in response_data and isinstance(response_data["data"], (dict, list)):
+                        plantuml_diagrams_obj = response_data["data"] if isinstance(response_data["data"], dict) else {}
+                        # If already a list, trust it but normalize items to have 'diagram' wrapper
+                        if isinstance(response_data["data"], list):
+                            for item in response_data["data"]:
+                                if isinstance(item, dict) and "diagram" in item:
+                                    data_list.append(item)
+                                elif isinstance(item, dict):
+                                    data_list.append({"diagram": item})
+                                elif isinstance(item, str):
+                                    data_list.append({"diagram": {"plantuml": item}})
                     else:
-                        plantuml_diagrams = response_data
+                        plantuml_diagrams_obj = response_data
                 errors = response_data.get("errors", []) if isinstance(response_data, dict) else []
 
                 # If JSON data is empty or missing PlantUML, attempt to extract raw @startuml...@enduml from content
-                if (not plantuml_diagrams) or (
-                    isinstance(plantuml_diagrams, dict) and not self._extract_plantuml_text(plantuml_diagrams)
-                ):
+                have_valid_uml = False
+                if data_list:
+                    # check if any item contains a valid UML text
+                    for it in data_list:
+                        uml = self._extract_plantuml_text(it.get("diagram") if isinstance(it, dict) else it)
+                        if uml:
+                            have_valid_uml = True
+                            break
+                else:
+                    have_valid_uml = bool(self._extract_plantuml_text(plantuml_diagrams_obj))
+
+                if (not data_list and not plantuml_diagrams_obj) or (not have_valid_uml):
                     import re
                     m = re.search(r"@startuml[\s\S]*?@enduml", content)
                     if m:
                         uml_text = m.group(0)
-                        plantuml_diagrams = {
-                            "typical": {
-                                "name": plantuml_diagrams.get("typical", {}).get("name", "typical") if isinstance(plantuml_diagrams, dict) else "typical",
+                        data_list = [{
+                            "diagram": {
+                                "name": "typical",
                                 "plantuml": uml_text
                             }
-                        }
+                        }]
+                # If we still don't have a list but have an object, convert it
+                if not data_list and isinstance(plantuml_diagrams_obj, dict):
+                    # turn each entry into a diagram item if it looks like a diagram
+                    if any(k in plantuml_diagrams_obj for k in ("plantuml", "name")):
+                        data_list = [{"diagram": plantuml_diagrams_obj}]
+                    else:
+                        for key, val in plantuml_diagrams_obj.items():
+                            if isinstance(val, dict):
+                                item = val if ("plantuml" in val or "name" in val) else {"name": key, **val}
+                                data_list.append({"diagram": item})
+                            elif isinstance(val, str):
+                                data_list.append({"diagram": {"name": key, "plantuml": val}})
 
                 # Extract token usage from response (centralized helper)
                 usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
@@ -315,7 +361,7 @@ class NetLogoPlantUMLWriterAgent(LlmAgent):
 
                 return {
                     "reasoning_summary": reasoning_summary,
-                    "data": plantuml_diagrams,
+                    "data": data_list,
                     "errors": [],
                     "tokens_used": tokens_used,
                     "input_tokens": input_tokens,
@@ -368,6 +414,28 @@ class NetLogoPlantUMLWriterAgent(LlmAgent):
 
         # Extract PlantUML diagram text for special file handling
         diagram_text = self._extract_plantuml_text(results.get("data")) if results.get("data") else None
+
+        # Defensive fallback: if no data detected, attempt to extract UML directly from raw_response text
+        if (not diagram_text or "@startuml" not in diagram_text or "@enduml" not in diagram_text):
+            try:
+                raw = results.get("raw_response")
+                # Attempt to find a text field containing the UML block
+                uml_text = ""
+                import re
+                raw_json = json.dumps(raw) if not isinstance(raw, (dict, list)) else json.dumps(raw)
+                m = re.search(r"@startuml[\s\S]*?@enduml", raw_json)
+                if m:
+                    # Unescape common JSON escapes (minimal)
+                    uml_text = m.group(0)
+                    uml_text = uml_text.replace("\\n", "\n").replace("\\t", "\t").replace("\\\"", '"')
+                if uml_text and "@startuml" in uml_text and "@enduml" in uml_text:
+                    diagram_text = uml_text
+                    # Also backfill a minimal data structure so downstream files are emitted
+                    results["data"] = [{"diagram": {"name": "typical", "plantuml": uml_text}}]
+                    # Ensure errors is a list
+                    results.setdefault("errors", [])
+            except Exception:
+                pass
         
         # Prepare special files for unified function
         special_files = None
@@ -397,15 +465,18 @@ class NetLogoPlantUMLWriterAgent(LlmAgent):
         Attempt to extract the PlantUML diagram text from the agent data structure.
         The method is defensive against variations in the response shape.
         """
-        if not isinstance(data, dict):
+        # Accept dict or list structures and find the first PlantUML block
+        if data is None:
             return ""
-
-        # Common structures: data["typical"] may be a string with @startuml or a dict with a field
         candidate_nodes = []
-        if "typical" in data:
-            candidate_nodes.append(data["typical"])
-        # Fallback: consider any values in data
-        candidate_nodes.extend(list(data.values()))
+        if isinstance(data, dict):
+            if "typical" in data:
+                candidate_nodes.append(data["typical"])
+            if "diagram" in data:
+                candidate_nodes.append(data["diagram"])
+            candidate_nodes.extend(list(data.values()))
+        elif isinstance(data, list):
+            candidate_nodes.extend(data)
 
         def find_in_obj(obj: Any) -> str:
             # String directly containing plantuml
@@ -471,7 +542,7 @@ def main():
     
     # Generate PlantUML diagrams
     print(f"[PlantUMLWriter] Generating PlantUML diagrams for {args.base_name}...")
-    results = agent.generate_plantuml_diagrams(scenarios_data, args.base_name)
+    results = agent.generate_plantuml_diagrams(scenarios_data)
     
     # Save results
     agent.save_results(results, args.base_name, args.model, args.step)
@@ -479,9 +550,16 @@ def main():
     # Print summary
     if results.get("data"):
         print(f"[PlantUMLWriter] Successfully generated PlantUML diagrams:")
-        if "typical" in results["data"]:
-            print(f"  - Typical diagram: {results['data']['typical'].get('name', 'Unnamed')}")
-        # Only typical diagram is generated
+        try:
+            # Expect a list of {"diagram": {...}}
+            items = results["data"] if isinstance(results["data"], list) else []
+            for idx, item in enumerate(items):
+                if isinstance(item, dict):
+                    diag = item.get("diagram", {})
+                    if isinstance(diag, dict):
+                        print(f"  - Diagram {idx+1}: {diag.get('name', 'Unnamed')}")
+        except Exception:
+            pass
     else:
         print(f"[PlantUMLWriter] Failed to generate PlantUML diagrams")
         if results.get("errors"):

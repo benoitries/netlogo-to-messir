@@ -64,7 +64,7 @@ def validate_response_file(response_path: pathlib.Path) -> str:
 
 def main(argv):
     if len(argv) < 2:
-        print("Usage: validate_response_jsons.py <run_dir>")
+        print("Usage: validate_response_jsons.py <run-dir>")
         return 2
 
     run_dir = pathlib.Path(argv[1])

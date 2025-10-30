@@ -166,11 +166,11 @@ netlogo-to-lucim/
 Run the orchestrator with a single command using the default nano model, the first case study (3d-solids), medium reasoning effort and medium text verbosity. Steps 01–02 always run in parallel:
 
 ```bash
-export OPENAI_API_KEY="<YOUR_API_KEY>" && \
+export OPENAI_API_KEY="<YOUR-API-KEY>" && \
 python3 /Users/benoit.ries/Library/CloudStorage/OneDrive-UniversityofLuxembourg/cursor-workspace-individual/research.publi.reverse.engineering.netlogo.to.messir.ucid/code-netlogo-to-lucim-agentic-workflow/scripts/run_default_nano.py | cat
 ```
 
-This will persist outputs under the canonical structure in `code-netlogo-to-lucim-agentic-workflow/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/<case>/`.
+This will persist outputs under the canonical structure in `code-netlogo-to-lucim-agentic-workflow/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<case>/`.
 
 ### Experimentation parameters
 
@@ -281,7 +281,7 @@ code-netlogo-to-lucim/
   output/
     runs/
       YYYY-MM-DD/
-        HHMM-<PERSONA_SET>/
+        HHMM-<PERSONA-SET>/
           <case-name>/
             01-netlogo_abstract_syntax_extractor/
             02-behavior_extractor/
@@ -297,7 +297,7 @@ code-netlogo-to-lucim/
 
 Each subfolder contains the agent’s files named with the existing prefix format. Orchestrator logs are stored per case under the same run folder.
 
-> Deprecation: The legacy `output/runs-<YYYYMMDD_HHMM>/` structure is no longer used for new runs. Historical runs remain as-is for reference.
+> Deprecation: The legacy `output/runs-<YYYYMMDD-HHMM>/` structure is no longer used for new runs. Historical runs remain as-is for reference.
 
 ### Validation
 

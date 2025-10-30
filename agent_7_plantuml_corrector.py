@@ -156,15 +156,14 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
             return estimated_tokens
         
     def correct_plantuml_diagrams(self, plantuml_diagrams: Dict[str, Any],
-                                 non_compliant_rules: List[str], lucim_dsl_content: str = None, filename: str = "input", output_dir: str = None) -> Dict[str, Any]:
+                                 audit_data: Dict[str, Any], lucim_dsl_definition: str = None, output_dir: str = None) -> Dict[str, Any]:
         """
         Correct PlantUML sequence diagrams based on non-compliant rules using the PlantUML Corrector persona.
         
         Args:
             plantuml_diagrams: PlantUML diagrams to correct
-            non_compliant_rules: List of non-compliant rules to fix
-            lucim_dsl_content: LUCIM DSL full definition content (MANDATORY)
-            filename: Optional filename for reference
+            audit_data: Audit data object from Step 6 including 'non-compliant-rules'
+            lucim_dsl_definition: LUCIM DSL full definition content (MANDATORY)
             
         Returns:
             Dictionary containing reasoning, corrected diagrams, and any errors
@@ -181,17 +180,34 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
             }
         
         
+        if not audit_data:
+            return {
+                "reasoning_summary": "MISSING MANDATORY INPUT: Audit data from Step 6 is required",
+                "data": None,
+                "errors": ["MANDATORY INPUT MISSING: Audit data with 'non-compliant-rules' from Step 6 must be provided"],
+                "tokens_used": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+            }
+
+        # Extract non-compliant rules from audit data
+        non_compliant_rules = []
+        if isinstance(audit_data, dict):
+            ncr = audit_data.get("non-compliant-rules", [])
+            if isinstance(ncr, list):
+                non_compliant_rules = ncr
+
         if not non_compliant_rules:
             return {
-                "reasoning_summary": "MISSING MANDATORY INPUT: Non-compliant rules from Step 6 are required",
+                "reasoning_summary": "No non-compliant rules found in audit data; nothing to correct",
                 "data": None,
-                "errors": ["MANDATORY INPUT MISSING: Non-compliant rules from Step 6 must be provided"],
+                "errors": ["No non-compliant rules present in the provided audit data"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
             }
         
-        if lucim_dsl_content is None or lucim_dsl_content.strip() == "":
+        if lucim_dsl_definition is None or lucim_dsl_definition.strip() == "":
             return {
                 "reasoning_summary": "MISSING MANDATORY INPUT: LUCIM DSL content is required",
                 "data": None,
@@ -205,28 +221,24 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
         task_content = load_task_instruction(7, "PlantUML Corrector")
 
         # Build canonical instructions order: task_content → persona → LUCIM rules
-        instructions = f"{task_content}\n\n{self.persona_text}\n\n{lucim_dsl_content}"
+        instructions = f"{task_content}\n\n{self.persona_text}\n\n{lucim_dsl_definition}"
 
         # Extract PlantUML text best-effort from provided diagrams
         original_puml = self._extract_plantuml_text(plantuml_diagrams) if plantuml_diagrams else ""
 
         # Build input text with required tagged sections
         input_text = f"""
-<CASE-STUDY-NAME>
-{filename}
-</CASE-STUDY-NAME>
-
 <PLANTUML-DIAGRAM>
 ```plantuml
 {original_puml}
 ```
 </PLANTUML-DIAGRAM>
 
-<LUCIM-NONCOMPLIANCE-REPORT>
+<LUCIM-AUDIT-REPORT>
 ```json
-{json.dumps(non_compliant_rules, indent=2)}
+{json.dumps(audit_data, indent=2)}
 ```
-</LUCIM-NONCOMPLIANCE-REPORT>
+</LUCIM-AUDIT-REPORT>
 """
 
         # Create single system_prompt variable for both API call and file generation

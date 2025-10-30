@@ -117,14 +117,14 @@ class NetLogoBehaviorExtractorAgent(LlmAgent):
             self.persona_text = ""
 
     
-    def parse_from_ilsem_and_interface_description(self, interface_widgets: List[Dict[str, str]], base_name: str, base_output_dir: str = None) -> Dict[str, Any]:
+    def parse_from_ilsem_and_interface_description(self, interface_widgets: List[Dict[str, str]], case_study_name: str, output_dir: str = None) -> Dict[str, Any]:
         """
         Build semantics using only IL-SEM mapping/description and structured interface description from Agent 2a.
         This method is the canonical Stage 2b entry point (no images, no AST, no raw code).
         """
         # Resolve base output directory (per-agent if provided)
-        if base_output_dir is None:
-            base_output_dir = OUTPUT_DIR
+        if output_dir is None:
+            output_dir = OUTPUT_DIR
         
         # Base persona + IL-SEM references
         instructions_sections: List[str] = []
@@ -174,18 +174,12 @@ class NetLogoBehaviorExtractorAgent(LlmAgent):
         instructions = f"{task_content}\n\n{self.persona_text}\n\n{rules_block}".rstrip()
 
         # Load NetLogo source code
-        netlogo_code = self._load_netlogo_source_code(base_name)
+        netlogo_code = self._load_netlogo_source_code(case_study_name)
         
         # Build input text with required tagged sections
         input_text = f"""
-<CASE-STUDY-NAME>
-{base_name}
-</CASE-STUDY-NAME>
-
 <NETLOGO-SOURCE-CODE>
-```text
 {netlogo_code}
-```
 </NETLOGO-SOURCE-CODE>
 
 <NETLOGO-INTERFACE-DESCRIPTION>
@@ -197,7 +191,7 @@ class NetLogoBehaviorExtractorAgent(LlmAgent):
         system_prompt = f"{instructions}\n\n{input_text}"
         
         # Write input-instructions.md BEFORE API call for debugging
-        write_input_instructions_before_api(base_output_dir, system_prompt)
+        write_input_instructions_before_api(output_dir, system_prompt)
 
         exact_input_tokens = self.count_input_tokens(instructions, input_text)
         try:
@@ -309,21 +303,25 @@ class NetLogoBehaviorExtractorAgent(LlmAgent):
                 "errors": parsed_data["errors"],
                 "tokens_used": total_tokens,
                 "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
+                # Provide total_output_tokens to satisfy downstream validation
+                # and allow writer to derive visible_output_tokens deterministically
+                "total_output_tokens": output_tokens + reasoning_tokens,
                 "reasoning_tokens": reasoning_tokens,
                 "model": self.model,
                 "timestamp": self.timestamp,
-                "interface_widgets": interface_widgets
+                "interface_widgets": interface_widgets,
+                # Keep raw response for optional auditing
+                "raw_response": raw_response_serialized
             }
 
             # Write artifacts
             if WRITE_FILES:
                 from pathlib import Path as _P
                 write_all_output_files(
-                    _P(base_output_dir), 
+                    _P(output_dir), 
                     response_data, 
                     "behavior_extractor",
-                    base_name, 
+                    case_study_name, 
                     self.model,
                     self.timestamp,
                     "medium"  # reasoning_effort
@@ -339,7 +337,7 @@ class NetLogoBehaviorExtractorAgent(LlmAgent):
             if WRITE_FILES:
                 from pathlib import Path as _P
                 write_minimal_artifacts(
-                    _P(base_output_dir), 
+                    _P(output_dir), 
                     error_msg
                 )
             
@@ -389,7 +387,7 @@ def main():
     import sys
     
     if len(sys.argv) < 3:
-        print("Usage: python agent_2b_netlogo_behavior_extractor.py <interface_json_file> <base_name> [output_dir]")
+        print("Usage: python agent_2b_netlogo_behavior_extractor.py <interface-json-file> <base-name> [output-dir]")
         sys.exit(1)
     
     interface_json_file = sys.argv[1]

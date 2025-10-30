@@ -380,7 +380,6 @@ class NetLogoOrchestratorSimplified:
                 "netlogo_interface_image_analyzer",
                 self.netlogo_interface_image_analyzer_agent.analyze_interface_images,
                 file_info["interface_images"],
-                base_name,
                 str(agent_2a_output_dir)
             )
             
@@ -566,7 +565,6 @@ class NetLogoOrchestratorSimplified:
                     "lucim_environment_synthesizer",
                     self.lucim_environment_synthesizer_agent.synthesize_lucim_environment,
                     processed_results["semantics"]["data"],
-                    base_name,
                     processed_results["ast"]["data"],  # Step 01 AST data (MANDATORY)
                     lucim_dsl_content,  # LUCIM DSL content (MANDATORY)
                     output_dir=agent_output_dir
@@ -603,10 +601,8 @@ class NetLogoOrchestratorSimplified:
                 scenario_result = self._execute_agent_with_tracking(
                     "lucim_scenario_synthesizer",
                     self.lucim_scenario_synthesizer_agent.write_scenarios,
-                    processed_results["semantics"]["data"],  # State machine from step 2
                     processed_results["lucim_environment_synthesizer"]["data"],  # LUCIM environment from step 3
                     lucim_dsl_content,  # LUCIM DSL full definition
-                    base_name,  # Filename
                     output_dir=agent_output_dir
                 )
                 
@@ -638,8 +634,6 @@ class NetLogoOrchestratorSimplified:
                     "plantuml_writer",
                     self.plantuml_writer_agent.generate_plantuml_diagrams,
                     processed_results["lucim_scenario_synthesizer"]["data"],  # Scenarios from step 4
-                    base_name,
-                    lucim_dsl_content,
                     output_dir=agent_output_dir
                 )
                 
@@ -678,7 +672,6 @@ class NetLogoOrchestratorSimplified:
                         self.plantuml_lucim_auditor_agent.audit_plantuml_diagrams,
                         plantuml_file_path,
                         str(LUCIM_RULES_FILE),  # Path to LUCIM DSL file (not content)
-                        base_name,
                         output_dir=agent_output_dir
                     )
                     
@@ -722,7 +715,6 @@ class NetLogoOrchestratorSimplified:
                     processed_results["plantuml_writer"]["data"],  # Original diagrams
                     processed_results["plantuml_lucim_auditor"]["data"],  # Audit results
                     lucim_dsl_content,
-                    base_name,
                     output_dir=agent_output_dir
                 )
                 
@@ -760,7 +752,6 @@ class NetLogoOrchestratorSimplified:
                         self.plantuml_lucim_final_auditor_agent.audit_plantuml_diagrams,
                         corrected_plantuml_file_path,
                         str(LUCIM_RULES_FILE),  # Path to LUCIM DSL file (not content)
-                        base_name,
                         8,  # step parameter for final audit
                         output_dir=agent_output_dir
                     )

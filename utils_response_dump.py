@@ -225,13 +225,23 @@ def write_all_output_files(
         )
         print(f"OK: {base_name} -> output-reasoning.md")
         
-        # 3) Write output-data.json
+        # 3) Write output-data.json (with fallback if special_files contains a diagram)
         data_file = output_dir / "output-data.json"
         if results.get("data"):
             data_file.write_text(json.dumps(results["data"], indent=2, ensure_ascii=False), encoding="utf-8")
             print(f"OK: {base_name} -> output-data.json")
         else:
-            print(f"WARNING: No data to save for {base_name}")
+            # If we have a PlantUML diagram via special_files, synthesize minimal data
+            synthesized = None
+            if special_files and isinstance(special_files, dict):
+                uml = special_files.get("plantuml_diagram")
+                if isinstance(uml, str) and "@startuml" in uml and "@enduml" in uml:
+                    synthesized = [{"diagram": {"name": "typical", "plantuml": uml}}]
+            if synthesized:
+                data_file.write_text(json.dumps(synthesized, indent=2, ensure_ascii=False), encoding="utf-8")
+                print(f"OK: {base_name} -> output-data.json (synthesized)")
+            else:
+                print(f"WARNING: No data to save for {base_name}")
 
         # 4) Write output-raw_response.json
         raw_path = output_dir / "output-raw_response.json"
