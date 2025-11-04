@@ -30,7 +30,7 @@ def sanitize_model_name(model_name: str) -> str:
     """Sanitize model name by replacing hyphens with underscores for valid identifier."""
     return model_name.replace("-", "_")
 
-class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
+class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
     model: str = DEFAULT_MODEL
     timestamp: str = ""
     name: str = "NetLogo PlantUML Auditor"
@@ -251,7 +251,7 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
             })
             
             # Use unified helper with configured timeout
-            timeout = AGENT_TIMEOUTS.get("plantuml_auditor") if 'AGENT_TIMEOUTS' in globals() or 'AGENT_TIMEOUTS' in locals() else None
+            timeout = AGENT_TIMEOUTS.get("plantuml_auditor")
             response = create_and_wait(self.client, api_config, timeout_seconds=timeout)
             
             # Extract content and reasoning via helpers

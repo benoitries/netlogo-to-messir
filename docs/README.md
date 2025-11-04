@@ -4,11 +4,11 @@ A sophisticated multi-agent AI system that automatically converts NetLogo agent-
 
 ## 🚀 Overview
 
-This project implements an 8-step orchestration pipeline that transforms NetLogo simulation models into standardized LUCIM PlantUML diagrams. The system uses multiple specialized AI agents; steps 01 (Syntax) and 02 (Semantics) are always executed in parallel to optimize throughput, and the pipeline continues sequentially from step 03.
+This project implements a 6-agent orchestration pipeline that transforms NetLogo simulation models into standardized LUCIM PlantUML diagrams. Each artifact is produced by a Generator and validated by its paired Auditor. When non-compliance is detected, the corresponding Generator performs minimal auto-corrections (there is no separate Corrector agent).
 
 ### Key Features
 
-- **Multi-Agent Architecture**: 7 specialized AI agents handling different aspects of the conversion
+- **Multi-Agent Architecture**: specialized AI agents handling different aspects of the conversion
 - **Multi-Persona Support**: Interactive selection of persona sets for different agent configurations
 - **Automated Orchestration**: Parallel-first for steps 01–02, then sequential with error correction and compliance auditing
 - **LUCIM Compliance**: Ensures generated diagrams follow LUCIM-UCI standards
@@ -20,8 +20,15 @@ This project implements an 8-step orchestration pipeline that transforms NetLogo
 
 For a concise overview of the orchestration flow, per-agent inputs/outputs, and known ambiguities/inconsistencies, see:
 
-- `code-netlogo-to-lucim/docs/orchestration-flow.md` (detailed per-agent I/O and conditions)
-- `code-netlogo-to-lucim/docs/orchestrator_workflow_summary.md` (findings and inconsistencies)
+- `code-netlogo-to-lucim-agentic-workflow/docs/orchestration-flow.md` (detailed per-agent I/O and conditions)
+- `code-netlogo-to-lucim-agentic-workflow/docs/orchestrator_workflow_summary.md` (findings and inconsistencies)
+
+### Reference Orchestrator (Canonical)
+The canonical reference implementation of the multi-agent workflow is:
+
+- `code-netlogo-to-lucim-agentic-workflow/archive/orchestrator_persona_v3.py`
+
+See `code-netlogo-to-lucim-agentic-workflow/docs/ORCHESTRATOR_REFERENCE.md` for rationale and run instructions.
 
 ### Canonical system_prompt order
 All agents construct `system_prompt` using a single canonical order for determinism and auditability:
@@ -31,82 +38,47 @@ All agents construct `system_prompt` using a single canonical order for determin
 3) agent-specific instructions (e.g., LUCIM rules)
 4) agent-specific inputs (e.g., state_machine, scenarios, .puml)
 
-This order is enforced across Agents 1–8 and is reflected in saved `input-instructions.md` artifacts.
+This order is enforced across all agents and is reflected in saved `input-instructions.md` artifacts, which contain the exact system prompt given to the AI model.
 
 ## 🏗️ Architecture
 
-### The 8-Step Orchestration Pipeline
+### The Orchestration Pipeline (6 Agents)
 
-1. **Syntax Parser** - Extracts and structures NetLogo code components
-2. **Behavior Extractor** - Extracts behavioral patterns and agent interactions
-3. **LUCIM Mapper** - Maps NetLogo concepts to LUCIM entities and relationships
-4. **LUCIM Scenario Synthesizer** - Synthesizes LUCIM scenario descriptions
-5. **PlantUML Writer** - Creates PlantUML diagram code
-6. **Compliance Auditor** - Validates LUCIM rule compliance
-7. **Corrector** - Fixes non-compliance issues (if needed)
-8. **Final Audit** - Confirms final compliance
+1. **LUCIM Operation Model Generator** — Produces the operation model; performs precise and exhaustive corrections when auditor flags issues
+2. **LUCIM Operation Model Auditor** — Audits the operation model for LUCIM compliance
+3. **LUCIM Scenario Generator** — Produces scenarios; performs precise and exhaustive corrections when auditor flags issues
+4. **LUCIM Scenario Auditor** — Audits scenarios for LUCIM compliance
+5. **LUCIM PlantUML Diagram Generator** — Produces PlantUML diagrams; performs precise and exhaustive corrections when auditor flags issues
+6. **LUCIM PlantUML Diagram Auditor** — Audits PlantUML diagrams for LUCIM compliance
 
 ### AI Agents
 
-- `NetLogoAbstractSyntaxExtractor` - Abstract syntax extraction
-- `NetLogoBehaviorExtractor` - Behavioral pattern extraction
-- `LUCIMMapper` - Concept mapping and translation
-- `LUCIMScenarioSynthesizer` - LUCIM scenario synthesis
-- `PlantUMLWriter` - Diagram code generation
-- `PlantUMLAuditor` - Compliance validation
-- `PlantUMLCorrector` - Error correction
+- LUCIM Operation Model Generator (`agent_lucim_operation_generator.py`)
+- LUCIM Operation Model Auditor (`agent_lucim_operation_auditor.py`)
+- LUCIM Scenario Generator (`agent_lucim_scenario_generator.py`)
+- LUCIM Scenario Auditor (`agent_lucim_scenario_auditor.py`)
+- LUCIM PlantUML Diagram Generator (`agent_lucim_plantuml_diagram_generator.py`)
+- LUCIM PlantUML Diagram Auditor (`agent_lucim_plantuml_diagram_auditor.py`)
 
 ## 📁 Project Structure
 
 Note: Persona directories under `input-persona/` are symbolic links to `experimentation/input/input-persona/`. The default persona set is `persona-v1`; you can change it at runtime via the interactive selection menu.
 
 ```
-netlogo-to-lucim/
-├── orchestrator.py                         # Main orchestration engine
-├── agent_1_netlogo_abstract_syntax_extractor.py               # NetLogo Abstract Syntax Extractor agent
-├── agent_2_netlogo_behavior_extractor.py  # Behavior extraction agent
-├── agent_3_lucim_environment_synthesizer.py      # LUCIM Environment Synthesizer agent
-├── agent_4_lucim_scenario_synthesizer.py # LUCIM scenario synthesis agent
-├── agent_5_plantuml_writer.py             # PlantUML generation agent
-├── agent_6_plantuml_auditor.py             # Compliance auditing agent
-├── agent_7_plantuml_corrector.py          # Error correction agent
+code-netlogo-to-lucim-agentic-workflow/
+├── orchestrator_persona_v3_adk.py         # Main orchestration (ADK-integrated)
+├── agent_lucim_operation_generator.py     # LUCIM Operation Model generator
+├── agent_lucim_operation_auditor.py       # LUCIM Operation Model auditor
+├── agent_lucim_scenario_generator.py      # LUCIM Scenario generator
+├── agent_lucim_scenario_auditor.py        # LUCIM Scenario auditor
+├── agent_lucim_plantuml_diagram_generator.py             # PlantUML generation agent
+├── agent_lucim_plantuml_diagram_auditor.py            # PlantUML LUCIM auditor
 ├── utils_config_constants.py              # Configuration and paths
-├── utils_logging.py                       # Logging utilities
-├── utils_parse_orchestrator_times.py      # Performance analysis
-├── requirements.txt                       # Python dependencies
+├── utils_openai_client.py                 # OpenAI Responses API helpers
+├── scripts/                               # Run scripts (e.g., run_default_nano.py)
 ├── input-netlogo/                         # NetLogo case studies
-│   ├── 3d-solids-netlogo-code.md
-│   ├── altruism-netlogo-code.md
-│   ├── ant-adaptation-netlogo-code.md
-│   ├── artificial-nn-netlogo-code.md
-│   ├── boiling-netlogo-code.md
-│   ├── continental-divide-netlogo-code.md
-│   ├── diffusion-network-netlogo-code.md
-│   ├── frogger-netlogo-code.md
-│   ├── piaget-vygotsky-netlogo-code.md
-│   ├── signaling-game-netlogo-code.md
-│   └── archive-initial-case-studies/
 ├── input-persona/                         # Persona sets (symlinks to experimentation/input)
-│   ├── persona-v1/
-│   │   ├── PSN_1_NetLogoAbstractSyntaxExtractor.md
-│   │   ├── PSN_2a_NetlogoInterfaceImageAnalyzer.md
-│   │   ├── PSN_2b_NetlogoBehaviorExtractor.md
-│   │   ├── PSN_3_LUCIMEnvironmentSynthesizer.md
-│   │   ├── PSN_4_LUCIMScenarioSynthesizer.md
-│   │   ├── PSN_5_PlantUMLWriter.md
-│   │   ├── PSN_6_PlantUMLLUCIMAuditor.md
-│   │   ├── PSN_7_PlantUMLLUCIMCorrector.md
-│   │   └── DSL_Target_LUCIM-full-definition-for-compliance.md
-│   └── persona-v2-after-ng-meeting/
-│       ├── PSN_1_NetLogoAbstractSyntaxExtractor.md
-│       ├── PSN_2a_NetlogoInterfaceImageAnalyzer.md
-│       ├── PSN_2b_NetlogoBehaviorExtractor.md
-│       ├── PSN_3_LUCIMEnvironmentSynthesizer.md
-│       ├── PSN_4_LUCIMScenarioSynthesizer.md
-│       ├── PSN_5_PlantUMLWriter.md
-│       ├── PSN_6_PlantUMLLUCIMAuditor.md
-│       ├── PSN_7_PlantUMLLUCIMCorrector.md
-│       └── DSL_Target_LUCIM-full-definition-for-compliance.md
+├── input-valid-examples/                  # Example diagrams and concepts
 └── output/                                # Generated results (see Output Layout below)
 ```
 
@@ -167,7 +139,7 @@ Run the orchestrator with a single command using the default nano model, the fir
 
 ```bash
 export OPENAI_API_KEY="<YOUR-API-KEY>" && \
-python3 /Users/benoit.ries/Library/CloudStorage/OneDrive-UniversityofLuxembourg/cursor-workspace-individual/research.publi.reverse.engineering.netlogo.to.messir.ucid/code-netlogo-to-lucim-agentic-workflow/scripts/run_default_nano.py | cat
+python3 code-netlogo-to-lucim-agentic-workflow/scripts/run_default_nano.py | cat
 ```
 
 This will persist outputs under the canonical structure in `code-netlogo-to-lucim-agentic-workflow/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<case>/`.
@@ -277,25 +249,55 @@ Compatibility notes:
 All artifacts are organized per run, case, and agent step to improve traceability and avoid collisions:
 
 ```
-code-netlogo-to-lucim/
+code-netlogo-to-lucim-agentic-workflow/
   output/
     runs/
       YYYY-MM-DD/
         HHMM-<PERSONA-SET>/
-          <case-name>/
-            01-netlogo_abstract_syntax_extractor/
-            02-behavior_extractor/
-            03-lucim_environment_synthesizer/
-            04-lucim_scenario_synthesizer/
-            05-plantuml_writer/
-            06-plantuml_lucim_auditor/
-            07-plantuml_lucim_corrector/
-            08-plantuml_lucim_final_auditor/
-          <another-case>/
+          <case>-<model>-<DATE>-reason-<X>-verb-<Y>/
+            <case>_<YYYYMMDD>_<HHMM>_<model>_orchestrator.log
+            lucim_environment/
+              0_synthesizer/          # Operation Model Generator
+                input-instructions.md
+                output-data.json
+                output-raw_response.json
+                output-reasoning.md
+                output-response.json
+              1_iter/                 # Iteration 1 (if corrections needed)
+                iter-1-auditor/       # Operation Model Auditor
+                  input-instructions.md
+                  output-data.json
+                  ...
+                iter-1-corrector/     # Corrector (optional)
+                  output-data.json
+                  ...
+                output_python_environment.md
+              2_iter/                 # Iteration 2 (if needed)
+                ...
+            lucim_scenario/
+              0_synthesizer/          # Scenario Generator
+                input-instructions.md
+                output-data.json
+                ...
+              1_iter/                 # Iteration 1 (if corrections needed)
+                iter-1-auditor/       # Scenario Auditor
+                  ...
+                output_python_scenario.md
+            plantuml/
+              0_writer/               # PlantUML Diagram Generator
+                diagram.puml
+                input-instructions.md
+                output-data.json
+                ...
+              1_iter/                 # Iteration 1 (if corrections needed)
+                iter-1-auditor/       # PlantUML Diagram Auditor
+                  output_python_diagram.md
+                  ...
+          <another-case>-<model>-<DATE>-reason-<X>-verb-<Y>/
             ...
 ```
 
-Each subfolder contains the agent’s files named with the existing prefix format. Orchestrator logs are stored per case under the same run folder.
+Each subfolder contains the agent's files named with the existing prefix format. Orchestrator logs are stored at the case level with the format `<case>_<YYYYMMDD>_<HHMM>_<model>_orchestrator.log`.
 
 > Deprecation: The legacy `output/runs-<YYYYMMDD-HHMM>/` structure is no longer used for new runs. Historical runs remain as-is for reference.
 
@@ -311,7 +313,7 @@ Validation script: `code-netlogo-to-lucim/validate_task_success_criteria.py` (ch
 
 The canonical LUCIM/UCI compliance rules file is referenced through the `LUCIM_RULES_FILE` constant in `utils_config_constants.py` and must point to:
 
-`code-netlogo-to-lucim/input-persona/DSL_Target_LUCIM-full-definition-for-compliance.md`
+`code-netlogo-to-lucim-agentic-workflow/input-persona/DSL_Target_LUCIM-full-definition-for-compliance.md`
 
 Quick verification commands:
 

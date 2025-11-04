@@ -265,16 +265,7 @@ def _write_special_files(output_dir: pathlib.Path, special_files: Dict[str, Any]
         if "plantuml_diagram" in special_files:
             diagram_text = special_files["plantuml_diagram"]
             if diagram_text and "@startuml" in diagram_text and "@enduml" in diagram_text:
-                
-                # Determine filename based on agent type and special flags
-                if special_files.get("corrected", False):
-                    # Agent 7: corrected diagram with timestamp suffix
-                    timestamp_suffix = special_files.get("timestamp_suffix", "")
-                    puml_filename = f"{base_name}_{timestamp_suffix}_plantuml_corrector_diagram.puml"
-                else:
-                    # Agent 5: standard diagram
-                    puml_filename = "diagram.puml"
-                
+                puml_filename = "diagram.puml"
                 puml_file = output_dir / puml_filename
                 puml_file.write_text(diagram_text, encoding="utf-8")
                 print(f"OK: {base_name} -> {puml_filename}")

@@ -69,7 +69,8 @@ class OrchestratorFileIO:
             raise FileNotFoundError(f"MANDATORY INPUT MISSING: LUCIM DSL file not found: {LUCIM_RULES_FILE}")
        
     def create_run_directory(self, timestamp: str, base_name: str, model: str, 
-                           reasoning_effort: str, text_verbosity: str, persona_set: str = "persona-v1") -> pathlib.Path:
+                           reasoning_effort: str, text_verbosity: str, persona_set: str = "persona-v1",
+                           version: Optional[str] = None) -> pathlib.Path:
         """
         Create the run directory for a specific orchestration.
         
@@ -79,11 +80,13 @@ class OrchestratorFileIO:
             model: Model name
             reasoning_effort: Reasoning effort level
             text_verbosity: Text verbosity level
+            persona_set: Persona set name (default: persona-v1)
+            version: Optional orchestrator version (e.g., "v2", "v3-no-adk", "v3-adk")
             
         Returns:
             Path to the created run directory
         """
-        run_dir = get_run_base_dir(timestamp, base_name, model, reasoning_effort, text_verbosity, persona_set)
+        run_dir = get_run_base_dir(timestamp, base_name, model, reasoning_effort, text_verbosity, persona_set, version)
         run_dir.mkdir(parents=True, exist_ok=True)
         return run_dir
     
@@ -175,7 +178,7 @@ class OrchestratorFileIO:
         step_agents = [
             (1, "netlogo_abstract_syntax_extractor"),
             (2, "behavior_extractor"),
-            (3, "lucim_environment_synthesizer"),
+            (3, "lucim_operation_synthesizer"),
             (4, "lucim_scenario_synthesizer"),
             (5, "plantuml_writer"),
             (6, "plantuml_lucim_auditor"),
@@ -243,8 +246,8 @@ class OrchestratorFileIO:
             file_info["pattern"] = f"{base_name}_{timestamp}_{model}_1a_netlogo_abstract_syntax_extractor_v1_*.md"
         elif agent_type == "behavior_extractor":
             file_info["pattern"] = f"{base_name}_{timestamp}_{model}_1b_behavior_extractor_v1_*.json/md"
-        elif agent_type == "lucim_environment_synthesizer":
-            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_3_lucim_environment_synthesizer_v1_*.json/md"
+        elif agent_type == "lucim_operation_synthesizer":
+            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_3_lucim_operation_synthesizer_v1_*.json/md"
         elif agent_type == "lucim_scenario_synthesizer":
             file_info["pattern"] = f"{base_name}_{timestamp}_{model}_3_scenario_v1_*.md"
         elif agent_type == "plantuml_writer":

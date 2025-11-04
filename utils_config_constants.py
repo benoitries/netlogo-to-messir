@@ -34,13 +34,11 @@ OUTPUT_DIR = BASE_DIR / "output"
 DEFAULT_PERSONA_SET = "persona-v2-after-ng-meeting"
 
 # Persona files (default to DEFAULT_PERSONA_SET)
-PERSONA_NETLOGO_ABSTRACT_SYNTAX_EXTRACTOR = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_1_NetLogoAbstractSyntaxExtractor.md"
-PERSONA_BEHAVIOR_EXTRACTOR = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_2b_NetlogoBehaviorExtractor.md"
-PERSONA_LUCIM_ENVIRONMENT_SYNTHESIZER = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_3_LUCIMEnvironmentSynthesizer.md"
-PERSONA_LUCIM_SCENARIO_SYNTHESIZER = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_4_LUCIMScenarioSynthesizer.md"
-PERSONA_PLANTUML_WRITER = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_5_PlantUMLWriter.md"
-PERSONA_PLANTUML_AUDITOR = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_6_PlantUMLLUCIMAuditor.md"
-PERSONA_PLANTUML_CORRECTOR = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_7_PlantUMLLUCIMCorrector.md"
+PERSONA_LUCIM_OPERATION_MODEL_GENERATOR = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_LUCIM_Operation_Model_Generator.md"
+PERSONA_LUCIM_OPERATION_MODEL_AUDITOR = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_LUCIM_Operation_Model_Auditor.md"
+PERSONA_LUCIM_SCENARIO_GENERATOR = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_LUCIM_Scenario_Generator.md"
+PERSONA_LUCIM_PLANTUML_DIAGRAM_GENERATOR = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_LUCIM_PlantUML_Diagram_Generator.md"
+PERSONA_LUCIM_PLANTUML_DIAGRAM_AUDITOR = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_LUCIM_PlantUML_Diagram_Auditor.md"
 
 # Rules files (default to DEFAULT_PERSONA_SET)
 LUCIM_RULES_FILE = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "DSL_Target_LUCIM-full-definition-for-compliance.md"
@@ -82,7 +80,7 @@ AGENT_CONFIGS = {
         "reasoning_summary": "auto",
         "text_verbosity": "medium"
     },
-    "lucim_environment_synthesizer": {
+    "lucim_operation_synthesizer": {
         "model": DEFAULT_MODEL,
         "reasoning_effort": "medium",
         "reasoning_summary": "auto",
@@ -121,7 +119,7 @@ AGENT_TIMEOUTS = {
     "netlogo_abstract_syntax_extractor": None,
     "netlogo_interface_image_analyzer": None,
     "behavior_extractor": None,
-    "lucim_environment_synthesizer": None,
+    "lucim_operation_synthesizer": None,
     "lucim_scenario_synthesizer": None,
     "plantuml_writer": None,
     "plantuml_auditor": None,
@@ -243,10 +241,7 @@ COMMON_KEYS = {
 OPTIONAL_KEYS = {"raw_response"}
 
 AGENT_KEYS: Dict[str, Set[str]] = {
-    "netlogo_abstract_syntax_extractor": COMMON_KEYS | OPTIONAL_KEYS,
-    "netlogo_interface_image_analyzer": COMMON_KEYS | OPTIONAL_KEYS,
-    "behavior_extractor": COMMON_KEYS | OPTIONAL_KEYS,
-    "lucim_environment_synthesizer": COMMON_KEYS | OPTIONAL_KEYS,
+    "lucim_operation_synthesizer": COMMON_KEYS | OPTIONAL_KEYS,
     "lucim_scenario_synthesizer": COMMON_KEYS | OPTIONAL_KEYS,
     "plantuml_writer": COMMON_KEYS | OPTIONAL_KEYS,
     "plantuml_auditor": COMMON_KEYS | OPTIONAL_KEYS,
@@ -273,21 +268,13 @@ def get_persona_file_paths(persona_set: str = DEFAULT_PERSONA_SET) -> Dict[str, 
     persona_dir = INPUT_PERSONA_DIR / persona_set
     
     return {
-        "netlogo_abstract_syntax_extractor": persona_dir / "PSN_1_NetLogoAbstractSyntaxExtractor.md",
-        "netlogo_interface_image_analyzer": persona_dir / "PSN_2a_NetlogoInterfaceImageAnalyzer.md",
-        "behavior_extractor": persona_dir / "PSN_2b_NetlogoBehaviorExtractor.md",
-        "lucim_environment_synthesizer": persona_dir / "PSN_3_LUCIMEnvironmentSynthesizer.md",
-        "lucim_scenario_synthesizer": persona_dir / "PSN_4_LUCIMScenarioSynthesizer.md",
-        "plantuml_writer": persona_dir / "PSN_5_PlantUMLWriter.md",
-        "plantuml_auditor": persona_dir / "PSN_6_PlantUMLLUCIMAuditor.md",
-        # Final auditor reuses the same persona as the initial auditor
-        "plantuml_final_auditor": persona_dir / "PSN_6_PlantUMLLUCIMAuditor.md",
-        "plantuml_corrector": persona_dir / "PSN_7_PlantUMLLUCIMCorrector.md",
+        "lucim_operation_model_generator": persona_dir / "PSN_LUCIM_Operation_Model_Generator.md",
+        "lucim_operation_model_auditor": persona_dir / "PSN_LUCIM_Operation_Model_Auditor.md",
+        "lucim_scenario_generator": persona_dir / "PSN_LUCIM_Scenario_Generator.md",
+        "lucim_plantuml_diagram_generator": persona_dir / "PSN_LUCIM_PlantUML_Diagram_Generator.md",
+        "lucim_plantuml_diagram_auditor": persona_dir / "PSN_LUCIM_PlantUML_Diagram_Auditor.md",
         "lucim_rules": persona_dir / "DSL_Target_LUCIM-full-definition-for-compliance.md",
-        "dsl_il_syn_description": persona_dir / "DSL_IL_SYN-description.md",
-        "dsl_il_syn_mapping": persona_dir / "DSL_IL_SYN-mapping.md",
-        "dsl_il_sem_description": persona_dir / "DSL_IL_SEM-description.md",
-        "dsl_il_sem_mapping": persona_dir / "DSL_IL_SEM-mapping.md"
+        "netlogo_lucim_mapping": persona_dir / "RULES_MAPPING_NETLOGO_TO_OPERATION_MODEL.md",
     }
 
 

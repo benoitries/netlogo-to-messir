@@ -90,7 +90,7 @@ class OrchestratorLogger:
         # Determine success status for each step
         netlogo_abstract_syntax_extractor_success = results.get("ast", {}).get("data") is not None
         behavior_extractor_success = results.get("semantics", {}).get("data") is not None
-        lucim_environment_success = results.get("lucim_environment_synthesizer", {}).get("data") is not None
+        lucim_environment_success = results.get("lucim_operation_synthesizer", {}).get("data") is not None
         lucim_scenario_synthesizer_success = results.get("lucim_scenario_synthesizer", {}).get("data") is not None
         plantuml_writer_success = results.get("plantuml_writer", {}).get("data") is not None
         plantuml_lucim_auditor_success = results.get("plantuml_lucim_auditor", {}).get("data") is not None
@@ -104,7 +104,7 @@ class OrchestratorLogger:
         self.logger.info(f"{base_name} results:")
         self.logger.info(f"  Step 1 - Syntax Parser: {'✓' if netlogo_abstract_syntax_extractor_success else '✗'}")
         self.logger.info(f"  Step 2 - Behavior Extractor: {'✓' if behavior_extractor_success else '✗'}")
-        self.logger.info(f"  Step 3 - LUCIM Environment Synthesizer: {'✓' if lucim_environment_success else '✗'}")
+        self.logger.info(f"  Step 3 - LUCIM Operation Synthesizer: {'✓' if lucim_environment_success else '✗'}")
         self.logger.info(f"  Step 4 - LUCIM Scenario Synthesizer: {'✓' if lucim_scenario_synthesizer_success else '✗'}")
         self.logger.info(f"  Step 5 - PlantUML Writer: {'✓' if plantuml_writer_success else '✗'}")
         self.logger.info(f"  Step 6 - PlantUML LUCIM Auditor: {'✓' if plantuml_lucim_auditor_success else '✗'}")
@@ -157,7 +157,7 @@ class OrchestratorLogger:
         # Determine status for each agent
         netlogo_abstract_syntax_extractor_success = results.get("ast", {}).get("data") is not None
         behavior_extractor_success = results.get("semantics", {}).get("data") is not None
-        lucim_environment_success = results.get("lucim_environment_synthesizer", {}).get("data") is not None
+        lucim_environment_success = results.get("lucim_operation_synthesizer", {}).get("data") is not None
         lucim_scenario_synthesizer_success = results.get("lucim_scenario_synthesizer", {}).get("data") is not None
         plantuml_writer_success = results.get("plantuml_writer", {}).get("data") is not None
         plantuml_lucim_auditor_success = results.get("plantuml_lucim_auditor", {}).get("data") is not None
@@ -170,7 +170,7 @@ class OrchestratorLogger:
         
         self.logger.info(f"   Step 1 - Syntax Parser Agent: {'✓ SUCCESS' if netlogo_abstract_syntax_extractor_success else '✗ FAILED'}")
         self.logger.info(f"   Step 2 - Behavior Extractor Agent: {'✓ SUCCESS' if behavior_extractor_success else '✗ FAILED'}")
-        self.logger.info(f"   Step 3 - LUCIM Environment Synthesizer Agent: {'✓ SUCCESS' if lucim_environment_success else '✗ FAILED'}")
+        self.logger.info(f"   Step 3 - LUCIM Operation Synthesizer Agent: {'✓ SUCCESS' if lucim_environment_success else '✗ FAILED'}")
         self.logger.info(f"   Step 4 - LUCIM Scenario Synthesizer Agent: {'✓ SUCCESS' if lucim_scenario_synthesizer_success else '✗ FAILED'}")
         self.logger.info(f"   Step 5 - PlantUML Writer Agent: {'✓ SUCCESS' if plantuml_writer_success else '✗ FAILED'}")
         self.logger.info(f"   Step 6 - PlantUML LUCIM Auditor Agent: {'✓ SUCCESS' if plantuml_lucim_auditor_success else '✗ FAILED'}")
@@ -196,8 +196,8 @@ class OrchestratorLogger:
                     self.logger.info(f"   • Syntax Parser: {base_name}_{timestamp}_{model}_1a_netlogo_abstract_syntax_extractor_v1_*.md")
                 elif agent_type == "behavior_extractor":
                     self.logger.info(f"   • Behavior Extractor: {base_name}_{timestamp}_{model}_1b_behavior_extractor_v1_*.json/md")
-                elif agent_type == "lucim_environment_synthesizer":
-                    self.logger.info(f"   • LUCIM Environment Synthesizer: {base_name}_{timestamp}_{model}_2_lucim_environment_v1_*.json/md")
+                elif agent_type == "lucim_operation_synthesizer":
+                    self.logger.info(f"   • LUCIM Operation Synthesizer: {base_name}_{timestamp}_{model}_2_lucim_operation_v1_*.json/md")
                 elif agent_type == "lucim_scenario_synthesizer":
                     self.logger.info(f"   • Scenarios: {base_name}_{timestamp}_{model}_3_scenario_v1_*.md")
                 elif agent_type == "plantuml_writer":
@@ -209,13 +209,30 @@ class OrchestratorLogger:
                 elif agent_type == "plantuml_lucim_final_auditor":
                     self.logger.info(f"   • PlantUML LUCIM Final Auditor: {base_name}_{timestamp}_{model}_8_lucim_final_auditor_*.json/md/.puml")
     
-    def log_pipeline_completion(self, successful_agents: int, total_agents: int) -> None:
-        """Log pipeline completion status."""
+    def log_pipeline_completion(self, successful_agents: int, total_agents: int, final_compliance: Dict[str, Any] = None) -> None:
+        """Log pipeline completion status.
+        
+        Args:
+            successful_agents: Number of successfully executed agents
+            total_agents: Total number of agents that were executed (not skipped)
+            final_compliance: Optional compliance status dict with 'status' key
+        """
         self.logger.info(f"\n🎯 PIPELINE COMPLETION:")
+        
+        # Determine success based on compliance status and critical agents
+        # For limited-agents pipeline, core agents are 1-4 (lucim_env, lucim_scenario, plantuml_writer, plantuml_auditor)
+        core_agents_count = 4
+        compliance_verified = final_compliance and final_compliance.get("status") == "VERIFIED"
+        
         if successful_agents == total_agents:
             self.logger.info(f"   🎉 FULL SUCCESS: All {total_agents} agents completed successfully!")
             self.logger.info(f"   📋 Final output includes LUCIM-compliant PlantUML sequence diagrams")
-        elif successful_agents >= 6:  # At least core pipeline completed (all 6 agents)
+        elif compliance_verified and successful_agents >= core_agents_count:
+            # Success: compliance verified with all core agents completed (conditional agents may be skipped)
+            self.logger.info(f"   🎉 SUCCESS: Core pipeline completed with LUCIM compliance verified!")
+            self.logger.info(f"   📋 {successful_agents}/{total_agents} agents executed (conditional steps may have been skipped)")
+            self.logger.info(f"   ✅ Compliance status: VERIFIED")
+        elif successful_agents >= 6:  # At least full pipeline completed (all 6 agents)
             self.logger.info(f"   ⚠️  PARTIAL SUCCESS: {successful_agents}/{total_agents} agents completed")
             self.logger.info(f"   📋 Some outputs available, but pipeline incomplete")
         else:
@@ -234,3 +251,25 @@ class OrchestratorLogger:
         else:
             self.logger.info(f"   ❓ COMPLIANCE STATUS: UNKNOWN")
             self.logger.info(f"   ⚠️  Result: No authoritative compliance verdict available")
+
+    def log_auditor_metrics(self, initial_audit: Dict[str, Any], final_audit: Dict[str, Any]) -> None:
+        """Compute and log confusion-matrix metrics comparing step 6 vs step 8 auditors.
+
+        Convention: positive = compliant.
+        """
+        try:
+            from utils_metrics import compute_audit_confusion_metrics
+            metrics = compute_audit_confusion_metrics(initial_audit, final_audit, positive_label="compliant")
+        except Exception as e:
+            self.logger.warning(f"Failed to compute auditor metrics: {e}")
+            return
+
+        self.logger.info("\n📊 AUDITOR METRICS (positive = compliant)")
+        self.logger.info(
+            f"   • TP={metrics['tp']} FP={metrics['fp']} TN={metrics['tn']} FN={metrics['fn']} (universe={metrics['universe_size']})"
+        )
+        self.logger.info(
+            "   • Precision={:.2%} Recall={:.2%} Specificity={:.2%} Accuracy={:.2%} F1={:.2%}".format(
+                metrics["precision"], metrics["recall"], metrics["specificity"], metrics["accuracy"], metrics["f1"]
+            )
+        )

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NetLogo PlantUML Writer Agent using OpenAI models
+LUCIM PlantUML Diagram Generator Agent using OpenAI models
 Generates PlantUML sequence diagrams from scenario JSON files using OpenAI models.
 """
 
@@ -33,7 +33,7 @@ def sanitize_model_name(model_name: str) -> str:
     """Sanitize model name by replacing hyphens with underscores for valid identifier."""
     return model_name.replace("-", "_")
 
-class NetLogoPlantUMLWriterAgent(LlmAgent):
+class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
     model: str = DEFAULT_MODEL
     timestamp: str = ""
     name: str = "NetLogo PlantUML Writer"
@@ -205,6 +205,16 @@ class NetLogoPlantUMLWriterAgent(LlmAgent):
 ```
 </LUCIM-SCENARIO>
 """
+
+        # Also embed the full LUCIM DSL definition as an explicit input file block
+        # so the model receives it within the user-input context (not only in instructions)
+        if self.lucim_dsl_definition:
+            input_text += (
+                "\n<LUCIM-DSL-DEFINITION>\n"
+                f"<!-- source: {self.lucim_rules_path} -->\n"
+                f"{self.lucim_dsl_definition}\n"
+                "</LUCIM-DSL-DEFINITION>\n"
+            )
 
         # Create single system_prompt variable for both API call and file generation
         system_prompt = f"{instructions}\n\n{input_text}"
@@ -520,7 +530,7 @@ def main():
     args = parser.parse_args()
     
     # Create agent
-    agent = NetLogoPlantUMLWriterAgent(args.model, args.timestamp)
+    agent = LUCIMPlantUMLDiagramGeneratorAgent(args.model, args.timestamp)
     
     # Load input files
     scenarios_file = OUTPUT_DIR / f"{args.base_name}_{args.timestamp or agent.timestamp}_{args.model}_3_scenarios.json"
@@ -566,3 +576,4 @@ def main():
 
 if __name__ == "__main__":
     main() 
+

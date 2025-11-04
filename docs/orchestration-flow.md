@@ -2,6 +2,8 @@
 
 This document provides a precise, concise description of the end-to-end orchestration flow, including per-agent inputs/outputs and conditional branches.
 
+> Reference Orchestrator: The canonical implementation of the multi-agent workflow is `code-netlogo-to-lucim-agentic-workflow/archive/orchestrator_persona_v3.py`. See `docs/ORCHESTRATOR_REFERENCE.md` for details and run instructions.
+
 ## Pipeline Overview
 
 The system implements an 8-stage pipeline with parallel execution for stages 01-02, followed by sequential processing from stage 03 onwards.
@@ -30,7 +32,7 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<case>-<mode
 - `output-reasoning.md` (reasoning trace)
 - `output-data.json` (AST structure)
 - `output-raw_response.json` (raw API response)
-- `input-instructions.md` (processed instructions)
+- `input-instructions.md` (exact system prompt given to the AI model)
 
 **Conditions:**
 - If IL-SYN reference files are missing: warning logged, processing continues with reduced context
@@ -49,14 +51,14 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<case>-<mode
 - `output-reasoning.md` (reasoning trace)
 - `output-data.json` (state machine)
 - `output-raw_response.json` (raw API response)
-- `input-instructions.md` (processed instructions)
+- `input-instructions.md` (exact system prompt given to the AI model)
 
 **Conditions:**
 - Forbids AST/raw code input (deprecated paths raise `NotImplementedError`)
 - Always executes in parallel with Syntax Parser (stage 01)
 - If UI images are missing: processing continues with reduced context
 
-### 03 — LUCIM Environment Synthesizer (`agent_3_lucim_environment_synthesizer.py`)
+### 03 — LUCIM Operation Synthesizer (`agent_lucim_operation_generator.py`)
 
 **Inputs:**
 - State machine from Stage 02: `../02-behavior_extractor/output-data.json`
@@ -66,9 +68,9 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<case>-<mode
 **Outputs:**
 - `output-response.json` (agent response)
 - `output-reasoning.md` (reasoning trace)
-- `output-data.json` (LUCIM environment concepts)
+- `output-data.json` (LUCIM operation model)
 - `output-raw_response.json` (raw API response)
-- `input-instructions.md` (processed instructions)
+- `input-instructions.md` (exact system prompt given to the AI model)
 
 **Conditions:**
 - Executes sequentially after stages 01-02 completion
@@ -78,7 +80,7 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<case>-<mode
 
 **Inputs:**
 - State machine from Stage 02: `../02-behavior_extractor/output-data.json`
-- LUCIM environment from Stage 03: `../03-lucim_environment_synthesizer/output-data.json`
+- LUCIM operation model from Stage 03: `../03-lucim_operation_synthesizer/output-data.json`
 - LUCIM DSL definition: `input-persona/<PERSONA-SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
 - iCrash references: removed
 - Persona instructions: `input-persona/<PERSONA-SET>/PSN_4_LUCIMScenarioSynthesizer.md`
@@ -88,13 +90,16 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<case>-<mode
 - `output-reasoning.md` (reasoning trace)
 - `output-data.json` (scenarios)
 - `output-raw_response.json` (raw API response)
-- `input-instructions.md` (processed instructions)
+- `input-instructions.md` (exact system prompt given to the AI model)
 
 **Conditions:**
 - All inputs are MANDATORY; failure if any are missing
 - Executes sequentially after stage 03 completion
 
-### 05 — PlantUML Writer (`agent_5_plantuml_writer.py`)
+Note on Correctors:
+- There is no LLM-based corrector for Operation Model or Scenarios in this pipeline. Audit steps may report issues; corrections must be handled via deterministic tools or manual iteration. Do not add `agent_lucim_operation_corrector.py` or `agent_lucim_scenario_corrector.py`.
+
+### 05 —LUCIM PlantUML Diagram Generator (`agent_lucim_plantuml_diagram_generator.py`)
 
 **Inputs:**
 - Scenarios from Stage 04: `../04-lucim_scenario_synthesizer/output-data.json`
@@ -107,13 +112,13 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<case>-<mode
 - `output-data.json` (diagram payload including PlantUML text)
 - `diagram.puml` (standalone PlantUML diagram)
 - `output-raw_response.json` (raw API response)
-- `input-instructions.md` (processed instructions)
+- `input-instructions.md` (exact system prompt given to the AI model)
 
 **Conditions:**
 - If JSON payload lacks clear diagram field: falls back to extracting `@startuml...@enduml` blocks
 - Executes sequentially after stage 04 completion
 
-### 06 — PlantUML LUCIM Auditor (`agent_6_plantuml_auditor.py`)
+### 06 — LUCIM PlantUML Diagram Auditor (`agent_lucim_plantuml_diagram_auditor.py`)
 
 **Inputs:**
 - Standalone PlantUML file from Stage 05: `../05-plantuml_writer/diagram.puml` (MANDATORY)
@@ -125,51 +130,14 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<case>-<mode
 - `output-reasoning.md` (reasoning trace)
 - `output-data.json` (audit results with non-compliant rules and verdict)
 - `output-raw_response.json` (raw API response)
-- `input-instructions.md` (processed instructions)
+- `input-instructions.md` (exact system prompt given to the AI model)
 
 **Conditions:**
 - Both inputs are MANDATORY; failure if either is missing
 - Executes sequentially after stage 05 completion
 - Uses manual polling style (divergent from centralized helper used by other agents)
 
-### 07 — PlantUML LUCIM Corrector (`agent_7_plantuml_corrector.py`)
 
-**Inputs:**
-- PlantUML diagrams from Stage 05: `../05-plantuml_writer/output-data.json` and/or `../05-plantuml_writer/diagram.puml`
-- Non-compliant rules from Stage 06: `../06-plantuml_lucim_auditor/output-data.json` (MANDATORY)
-- LUCIM DSL definition: `input-persona/<PERSONA-SET>/DSL_Target_LUCIM-full-definition-for-compliance.md` (MANDATORY)
-- Persona instructions: `input-persona/<PERSONA-SET>/PSN_7_PlantUMLLUCIMCorrector.md`
-
-**Outputs:**
-- `output-response.json` (agent response)
-- `output-reasoning.md` (reasoning trace with embedded markdown diffs and justification)
-- `output-data.json` (corrected diagram payload)
-- `<case>_<YYYYMMDD>_<HHMM>_<model>_plantuml_corrector_diagram.puml` (corrected standalone diagram)
-- `output-raw_response.json` (raw API response)
-- `input-instructions.md` (processed instructions)
-
-**Conditions:**
-- Only executes if Stage 06 audit finds non-compliance issues
-- If no non-compliance: stage is skipped
-- Uses manual polling style (divergent from centralized helper)
-
-### 08 — PlantUML LUCIM Final Auditor (`agent_6_plantuml_auditor.py`)
-
-**Inputs:**
-- Persona Auditor: `input-persona/<PERSONA-SET>/PSN_6_PlantUMLLUCIMAuditor.md`
-- LUCIM DSL full definition: `input-persona/<PERSONA-SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
-- Corrected PlantUML diagram from Stage 07: `.puml` file
-
-**Outputs:**
-- `output-response.json` (agent response)
-- `output-reasoning.md` (reasoning trace)
-- `output-data.json` (final audit verdict)
-- `output-raw_response.json` (raw API response)
-- `input-instructions.md` (processed instructions)
-
-**Conditions:**
-- Always executes after stage 07 (regardless of correction results)
-- Provides final compliance confirmation
 
 ## Conditional Branching Logic
 
@@ -196,17 +164,27 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<case>-<mode
 - `output-reasoning.md`: Human-readable reasoning trace
 - `output-data.json`: Stage-specific data payload
 - `output-raw_response.json`: Raw OpenAI API response
-- `input-instructions.md`: Processed instruction set
+- `input-instructions.md`: Exact system prompt given to the AI model
 
 ### Stage-Specific Artifacts
 - **Stage 05**: `diagram.puml` (standalone PlantUML)
-- **Stage 07**: `<case>_<YYYYMMDD>_<HHMM>_<model>_plantuml_corrector_diagram.puml` (corrected diagram)
+<!-- Stage 07 corrected diagram naming removed -->
 
 ## Known Inconsistencies
 
 1. **Polling Style Divergence**: Stages 06-08 use manual polling while stages 01-05 use centralized helper
 2. **Diagram Naming**: Stage 05 uses simple `diagram.puml` while Stage 07 uses detailed timestamped naming
 3. **Token Usage Extraction**: Inconsistent extraction methods across agents (centralized vs manual)
+
+## Compliance Metrics in Logs
+
+When both Stage 06 (PlantUML LUCIM Auditor) and Stage 08 (Final Auditor) produce outputs, the orchestrator appends a metrics section at the end of the run logs:
+
+- Labeling convention: positive = compliant
+- Metrics: TP, FP, TN, FN and Precision, Recall, Specificity, Accuracy, F1
+- Where to find: console logs and the final orchestration summary output (same stream as other end-of-run summaries)
+
+If only a single auditor output is available, a compact audit summary (final verdict, number of non-compliant rules, coverage counts) is printed instead.
 
 ## Validation
 

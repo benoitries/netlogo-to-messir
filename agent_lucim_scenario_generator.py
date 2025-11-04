@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-NetLogo PlantUML Corrector Agent using OpenAI models
-Corrects PlantUML sequence diagrams based on audit results using OpenAI models.
+NetLogo LUCIM Scenario Synthesizer Agent using OpenAI models
+Synthesizes LUCIM scenarios from LUCIM concepts using OpenAI models.
 """
 
 import os
@@ -9,47 +9,48 @@ import json
 import datetime
 import pathlib
 import tiktoken
-from typing import Dict, Any, List
+from typing import Dict, Any
 from google.adk.agents import LlmAgent
 from openai import OpenAI
+from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens, format_prompt_for_responses_api
 from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts, write_all_output_files, write_input_instructions_before_api
-from utils_openai_client import get_usage_tokens, create_and_wait, get_output_text, get_reasoning_summary, format_prompt_for_responses_api
+from utils_schema_loader import get_template_for_agent, validate_data_against_template
 from utils_config_constants import expected_keys_for_agent
+from utils_logging import write_reasoning_md_from_payload
 from utils_task_loader import load_task_instruction
-from utils_plantuml import process_plantuml_file
 
 from utils_config_constants import (
-    PERSONA_PLANTUML_CORRECTOR, OUTPUT_DIR, LUCIM_RULES_FILE,
-    get_reasoning_config, validate_agent_response, DEFAULT_MODEL, AGENT_TIMEOUTS)
+    PERSONA_LUCIM_SCENARIO_GENERATOR, OUTPUT_DIR, LUCIM_RULES_FILE,
+    get_reasoning_config, validate_agent_response, DEFAULT_MODEL)
 
 # Configuration
-PERSONA_FILE = PERSONA_PLANTUML_CORRECTOR
+PERSONA_FILE = PERSONA_LUCIM_SCENARIO_GENERATOR
 WRITE_FILES = True
+
+# Load persona and LUCIM rules (instance-level will be set in __init__)
 
 
 def sanitize_model_name(model_name: str) -> str:
     """Sanitize model name by replacing hyphens with underscores for valid identifier."""
     return model_name.replace("-", "_")
 
-class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
+class LUCIMScenarioGeneratorAgent(LlmAgent):
     model: str = DEFAULT_MODEL
     timestamp: str = ""
-    name: str = "NetLogo PlantUML Corrector"
+    name: str = "NetLogo LUCIM Scenario Generator"
     
     client: OpenAI = None
     reasoning_effort: str = "medium"
-    reasoning_summary: str = "auto"
+    reasoning_summary: str = "auto"  # Add client field
     text_verbosity: str = "medium"
     persona_path: str = ""
     persona_text: str = ""
-    lucim_rules_path: str = ""
-    lucim_rules_text: str = ""
     
     def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
         sanitized_name = sanitize_model_name(model_name)
         super().__init__(
-            name=f"netlogo_plantuml_corrector_agent_{sanitized_name}",
-            description="PlantUML corrector agent for fixing LUCIM UCI compliance issues"
+            name=f"netlogo_lucim_scenario_synthesizer_agent_{sanitized_name}",
+            description="LUCIM scenario synthesizer agent for NetLogo models"
         )
         self.model = model_name
         
@@ -63,17 +64,12 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
         # Configure OpenAI client (assumes key already validated by orchestrator)
         from utils_config_constants import OPENAI_API_KEY
         self.client = OpenAI(api_key=OPENAI_API_KEY)
-        # Initialize persona and rules from defaults; orchestrator can override
+        # Initialize persona from default; orchestrator may override
         try:
             self.persona_path = str(PERSONA_FILE)
             self.persona_text = pathlib.Path(self.persona_path).read_text(encoding="utf-8")
         except Exception:
             self.persona_text = ""
-        try:
-            self.lucim_rules_path = str(LUCIM_RULES_FILE)
-            self.lucim_rules_text = pathlib.Path(self.lucim_rules_path).read_text(encoding="utf-8")
-        except Exception:
-            self.lucim_rules_text = ""
     
     def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
         """
@@ -85,10 +81,20 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
         """
         self.reasoning_effort = reasoning_effort
         self.reasoning_summary = reasoning_summary
-
+    
     def update_text_config(self, text_verbosity: str):
         """Update text verbosity configuration for this agent."""
         self.text_verbosity = text_verbosity
+    
+    def update_persona_path(self, persona_path: str) -> None:
+        if not persona_path:
+            return
+        self.persona_path = persona_path
+        try:
+            self.persona_text = pathlib.Path(persona_path).read_text(encoding="utf-8")
+        except Exception as e:
+            print(f"[WARNING] Failed to load persona file: {persona_path} ({e})")
+            self.persona_text = ""
     
     def apply_config(self, config: Dict[str, Any]) -> None:
         """Apply a unified configuration bundle to this agent.
@@ -103,26 +109,6 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
             if value is not None:
                 setattr(self, key, value)
     
-    def update_persona_path(self, persona_path: str) -> None:
-        if not persona_path:
-            return
-        self.persona_path = persona_path
-        try:
-            self.persona_text = pathlib.Path(persona_path).read_text(encoding="utf-8")
-        except Exception as e:
-            print(f"[WARNING] Failed to load persona file: {persona_path} ({e})")
-            self.persona_text = ""
-    
-    def update_lucim_rules_path(self, rules_path: str) -> None:
-        if not rules_path:
-            return
-        self.lucim_rules_path = rules_path
-        try:
-            self.lucim_rules_text = pathlib.Path(rules_path).read_text(encoding="utf-8")
-        except Exception as e:
-            print(f"[WARNING] Failed to load LUCIM rules file: {rules_path} ({e})")
-            self.lucim_rules_text = ""
-    
     def count_input_tokens(self, instructions: str, input_text: str) -> int:
         """
         Count input tokens exactly using tiktoken for the given model.
@@ -135,7 +121,7 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
             Exact token count for the input
         """
         try:
-            # Get the appropriate encoding for the model, fallback if not recognized
+            # Get the appropriate encoding for the model
             try:
                 encoding = tiktoken.encoding_for_model(self.model)
             except Exception:
@@ -155,104 +141,55 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def correct_plantuml_diagrams(self, plantuml_diagrams: Dict[str, Any],
-                                 audit_data: Dict[str, Any], lucim_dsl_definition: str = None, output_dir: str = None) -> Dict[str, Any]:
+    def write_scenarios(self, lucim_operation_model: Dict[str, Any], lucim_dsl_definition: str, output_dir: str = None) -> Dict[str, Any]:
         """
-        Correct PlantUML sequence diagrams based on non-compliant rules using the PlantUML Corrector persona.
+        Synthesize LUCIM scenarios from mandatory inputs using the LUCIM Scenario Synthesizer persona.
         
         Args:
-            plantuml_diagrams: PlantUML diagrams to correct
-            audit_data: Audit data object from Step 6 including 'non-compliant-rules'
-            lucim_dsl_definition: LUCIM DSL full definition content (MANDATORY)
+            lucim_operation_model: Step 03 LUCIM operation model (required)
+            lucim_dsl_definition: LUCIM DSL full definition (required)
             
         Returns:
-            Dictionary containing reasoning, corrected diagrams, and any errors
+            Dictionary containing reasoning, scenarios, and any errors
         """
         # Validate mandatory inputs
-        if not plantuml_diagrams:
+        if not lucim_operation_model:
             return {
-                "reasoning_summary": "MISSING MANDATORY INPUT: PlantUML diagrams from Step 5 are required",
+                "reasoning_summary": "Missing mandatory input: LUCIM operation model",
                 "data": None,
-                "errors": ["MANDATORY INPUT MISSING: PlantUML diagrams from Step 5 must be provided"],
+                "errors": ["LUCIM operation model is required but not provided"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
             }
         
-        
-        if not audit_data:
+        if not lucim_dsl_definition or lucim_dsl_definition.strip() == "":
             return {
-                "reasoning_summary": "MISSING MANDATORY INPUT: Audit data from Step 6 is required",
+                "reasoning_summary": "Missing mandatory input: LUCIM DSL full definition",
                 "data": None,
-                "errors": ["MANDATORY INPUT MISSING: Audit data with 'non-compliant-rules' from Step 6 must be provided"],
-                "tokens_used": 0,
-                "input_tokens": 0,
-                "output_tokens": 0
-            }
-
-        # Extract non-compliant rules from audit data (support both top-level and nested under data)
-        non_compliant_rules = []
-        if isinstance(audit_data, dict):
-            node = audit_data.get("data") if isinstance(audit_data.get("data"), dict) else audit_data
-            ncr = node.get("non-compliant-rules", [])
-            if isinstance(ncr, list):
-                non_compliant_rules = ncr
-
-        if not non_compliant_rules:
-            # Detect inconsistency: explicit non-compliant verdict but empty rules list
-            verdict_value = None
-            if isinstance(audit_data, dict):
-                node_v = audit_data.get("data") if isinstance(audit_data.get("data"), dict) else audit_data
-                vv = node_v.get("verdict") if isinstance(node_v, dict) else None
-                if isinstance(vv, str):
-                    verdict_value = vv
-            error_msg = "No non-compliant rules present in the provided audit data"
-            if verdict_value and str(verdict_value).lower().startswith("non"):
-                error_msg = "Inconsistent audit data: verdict is non-compliant but 'non-compliant-rules' is empty"
-            return {
-                "reasoning_summary": "No non-compliant rules found in audit data; nothing to correct",
-                "data": None,
-                "errors": [error_msg],
-                "tokens_used": 0,
-                "input_tokens": 0,
-                "output_tokens": 0
-            }
-        
-        if lucim_dsl_definition is None or lucim_dsl_definition.strip() == "":
-            return {
-                "reasoning_summary": "MISSING MANDATORY INPUT: LUCIM DSL content is required",
-                "data": None,
-                "errors": ["MANDATORY INPUT MISSING: LUCIM DSL content must be provided"],
+                "errors": ["LUCIM DSL full definition is required but not provided"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
             }
         
         # Load TASK instruction using utility function
-        task_content = load_task_instruction(7, "PlantUML Corrector")
+        task_content = load_task_instruction(4, "LUCIM Scenario Synthesizer")
 
         # Build canonical instructions order: task_content → persona → LUCIM rules
         instructions = f"{task_content}\n\n{self.persona_text}\n\n{lucim_dsl_definition}"
 
-        # Extract PlantUML text best-effort from provided diagrams
-        original_puml = self._extract_plantuml_text(plantuml_diagrams) if plantuml_diagrams else ""
-
-        # Build input text with required tagged sections
+        # Build input blocks with required tagged sections (without repeating instructions)
         input_text = f"""
-<PLANTUML-DIAGRAM>
-```plantuml
-{original_puml}
-```
-</PLANTUML-DIAGRAM>
-
-<LUCIM-AUDIT-REPORT>
+<LUCIM-OPERATION-MODEL>
 ```json
-{json.dumps(audit_data, indent=2)}
+{json.dumps(lucim_operation_model, indent=2)}
 ```
-</LUCIM-AUDIT-REPORT>
+</LUCIM-OPERATION-MODEL>
+
 """
 
-        # Create single system_prompt variable for both API call and file generation
+        # Build system_prompt with required tagged blocks and inputs
         system_prompt = f"{instructions}\n\n{input_text}"
         
         # Resolve base output directory (per-agent if provided)
@@ -266,7 +203,7 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
         
         try:
             # Create response using OpenAI Responses API
-            api_config = get_reasoning_config("plantuml_corrector")
+            api_config = get_reasoning_config("lucim_scenario_synthesizer")
             # Update reasoning configuration with agent's settings
             if "reasoning" in api_config:
                 api_config["reasoning"]["effort"] = self.reasoning_effort
@@ -276,8 +213,8 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
                 "input": [{"role": "user", "content": system_prompt}]
             })
             
-            # Use unified helper with configured timeout
-            timeout = AGENT_TIMEOUTS.get("plantuml_corrector") if 'AGENT_TIMEOUTS' in globals() or 'AGENT_TIMEOUTS' in locals() else None
+            from utils_config_constants import AGENT_TIMEOUTS
+            timeout = AGENT_TIMEOUTS.get("lucim_scenario_synthesizer")
             response = create_and_wait(self.client, api_config, timeout_seconds=timeout)
             
             # Extract content and reasoning via helpers
@@ -316,32 +253,77 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
                 print(f"[DEBUG] Successfully parsed response as JSON")
                 
                 # Extract and normalize fields from JSON response.
-                # Always save under 'data': if no 'data' key present, wrap top-level object.
-                corrected_diagrams = {}
+                # Always save under 'data' as a LIST of scenario objects:
+                # {
+                #   "data": [ { "scenario": { name, description, messages[] } }, ... ],
+                #   "errors": []
+                # }
+                normalized_data_list: list = []
+                errors = []
                 if isinstance(response_data, dict):
-                    if "data" in response_data and isinstance(response_data["data"], dict):
-                        corrected_diagrams = response_data["data"]
+                    # Capture errors if present
+                    if isinstance(response_data.get("errors"), list):
+                        errors = response_data.get("errors", [])
+
+                    # Preferred: response_data["data"] is a list of items containing {"scenario": {...}}
+                    data_node = response_data.get("data")
+                    if isinstance(data_node, list):
+                        for item in data_node:
+                            if isinstance(item, dict):
+                                if isinstance(item.get("scenario"), dict):
+                                    normalized_data_list.append({"scenario": item["scenario"]})
+                                elif all(k in item for k in ("name", "description", "messages")):
+                                    normalized_data_list.append({"scenario": {
+                                        "name": item.get("name"),
+                                        "description": item.get("description"),
+                                        "messages": item.get("messages", [])
+                                    }})
+                                else:
+                                    # Keep as-is for legacy, wrapped under scenario if possible later
+                                    normalized_data_list.append(item)
+                    elif isinstance(data_node, dict):
+                        # If dict: check for nested scenario or direct fields; then wrap into list
+                        if isinstance(data_node.get("scenario"), dict):
+                            normalized_data_list = [{"scenario": data_node["scenario"]}]
+                        elif all(k in data_node for k in ("name", "description", "messages")):
+                            normalized_data_list = [{"scenario": data_node}]
+                        else:
+                            normalized_data_list = [data_node]
                     else:
-                        corrected_diagrams = response_data
-                errors = response_data.get("errors", []) if isinstance(response_data, dict) else []
+                        # No top-level data: check for direct scenario or direct fields
+                        if isinstance(response_data.get("scenario"), dict):
+                            normalized_data_list = [{"scenario": response_data["scenario"]}]
+                        elif all(k in response_data for k in ("name", "description", "messages")):
+                            normalized_data_list = [{"scenario": {
+                                "name": response_data.get("name"),
+                                "description": response_data.get("description"),
+                                "messages": response_data.get("messages", [])
+                            }}]
+                        else:
+                            # Fallback: keep entire dict (legacy producers)
+                            normalized_data_list = [response_data]
+                else:
+                    # If the response was not a dict, surface a parsing error
+                    errors = ["Unexpected response shape: expected JSON object"]
+                    normalized_data_list = None
 
                 # Extract token usage from response (centralized helper)
                 usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
                 tokens_used = usage.get("total_tokens", 0)
                 input_tokens = usage.get("input_tokens", 0)
-                output_tokens = usage.get("output_tokens", 0)
+                api_output_tokens = usage.get("output_tokens", 0)
                 reasoning_tokens = usage.get("reasoning_tokens", 0)
-                visible_output_tokens = max((output_tokens or 0) - (reasoning_tokens or 0), 0)
-                total_output_tokens = visible_output_tokens + (reasoning_tokens or 0)
+                total_output_tokens = api_output_tokens if api_output_tokens is not None else max((tokens_used or 0) - (input_tokens or 0), 0)
+                visible_output_tokens = max((total_output_tokens or 0) - (reasoning_tokens or 0), 0)
                 usage_dict = usage
 
                 return {
                     "reasoning_summary": reasoning_summary,
-                    "data": corrected_diagrams,
-                    "errors": [],
+                    "data": normalized_data_list,
+                    "errors": errors or [],
                     "tokens_used": tokens_used,
                     "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
+                    "visible_output_tokens": visible_output_tokens,
                     "raw_usage": usage_dict,
                     "reasoning_tokens": reasoning_tokens,
                     "total_output_tokens": total_output_tokens,
@@ -351,7 +333,7 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
                 return {
                     "reasoning_summary": reasoning_summary,
                     "data": None,
-                    "errors": [f"Failed to parse corrected diagrams JSON: {e}", f"Raw response: {content[:200]}..."],
+                    "errors": [f"Failed to parse scenarios JSON: {e}", f"Raw response: {content[:200]}..."],
                     "tokens_used": 0,
                     "input_tokens": 0,
                     "output_tokens": 0,
@@ -378,66 +360,25 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
         # Resolve base output directory (per-agent if provided)
         base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
         
-        # Extract PlantUML diagram text for special file handling
-        diagram_text = self._extract_plantuml_text(results.get("data")) if results.get("data") else None
-        
-        # Prepare special files for unified function
-        special_files = None
-        if diagram_text and "@startuml" in diagram_text and "@enduml" in diagram_text:
-            # Generate timestamp suffix for corrected file
-            timestamp_suffix = f"{self.timestamp}_{self.model.replace('-', '_')}"
-            special_files = {
-                "plantuml_diagram": diagram_text,
-                "corrected": True,
-                "timestamp_suffix": timestamp_suffix,
-                "post_process": False
-            }
-            # Surface the path for orchestrator logging/downstream use
-            corrected_filename = f"{base_name}_{timestamp_suffix}_plantuml_corrector_diagram.puml"
-            results["puml_file"] = str(base_output_dir / corrected_filename)
+        # Optional: Validate data against persona template (shallow)
+        try:
+            template = get_template_for_agent("lucim_scenario_synthesizer")
+            if template is not None:
+                report = validate_data_against_template(results.get("data"), template)
+                if report.get("missing_keys"):
+                    print(f"[WARNING] Data is missing keys from persona template: {report['missing_keys']}")
+        except Exception as e:
+            print(f"[WARNING] Persona template validation failed (lucim_scenario_synthesizer): {e}")
         
         # Use unified function to write all output files
         write_all_output_files(
             output_dir=base_output_dir,
             results=results,
-            agent_type="plantuml_corrector",
+            agent_type="lucim_scenario_synthesizer",
             base_name=base_name,
             model=self.model,
             timestamp=self.timestamp,
             reasoning_effort=self.reasoning_effort,
-            step_number=step_number,
-            special_files=special_files
+            step_number=step_number
         )
 
-    def _extract_plantuml_text(self, data: Dict[str, Any]) -> str:
-        if not isinstance(data, dict):
-            return ""
-        candidate_nodes = []
-        if "typical" in data:
-            candidate_nodes.append(data["typical"])
-        candidate_nodes.extend(list(data.values()))
-
-        def find_in_obj(obj: Any) -> str:
-            if isinstance(obj, str) and "@startuml" in obj:
-                return obj
-            if isinstance(obj, dict):
-                for key in ("plantuml", "diagram", "uml", "content", "text"):
-                    val = obj.get(key)
-                    if isinstance(val, str) and "@startuml" in val:
-                        return val
-                for val in obj.values():
-                    found = find_in_obj(val)
-                    if found:
-                        return found
-            if isinstance(obj, list):
-                for item in obj:
-                    found = find_in_obj(item)
-                    if found:
-                        return found
-            return ""
-
-        for node in candidate_nodes:
-            found = find_in_obj(node)
-            if found:
-                return found.strip()
-        return find_in_obj(data).strip()

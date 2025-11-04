@@ -421,13 +421,34 @@ class OrchestratorUI:
         rule_violations = {}
         
         for run_name, result in all_results.items():
-            if not result or not isinstance(result.get("results"), dict):
+            # Handle different result structures:
+            # - v3-adk: result["results"] = {base_name: processed_results}
+            # - simplified: result["results"] = {base_name: processed_results}
+            # processed_results contains agent results directly
+            if not result:
+                continue
+            
+            # Extract run_results based on structure
+            if isinstance(result.get("results"), dict):
+                # Get the first (and typically only) base_name result
+                inner_results_dict = result["results"]
+                if inner_results_dict:
+                    # Get the actual processed_results from the first entry
+                    run_results = next(iter(inner_results_dict.values()))
+                else:
+                    continue
+            elif isinstance(result, dict):
+                # Direct structure (processed_results)
+                run_results = result
+            else:
+                continue
+                
+            if not isinstance(run_results, dict):
                 continue
                 
             total_runs += 1
-            run_results = result["results"]
             
-            # Check step 6 (plantuml_lucim_auditor) and step 8 (plantuml_lucim_final_auditor)
+            # Check step 4/6 (plantuml_lucim_auditor) and step 6/8 (plantuml_lucim_final_auditor)
             step6_compliant = self._is_audit_compliant(run_results.get("plantuml_lucim_auditor"))
             step8_compliant = self._is_audit_compliant(run_results.get("plantuml_lucim_final_auditor"))
             
@@ -436,20 +457,34 @@ class OrchestratorUI:
                 successful_runs += 1
             
             # Count non-compliant rules for this run
+            # Only count from the final auditor if it exists, otherwise from the initial auditor
             non_compliant_count = 0
-            for step_name in ["plantuml_lucim_auditor", "plantuml_lucim_final_auditor"]:
-                step_result = run_results.get(step_name)
+            final_auditor_result = run_results.get("plantuml_lucim_final_auditor")
+            initial_auditor_result = run_results.get("plantuml_lucim_auditor")
+            
+            # Prefer final auditor, fallback to initial auditor
+            audit_results_to_check = []
+            if final_auditor_result:
+                audit_results_to_check.append(("final", final_auditor_result))
+            elif initial_auditor_result:
+                audit_results_to_check.append(("initial", initial_auditor_result))
+            
+            for audit_type, step_result in audit_results_to_check:
                 if step_result and isinstance(step_result, dict):
                     data = step_result.get("data", {})
                     if isinstance(data, dict):
                         non_compliant_rules = data.get("non-compliant-rules", [])
                         if isinstance(non_compliant_rules, list):
-                            non_compliant_count += len(non_compliant_rules)
-                            
-                            # Track rule violations for frequency analysis
-                            for rule in non_compliant_rules:
-                                if isinstance(rule, str):
-                                    rule_violations[rule] = rule_violations.get(rule, 0) + 1
+                            # Extract rule IDs from rule objects
+                            for rule_obj in non_compliant_rules:
+                                if isinstance(rule_obj, dict):
+                                    rule_id = rule_obj.get("rule")
+                                    if rule_id:
+                                        rule_violations[rule_id] = rule_violations.get(rule_id, 0) + 1
+                                        non_compliant_count += 1
+                                elif isinstance(rule_obj, str):
+                                    rule_violations[rule_obj] = rule_violations.get(rule_obj, 0) + 1
+                                    non_compliant_count += 1
             
             non_compliant_per_run[run_name] = non_compliant_count
         
