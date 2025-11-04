@@ -12,17 +12,16 @@ import tiktoken
 from typing import Dict, Any, Optional
 from google.adk.agents import LlmAgent
 from openai import OpenAI
-from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts, write_all_output_files, write_input_instructions_before_api
+from utils_response_dump import serialize_response_to_dict, write_all_output_files, write_input_instructions_before_api
 from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, format_prompt_for_responses_api
-from utils_config_constants import expected_keys_for_agent
 from utils_task_loader import load_task_instruction
 
 from utils_config_constants import (
-    PERSONA_PLANTUML_AUDITOR, OUTPUT_DIR, LUCIM_RULES_FILE,
-    get_reasoning_config, validate_agent_response, DEFAULT_MODEL, AGENT_TIMEOUTS)
+    PERSONA_LUCIM_PLANTUML_DIAGRAM_AUDITOR, OUTPUT_DIR, LUCIM_RULES_FILE,
+    get_reasoning_config, DEFAULT_MODEL, AGENT_TIMEOUTS)
 
 # Configuration
-PERSONA_FILE = PERSONA_PLANTUML_AUDITOR
+PERSONA_FILE = PERSONA_LUCIM_PLANTUML_DIAGRAM_AUDITOR
 WRITE_FILES = True
 
 

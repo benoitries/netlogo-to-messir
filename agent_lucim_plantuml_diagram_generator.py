@@ -11,20 +11,18 @@ import pathlib
 import tiktoken
 from typing import Dict, Any, Optional
 from utils_config_constants import (
-    PERSONA_PLANTUML_WRITER, OUTPUT_DIR, LUCIM_RULES_FILE,
-    get_reasoning_config, validate_agent_response, DEFAULT_MODEL)
+    PERSONA_LUCIM_PLANTUML_DIAGRAM_GENERATOR, OUTPUT_DIR, LUCIM_RULES_FILE,
+    get_reasoning_config, DEFAULT_MODEL)
 
 from google.adk.agents import LlmAgent
 from openai import OpenAI
 from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens, format_prompt_for_responses_api
-from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts, write_all_output_files, write_input_instructions_before_api
+from utils_response_dump import serialize_response_to_dict, write_all_output_files, write_input_instructions_before_api
 from utils_schema_loader import get_template_for_agent, validate_data_against_template
-from utils_config_constants import expected_keys_for_agent
-from utils_logging import write_reasoning_md_from_payload
 from utils_task_loader import load_task_instruction
 
 # Configuration
-PERSONA_FILE = PERSONA_PLANTUML_WRITER
+PERSONA_FILE = PERSONA_LUCIM_PLANTUML_DIAGRAM_GENERATOR
 
 WRITE_FILES = True
 

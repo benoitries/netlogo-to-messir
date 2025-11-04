@@ -20,7 +20,8 @@ from typing import Dict, Any
 import os
 
 # Fail fast on unsupported Python versions
-if sys.version_info < (3, 10):
+# This check is necessary at runtime even if the linter runs on Python 3.10+
+if sys.version_info < (3, 10):  # noqa: SIM108
     raise RuntimeError(
         f"Python 3.10+ is required to run this orchestrator. Detected: {sys.version.split()[0]}"
     )
