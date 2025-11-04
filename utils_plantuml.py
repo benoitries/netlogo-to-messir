@@ -47,13 +47,7 @@ def clean_plantuml_escapes(content: str) -> str:
         cleaned
     )
     
-    # 3. Remove invalid color codes from activate commands
-    # Pattern: activate participant #invalidcolor -> activate participant
-    cleaned = re.sub(
-        r'activate\s+(\w+)\s+#[0-9A-Fa-f]{6}',
-        r'activate \1',
-        cleaned
-    )
+    # Preserve activation color codes (no removal). Colors like #RRGGBB are valid and must be kept.
     
     # 4. Clean any remaining escaped quotes in message parameters
     # Pattern: message(\\"param\\") -> message("param")
@@ -119,10 +113,7 @@ def validate_plantuml_syntax(content: str) -> Tuple[bool, List[str]]:
     if escaped_quote_count > 5:  # Allow some escaped quotes but flag excessive amounts
         issues.append(f"Contains {escaped_quote_count} escaped quotes that should be cleaned")
     
-    # Check for invalid color codes in activate commands
-    invalid_colors = re.findall(r'activate\s+\w+\s+#[0-9A-Fa-f]{6}', content)
-    if invalid_colors:
-        issues.append(f"Invalid color codes in activate commands: {invalid_colors}")
+    # Do not treat activation color codes as invalid; they are allowed and expected
     
     # Check for basic participant syntax
     participant_lines = [line for line in content.split('\n') if 'participant' in line]
@@ -159,10 +150,7 @@ def clean_plantuml_file(file_path: pathlib.Path) -> Tuple[bool, List[str]]:
             # Log what changes were made
             if '\\"' in original_content and '\\"' not in cleaned_content:
                 changes_made.append("Removed escaped quotes from participant declarations")
-            
-            if re.search(r'activate\s+\w+\s+#[0-9A-Fa-f]{6}', original_content):
-                changes_made.append("Removed invalid color codes from activate commands")
-            
+                        
             if re.search(r'\\"', original_content):
                 changes_made.append("Cleaned escaped quotes in JSON parameters")
         

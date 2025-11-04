@@ -289,15 +289,9 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
                 response_data = json.loads(content_clean)
                 print(f"[DEBUG] Successfully parsed response as JSON")
                 
-                # Extract and normalize fields from JSON response.
-                # Always save under 'data': if no 'data' key present, wrap top-level object.
-                audit_results = {}
-                if isinstance(response_data, dict):
-                    if "data" in response_data and isinstance(response_data["data"], dict):
-                        audit_results = response_data["data"]
-                    else:
-                        audit_results = response_data
-                errors = response_data.get("errors", []) if isinstance(response_data, dict) else []
+                # Normalize to persona-defined auditor schema (top-level {data:{...}, errors:[]})
+                from utils_auditor_schema import normalize_auditor_like_response
+                normalized = normalize_auditor_like_response(response_data)
 
                 # Extract token usage from response (centralized helper)
                 from utils_openai_client import get_usage_tokens
@@ -312,8 +306,8 @@ class NetLogoPlantUMLLUCIMAuditorAgent(LlmAgent):
 
                 return {
                     "reasoning_summary": reasoning_summary,
-                    "data": audit_results,
-                    "errors": errors,
+                    "data": normalized.get("data"),
+                    "errors": normalized.get("errors", []),
                     "tokens_used": tokens_used,
                     "input_tokens": input_tokens,
                     "visible_output_tokens": visible_output_tokens,

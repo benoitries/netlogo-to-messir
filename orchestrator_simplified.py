@@ -4,6 +4,7 @@ NetLogo Orchestrator Agent - Simplified Version
 Orchestrates the processing of NetLogo files using a simplified 8-stage pipeline.
 """
 
+import sys
 import os
 import asyncio
 import json
@@ -12,6 +13,12 @@ import pathlib
 import time
 import logging
 from typing import Dict, Any, List, Optional
+
+# Fail fast on unsupported Python versions (some dependencies require >= 3.10)
+if sys.version_info < (3, 10):
+    raise RuntimeError(
+        f"Python 3.10+ is required to run this orchestrator. Detected: {sys.version.split()[0]}"
+    )
 
 from agent_1_netlogo_abstract_syntax_extractor import NetLogoAbstractSyntaxExtractorAgent
 from agent_2a_netlogo_interface_image_analyzer import NetLogoInterfaceImageAnalyzerAgent

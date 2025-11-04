@@ -137,9 +137,13 @@ HEARTBEAT_SECONDS = 30  # periodic log while waiting
 
 def ensure_directories():
     """Ensure all required directories exist"""
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    INPUT_NETLOGO_DIR.mkdir(exist_ok=True)
-    INPUT_PERSONA_DIR.mkdir(exist_ok=True)
+    for path in (OUTPUT_DIR, INPUT_NETLOGO_DIR, INPUT_PERSONA_DIR):
+        try:
+            if not path.exists():
+                path.mkdir(parents=True, exist_ok=True)
+        except FileExistsError:
+            # Path may be an existing symlink or file; do not attempt to mkdir
+            pass
     # INPUT_VALID_EXAMPLES_DIR is a symlink, don't try to create it
 
 

@@ -22,7 +22,6 @@ from utils_schema_loader import get_template_for_agent, validate_data_against_te
 from utils_config_constants import expected_keys_for_agent
 from utils_logging import write_reasoning_md_from_payload
 from utils_task_loader import load_task_instruction
-from utils_plantuml import process_plantuml_file
 
 # Configuration
 PERSONA_FILE = PERSONA_PLANTUML_WRITER
@@ -441,8 +440,7 @@ class NetLogoPlantUMLWriterAgent(LlmAgent):
         special_files = None
         if diagram_text and "@startuml" in diagram_text and "@enduml" in diagram_text:
             special_files = {
-                "plantuml_diagram": diagram_text,
-                "post_process": True
+                "plantuml_diagram": diagram_text
             }
             # Surface the path for orchestrator logging/downstream use
             results["puml_file"] = str(base_output_dir / "diagram.puml")

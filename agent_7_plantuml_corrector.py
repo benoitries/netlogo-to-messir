@@ -190,18 +190,29 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
                 "output_tokens": 0
             }
 
-        # Extract non-compliant rules from audit data
+        # Extract non-compliant rules from audit data (support both top-level and nested under data)
         non_compliant_rules = []
         if isinstance(audit_data, dict):
-            ncr = audit_data.get("non-compliant-rules", [])
+            node = audit_data.get("data") if isinstance(audit_data.get("data"), dict) else audit_data
+            ncr = node.get("non-compliant-rules", [])
             if isinstance(ncr, list):
                 non_compliant_rules = ncr
 
         if not non_compliant_rules:
+            # Detect inconsistency: explicit non-compliant verdict but empty rules list
+            verdict_value = None
+            if isinstance(audit_data, dict):
+                node_v = audit_data.get("data") if isinstance(audit_data.get("data"), dict) else audit_data
+                vv = node_v.get("verdict") if isinstance(node_v, dict) else None
+                if isinstance(vv, str):
+                    verdict_value = vv
+            error_msg = "No non-compliant rules present in the provided audit data"
+            if verdict_value and str(verdict_value).lower().startswith("non"):
+                error_msg = "Inconsistent audit data: verdict is non-compliant but 'non-compliant-rules' is empty"
             return {
                 "reasoning_summary": "No non-compliant rules found in audit data; nothing to correct",
                 "data": None,
-                "errors": ["No non-compliant rules present in the provided audit data"],
+                "errors": [error_msg],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
@@ -379,7 +390,7 @@ class NetLogoPlantUMLLUCIMCorrectorAgent(LlmAgent):
                 "plantuml_diagram": diagram_text,
                 "corrected": True,
                 "timestamp_suffix": timestamp_suffix,
-                "post_process": True
+                "post_process": False
             }
             # Surface the path for orchestrator logging/downstream use
             corrected_filename = f"{base_name}_{timestamp_suffix}_plantuml_corrector_diagram.puml"
