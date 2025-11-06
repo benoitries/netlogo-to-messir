@@ -11,7 +11,7 @@ import pathlib
 import datetime
 from typing import Optional
 from utils_config_constants import OUTPUT_DIR
-from utils_path import get_run_base_dir
+from utils_path import get_run_base_dir, sanitize_path_component
 
 def _stringify(obj) -> str:
     """Safely stringify arbitrary objects for Markdown output."""
@@ -170,7 +170,9 @@ def setup_orchestration_logger(base_name: str, model_name: str, timestamp: str, 
     # New format: output/runs/<YYYY-MM-DD>/<HHMM>-<persona-set>[-<version>]/<case>-<model>-reason-<effort>-verb-<verbosity>/<case>_<timestamp>_<model>_orchestrator.log
     run_dir = get_run_base_dir(timestamp, base_name, model_name, reasoning_effort, text_verbosity, persona_set, version)
     run_dir.mkdir(parents=True, exist_ok=True)
-    log_filename = f"{base_name}_{timestamp}_{model_name}_orchestrator.log"
+    # Sanitize model name for filesystem safety in filename
+    model_safe = sanitize_path_component(model_name)
+    log_filename = f"{base_name}_{timestamp}_{model_safe}_orchestrator.log"
     log_file = run_dir / log_filename
     
     file_handler = logging.FileHandler(log_file, encoding='utf-8')

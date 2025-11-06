@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
 """
-Test script for the simplified orchestrator.
+Legacy simplified orchestrator test replaced to use Orchestrator V3 ADK.
 """
 
 import asyncio
 import sys
-import pytest
-try:
-    from orchestrator_simplified import NetLogoOrchestratorSimplified
-except Exception:
-    pytest.skip("orchestrator_simplified module not available; skipping test_simplified_orchestrator", allow_module_level=True)
+from orchestrator_persona_v3_adk import NetLogoOrchestratorPersonaV3ADK
+from utils_orchestrator_v3_agent_config import update_agent_configs
 
 
-async def test_simplified_orchestrator():
-    """Test the simplified orchestrator with a basic case."""
+async def test_v3_adk_orchestrator():
+    """Smoke test for the V3 ADK orchestrator with a basic case."""
     
-    print("🧪 Testing Simplified Orchestrator")
+    print("🧪 Testing Orchestrator V3 ADK")
     print("="*50)
     
     # Test with a simple case
@@ -23,11 +20,10 @@ async def test_simplified_orchestrator():
     
     try:
         # Create orchestrator with persona set to avoid interactive prompt
-        orchestrator = NetLogoOrchestratorSimplified(model_name="gpt-5-mini", persona_set="persona-v1")
+        orchestrator = NetLogoOrchestratorPersonaV3ADK(model_name="gpt-5-mini")
         
         # Configure for low effort to speed up testing
-        orchestrator.update_reasoning_config("low", "auto")
-        orchestrator.update_text_config("medium")
+        update_agent_configs(orchestrator, reasoning_effort="low", reasoning_summary="auto", text_verbosity="medium")
         
         print(f"✅ Orchestrator created successfully")
         print(f"📁 Processing base name: {base_name}")
@@ -54,9 +50,9 @@ async def test_simplified_orchestrator():
 
 async def main():
     """Main test function."""
-    print("🚀 Starting Simplified Orchestrator Test")
+    print("🚀 Starting Orchestrator V3 ADK Test")
     
-    success = await test_simplified_orchestrator()
+    success = await test_v3_adk_orchestrator()
     
     if success:
         print("\n🎉 All tests passed!")

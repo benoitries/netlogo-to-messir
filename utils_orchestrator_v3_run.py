@@ -24,9 +24,9 @@ async def run_orchestrator_v3(orchestrator_instance, base_name: str) -> Dict[str
     Returns:
         Dictionary containing all processing results
     """
-    tv = orchestrator_instance.agent_configs["lucim_operation_synthesizer"].get("text_verbosity", "medium")
-    reff = orchestrator_instance.agent_configs["lucim_operation_synthesizer"].get("reasoning_effort", "medium")
-    rsum = orchestrator_instance.agent_configs["lucim_operation_synthesizer"].get("reasoning_summary", "auto")
+    tv = orchestrator_instance.agent_configs["lucim_operation_model_generator"].get("text_verbosity", "medium")
+    reff = orchestrator_instance.agent_configs["lucim_operation_model_generator"].get("reasoning_effort", "medium")
+    rsum = orchestrator_instance.agent_configs["lucim_operation_model_generator"].get("reasoning_summary", "auto")
     
     orchestrator_instance.logger = setup_orchestration_logger(
         base_name, orchestrator_instance.model, orchestrator_instance.timestamp,
@@ -67,24 +67,28 @@ def finalize_run_results(orchestrator_instance, base_name: str, files: list, res
     orchestrator_instance.logger.info(f"\n{'='*60}\nORCHESTRATION SUMMARY FOR: {base_name}\n{'='*60}")
     
     final_result = results.get(base_name, {})
+    # Some failure paths wrap actual step outputs under "results".
+    # Use the inner dict for logging when present so audits are not N/A.
+    effective_results = final_result.get("results", final_result) if isinstance(final_result, dict) else {}
     orchestrator_instance.orchestrator_logger.log_execution_timing(orchestrator_instance.execution_times)
-    orchestrator_instance.orchestrator_logger.log_detailed_agent_status(final_result)
+    orchestrator_instance.orchestrator_logger.log_detailed_agent_status(effective_results)
+    orchestrator_instance.orchestrator_logger.log_audit_analysis(effective_results)
     orchestrator_instance.orchestrator_logger.log_output_files(
-        base_name, orchestrator_instance.timestamp, orchestrator_instance.model, final_result
+        base_name, orchestrator_instance.timestamp, orchestrator_instance.model, effective_results
     )
     
-    successful_agents = sum(1 for key, value in final_result.items() 
+    successful_agents = sum(1 for key, value in effective_results.items() 
                            if isinstance(value, dict) and value.get("data") is not None)
-    total_agents = len([k for k in final_result.keys() 
+    total_agents = len([k for k in effective_results.keys() 
                        if k not in ["execution_times", "token_usage", "detailed_timing"]])
     
-    final_compliance = extract_compliance_from_results(final_result)
+    final_compliance = extract_compliance_from_results(effective_results)
     orchestrator_instance.orchestrator_logger.log_pipeline_completion(successful_agents, total_agents, final_compliance)
     orchestrator_instance.orchestrator_logger.log_compliance_status(final_compliance)
 
     # Auditor metrics (step 6 vs step 8)
-    initial_audit = final_result.get("plantuml_lucim_auditor") or {}
-    final_audit = final_result.get("plantuml_lucim_final_auditor") or {}
+    initial_audit = effective_results.get("lucim_plantuml_diagram_auditor") or {}
+    final_audit = {}
     if isinstance(initial_audit, dict) and isinstance(final_audit, dict) and initial_audit and final_audit:
         orchestrator_instance.orchestrator_logger.log_auditor_metrics(initial_audit, final_audit)
 

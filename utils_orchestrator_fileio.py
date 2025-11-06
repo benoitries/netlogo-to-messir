@@ -6,7 +6,13 @@ File I/O operations and path management for the NetLogo orchestrator.
 
 import pathlib
 from typing import Dict, Any, List, Optional
-from utils_config_constants import INPUT_NETLOGO_DIR, LUCIM_RULES_FILE
+from utils_config_constants import (
+    INPUT_NETLOGO_DIR,
+    DEFAULT_PERSONA_SET,
+    RULES_LUCIM_OPERATION_MODEL,
+    RULES_LUCIM_SCENARIO,
+    RULES_LUCIM_PLANTUML_DIAGRAM,
+)
 from utils_path import get_run_base_dir
 
 
@@ -55,21 +61,26 @@ class OrchestratorFileIO:
     
     
     
-    def load_lucim_dsl_content(self) -> str:
-        """
-        Load LUCIM DSL content from the rules file.
-        
-        Returns:
-            LUCIM DSL content as string
-        """
+    def load_rules_operation_model(self) -> str:
         try:
-            lucim_dsl_content = LUCIM_RULES_FILE.read_text(encoding="utf-8")
-            return lucim_dsl_content
+            return RULES_LUCIM_OPERATION_MODEL.read_text(encoding="utf-8")
         except FileNotFoundError:
-            raise FileNotFoundError(f"MANDATORY INPUT MISSING: LUCIM DSL file not found: {LUCIM_RULES_FILE}")
+            raise FileNotFoundError(f"MANDATORY INPUT MISSING: Operation Model rules not found: {RULES_LUCIM_OPERATION_MODEL}")
+
+    def load_rules_scenario(self) -> str:
+        try:
+            return RULES_LUCIM_SCENARIO.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            raise FileNotFoundError(f"MANDATORY INPUT MISSING: Scenario rules not found: {RULES_LUCIM_SCENARIO}")
+
+    def load_rules_diagram(self) -> str:
+        try:
+            return RULES_LUCIM_PLANTUML_DIAGRAM.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            raise FileNotFoundError(f"MANDATORY INPUT MISSING: Diagram rules not found: {RULES_LUCIM_PLANTUML_DIAGRAM}")
        
     def create_run_directory(self, timestamp: str, base_name: str, model: str, 
-                           reasoning_effort: str, text_verbosity: str, persona_set: str = "persona-v1",
+                           reasoning_effort: str, text_verbosity: str, persona_set: str = DEFAULT_PERSONA_SET,
                            version: Optional[str] = None) -> pathlib.Path:
         """
         Create the run directory for a specific orchestration.
@@ -80,7 +91,7 @@ class OrchestratorFileIO:
             model: Model name
             reasoning_effort: Reasoning effort level
             text_verbosity: Text verbosity level
-            persona_set: Persona set name (default: persona-v1)
+            persona_set: Persona set name (default: DEFAULT_PERSONA_SET)
             version: Optional orchestrator version (e.g., "v2", "v3-no-adk", "v3-adk")
             
         Returns:
@@ -123,7 +134,7 @@ class OrchestratorFileIO:
         except Exception as e:
             raise Exception(f"Error reading code file: {e}")
     
-    def validate_mandatory_inputs(self, base_name: str, model: str) -> Dict[str, Any]:
+    def validate_mandatory_inputs(self, base_name: str, model: str, persona_set: str = DEFAULT_PERSONA_SET) -> Dict[str, Any]:
         """
         Validate that all mandatory inputs are available.
         
@@ -146,10 +157,11 @@ class OrchestratorFileIO:
             validation_results["valid"] = False
             validation_results["errors"].append(f"No NetLogo files found for base name '{base_name}'")
         
-        # Check for LUCIM DSL file
-        if not LUCIM_RULES_FILE.exists():
-            validation_results["valid"] = False
-            validation_results["errors"].append(f"MANDATORY INPUT MISSING: LUCIM DSL file not found: {LUCIM_RULES_FILE}")
+        # Check for stage-specific rules files
+        for required_rules in (RULES_LUCIM_OPERATION_MODEL, RULES_LUCIM_SCENARIO, RULES_LUCIM_PLANTUML_DIAGRAM):
+            if not required_rules.exists():
+                validation_results["valid"] = False
+                validation_results["errors"].append(f"MANDATORY INPUT MISSING: Rules file not found: {required_rules}")
         
         
         return validation_results
@@ -174,16 +186,14 @@ class OrchestratorFileIO:
         Args:
             run_dir: Base run directory
         """
-        # Create directories for all 8 steps
+        # Create directories for the 6-step v3 workflow
         step_agents = [
-            (1, "netlogo_abstract_syntax_extractor"),
-            (2, "behavior_extractor"),
-            (3, "lucim_operation_synthesizer"),
-            (4, "lucim_scenario_synthesizer"),
-            (5, "plantuml_writer"),
-            (6, "plantuml_lucim_auditor"),
-            (7, "plantuml_lucim_corrector"),
-            (8, "plantuml_lucim_final_auditor")
+            (1, "lucim_operation_model_generator"),
+            (2, "lucim_operation_model_auditor"),
+            (3, "lucim_scenario_generator"),
+            (4, "lucim_scenario_auditor"),
+            (5, "lucim_plantuml_diagram_generator"),
+            (6, "lucim_plantuml_diagram_auditor"),
         ]
         
         for step_number, agent_name in step_agents:
@@ -241,22 +251,22 @@ class OrchestratorFileIO:
             "agent_type": agent_type
         }
         
-        # Add specific file patterns based on agent type
-        if agent_type == "netlogo_abstract_syntax_extractor":
-            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_1a_netlogo_abstract_syntax_extractor_v1_*.md"
-        elif agent_type == "behavior_extractor":
-            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_1b_behavior_extractor_v1_*.json/md"
-        elif agent_type == "lucim_operation_synthesizer":
-            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_3_lucim_operation_synthesizer_v1_*.json/md"
-        elif agent_type == "lucim_scenario_synthesizer":
-            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_3_scenario_v1_*.md"
-        elif agent_type == "plantuml_writer":
-            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_4_plantuml_*.json/md/.puml"
-        elif agent_type == "plantuml_lucim_auditor":
-            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_5_lucim_audit_*.json/md/.puml"
-        elif agent_type == "plantuml_lucim_corrector":
-            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_7_lucim_corrector_*.json/md/.puml"
-        elif agent_type == "plantuml_lucim_final_auditor":
-            file_info["pattern"] = f"{base_name}_{timestamp}_{model}_8_lucim_final_auditor_*.json/md/.puml"
+        # Add file discovery hints based on agent type (v3 standardized artifacts)
+        # Note: New pipeline writes canonical filenames inside stage folders:
+        # - output-response.json, output-reasoning.md, output-data.json
+        # - diagram.puml (PlantUML generator only)
+        if agent_type == "lucim_operation_model_generator":
+            file_info["pattern"] = "output-data.json"
+        elif agent_type == "lucim_operation_model_auditor":
+            file_info["pattern"] = "output-data.json"
+        elif agent_type == "lucim_scenario_generator":
+            file_info["pattern"] = "output-data.json"
+        elif agent_type == "lucim_scenario_auditor":
+            file_info["pattern"] = "output-data.json"
+        elif agent_type == "lucim_plantuml_diagram_generator":
+            # Prefer the diagram; JSON artifacts also exist
+            file_info["pattern"] = "*.puml"
+        elif agent_type == "lucim_plantuml_diagram_auditor":
+            file_info["pattern"] = "output-data.json"
         
         return file_info

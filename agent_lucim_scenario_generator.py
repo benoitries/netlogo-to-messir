@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-NetLogo LUCIM Scenario Synthesizer Agent using OpenAI models
-Synthesizes LUCIM scenarios from LUCIM concepts using OpenAI models.
+NetLogo LUCIM Scenario Generator Agent using OpenAI models
+Generates LUCIM scenarios from NetLogo source using OpenAI models.
 """
 
-import os
 import json
 import datetime
 import pathlib
@@ -13,15 +12,13 @@ from typing import Dict, Any
 from google.adk.agents import LlmAgent
 from openai import OpenAI
 from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens, format_prompt_for_responses_api
-from utils_response_dump import serialize_response_to_dict, verify_exact_keys, write_minimal_artifacts, write_all_output_files, write_input_instructions_before_api
+from utils_response_dump import serialize_response_to_dict,write_all_output_files, write_input_instructions_before_api
 from utils_schema_loader import get_template_for_agent, validate_data_against_template
-from utils_config_constants import expected_keys_for_agent
-from utils_logging import write_reasoning_md_from_payload
-from utils_task_loader import load_task_instruction
 
 from utils_config_constants import (
-    PERSONA_LUCIM_SCENARIO_GENERATOR, OUTPUT_DIR, LUCIM_RULES_FILE,
-    get_reasoning_config, validate_agent_response, DEFAULT_MODEL)
+    PERSONA_LUCIM_SCENARIO_GENERATOR, OUTPUT_DIR,
+    get_reasoning_config, DEFAULT_MODEL, RULES_LUCIM_SCENARIO)
+from utils_path import sanitize_agent_name
 
 # Configuration
 PERSONA_FILE = PERSONA_LUCIM_SCENARIO_GENERATOR
@@ -30,9 +27,6 @@ WRITE_FILES = True
 # Load persona and LUCIM rules (instance-level will be set in __init__)
 
 
-def sanitize_model_name(model_name: str) -> str:
-    """Sanitize model name by replacing hyphens with underscores for valid identifier."""
-    return model_name.replace("-", "_")
 
 class LUCIMScenarioGeneratorAgent(LlmAgent):
     model: str = DEFAULT_MODEL
@@ -45,12 +39,13 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
     text_verbosity: str = "medium"
     persona_path: str = ""
     persona_text: str = ""
+    lucim_rules_path: str = ""
+    lucim_rules_text: str = ""
     
     def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
-        sanitized_name = sanitize_model_name(model_name)
         super().__init__(
-            name=f"netlogo_lucim_scenario_synthesizer_agent_{sanitized_name}",
-            description="LUCIM scenario synthesizer agent for NetLogo models"
+            name=f"netlogo_lucim_scenario_generator_agent_{sanitize_agent_name(model_name)}",
+            description="LUCIM scenario generator agent"
         )
         self.model = model_name
         
@@ -61,15 +56,21 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
             # Format: YYYYMMDD_HHMM for better readability
             self.timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
         
-        # Configure OpenAI client (assumes key already validated by orchestrator)
-        from utils_config_constants import OPENAI_API_KEY
-        self.client = OpenAI(api_key=OPENAI_API_KEY)
+        # Configure OpenAI client with automatic provider detection based on model
+        from utils_openai_client import get_openai_client_for_model
+        self.client = get_openai_client_for_model(self.model)
         # Initialize persona from default; orchestrator may override
         try:
             self.persona_path = str(PERSONA_FILE)
             self.persona_text = pathlib.Path(self.persona_path).read_text(encoding="utf-8")
         except Exception:
             self.persona_text = ""
+        # Load scenario rules from centralized constant (fallback used if caller does not pass them)
+        try:
+            self.lucim_rules_path = str(RULES_LUCIM_SCENARIO)
+            self.lucim_rules_text = pathlib.Path(self.lucim_rules_path).read_text(encoding="utf-8")
+        except Exception:
+            self.lucim_rules_text = ""
     
     def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
         """
@@ -141,13 +142,15 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def write_scenarios(self, lucim_operation_model: Dict[str, Any], lucim_dsl_definition: str, output_dir: str = None) -> Dict[str, Any]:
+    def generate_scenarios(self, lucim_operation_model: Dict[str, Any], scenario_rules_text: str, scenario_auditor_feedback: Dict[str, Any], previous_scenario: Dict[str, Any] | list | None, output_dir: str = None) -> Dict[str, Any]:
         """
-        Synthesize LUCIM scenarios from mandatory inputs using the LUCIM Scenario Synthesizer persona.
+        Generate LUCIM scenarios from mandatory inputs using the LUCIM Scenario Generator persona.
         
         Args:
             lucim_operation_model: Step 03 LUCIM operation model (required)
-            lucim_dsl_definition: LUCIM DSL full definition (required)
+            scenario_rules_text: Scenario rules content (RULES_LUCIM_Scenario.md). If empty, agent uses its internal fallback copy.
+            scenario_auditor_feedback: Audit report from Scenario Auditor (required parameter but may be empty on first run)
+            previous_scenario: Last LUCIM Scenario produced by Scenario Generator (required parameter but may be empty on first run)
             
         Returns:
             Dictionary containing reasoning, scenarios, and any errors
@@ -162,22 +165,21 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
                 "input_tokens": 0,
                 "output_tokens": 0
             }
-        
-        if not lucim_dsl_definition or lucim_dsl_definition.strip() == "":
+        if not self.persona_text or self.persona_text.strip() == "":
             return {
-                "reasoning_summary": "Missing mandatory input: LUCIM DSL full definition",
+                "reasoning_summary": "Missing mandatory input: Persona for Scenario Generator",
                 "data": None,
-                "errors": ["LUCIM DSL full definition is required but not provided"],
+                "errors": ["Persona PSN_LUCIM_Scenario_Generator.md is required but not provided"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
             }
         
-        # Load TASK instruction using utility function
-        task_content = load_task_instruction(4, "LUCIM Scenario Synthesizer")
-
-        # Build canonical instructions order: task_content → persona → LUCIM rules
-        instructions = f"{task_content}\n\n{self.persona_text}\n\n{lucim_dsl_definition}"
+        # Prefer provided rules text; fallback to internally loaded rules content
+        effective_rules = scenario_rules_text if (isinstance(scenario_rules_text, str) and scenario_rules_text.strip()) else self.lucim_rules_text
+        # Build canonical instructions: persona + explicit scenario rules
+        # Note: No <LUCIM-DSL-DESCRIPTION> is required or injected anywhere.
+        instructions = f"{self.persona_text}\n\n{effective_rules}".strip()
 
         # Build input blocks with required tagged sections (without repeating instructions)
         input_text = f"""
@@ -188,6 +190,17 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
 </LUCIM-OPERATION-MODEL>
 
 """
+        # Attach auditor feedback and previous scenario if provided (allowed to be empty on first run)
+        try:
+            if isinstance(scenario_auditor_feedback, dict):
+                input_text += ("\n<SCENARIO-AUDITOR-FEEDBACK>\n" "```json\n" + json.dumps(scenario_auditor_feedback, indent=2) + "\n```\n" "</SCENARIO-AUDITOR-FEEDBACK>\n")
+        except Exception:
+            pass
+        try:
+            if previous_scenario is not None:
+                input_text += ("\n<PREVIOUS-LUCIM-SCENARIO>\n" "```json\n" + json.dumps(previous_scenario, indent=2) + "\n```\n" "</PREVIOUS-LUCIM-SCENARIO>\n")
+        except Exception:
+            pass
 
         # Build system_prompt with required tagged blocks and inputs
         system_prompt = f"{instructions}\n\n{input_text}"
@@ -203,7 +216,9 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
         
         try:
             # Create response using OpenAI Responses API
-            api_config = get_reasoning_config("lucim_scenario_synthesizer")
+            api_config = get_reasoning_config("lucim_scenario_generator")
+            # Force the run-selected model (overrides DEFAULT_MODEL from configs)
+            api_config["model"] = self.model
             # Update reasoning configuration with agent's settings
             if "reasoning" in api_config:
                 api_config["reasoning"]["effort"] = self.reasoning_effort
@@ -214,7 +229,7 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
             })
             
             from utils_config_constants import AGENT_TIMEOUTS
-            timeout = AGENT_TIMEOUTS.get("lucim_scenario_synthesizer")
+            timeout = AGENT_TIMEOUTS.get("lucim_scenario_generator")
             response = create_and_wait(self.client, api_config, timeout_seconds=timeout)
             
             # Extract content and reasoning via helpers
@@ -341,13 +356,15 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
                 }
                 
         except Exception as e:
+            from utils_openai_client import build_error_raw_payload
             return {
                 "reasoning_summary": f"Error during model inference: {e}",
                 "data": None,
                 "errors": [f"Model inference error: {e}", f"Model used: {self.model}"],
                 "tokens_used": 0,
                 "input_tokens": 0,
-                "output_tokens": 0
+                "output_tokens": 0,
+                "raw_response": build_error_raw_payload(e)
             }
     
 
@@ -362,19 +379,19 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
         
         # Optional: Validate data against persona template (shallow)
         try:
-            template = get_template_for_agent("lucim_scenario_synthesizer")
+            template = get_template_for_agent("lucim_scenario_generator")
             if template is not None:
                 report = validate_data_against_template(results.get("data"), template)
                 if report.get("missing_keys"):
                     print(f"[WARNING] Data is missing keys from persona template: {report['missing_keys']}")
         except Exception as e:
-            print(f"[WARNING] Persona template validation failed (lucim_scenario_synthesizer): {e}")
+            print(f"[WARNING] Persona template validation failed (lucim_scenario_generator): {e}")
         
         # Use unified function to write all output files
         write_all_output_files(
             output_dir=base_output_dir,
             results=results,
-            agent_type="lucim_scenario_synthesizer",
+            agent_type="lucim_scenario_generator",
             base_name=base_name,
             model=self.model,
             timestamp=self.timestamp,

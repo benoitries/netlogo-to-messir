@@ -10,28 +10,23 @@ from pathlib import Path
 from typing import Dict, Set
 
 # Import API key utility for automatic .env loading
-from utils_api_key import get_openai_api_key
+from utils_api_key import get_api_key_for_model
 
 # Base directory (parent of this file)
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 
-# OpenAI API configuration - automatically loads from .env files
-try:
-    OPENAI_API_KEY = get_openai_api_key()
-except ValueError as e:
-    print(f"Warning: {e}")
-    OPENAI_API_KEY = None
+# OpenAI/Gemini/Router API key is selected based on the chosen model (set after DEFAULT_MODEL)
 
-# Input directories - use environment variables if set, otherwise use default paths
-INPUT_NETLOGO_DIR = Path(os.getenv("INPUT_NETLOGO_DIR", BASE_DIR / "input-netlogo"))
-INPUT_VALID_EXAMPLES_DIR = Path(os.getenv("INPUT_VALID_EXAMPLES_DIR", BASE_DIR / "input-valid-examples"))
-INPUT_PERSONA_DIR = Path(os.getenv("INPUT_PERSONA_DIR", BASE_DIR / "input-persona"))
+# Input directories
+INPUT_NETLOGO_DIR = Path(BASE_DIR / "input-netlogo")
+INPUT_VALID_EXAMPLES_DIR = Path(BASE_DIR / "input-valid-examples")
+INPUT_PERSONA_DIR = Path(BASE_DIR / "input-persona")
 
 # Output directory
 OUTPUT_DIR = BASE_DIR / "output"
 
 # Default persona set
-DEFAULT_PERSONA_SET = "persona-v2-after-ng-meeting"
+DEFAULT_PERSONA_SET = "persona-v3-limited-agents"
 
 # Persona files (default to DEFAULT_PERSONA_SET)
 PERSONA_LUCIM_OPERATION_MODEL_GENERATOR = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_LUCIM_Operation_Model_Generator.md"
@@ -42,7 +37,10 @@ PERSONA_LUCIM_PLANTUML_DIAGRAM_GENERATOR = INPUT_PERSONA_DIR / DEFAULT_PERSONA_S
 PERSONA_LUCIM_PLANTUML_DIAGRAM_AUDITOR = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "PSN_LUCIM_PlantUML_Diagram_Auditor.md"
 
 # Rules files (default to DEFAULT_PERSONA_SET)
-LUCIM_RULES_FILE = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "DSL_Target_LUCIM-full-definition-for-compliance.md"
+RULES_LUCIM_OPERATION_MODEL = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "RULES_LUCIM_Operation_model.md"
+RULES_LUCIM_SCENARIO = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "RULES_LUCIM_Scenario.md"
+RULES_LUCIM_PLANTUML_DIAGRAM = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "RULES_LUCIM_PlantUML_Diagram.md"
+RULES_MAPPING_NETLOGO_TO_OPERATION_MODEL = INPUT_PERSONA_DIR / DEFAULT_PERSONA_SET / "RULES_MAPPING_NETLOGO_TO_OPERATION_MODEL.md"
 
 # File patterns
 NETLOGO_CODE_PATTERN = "*-netlogo-code.md"
@@ -51,10 +49,21 @@ NETLOGO_INTERFACE_PATTERN = "*-netlogo-interface-*.png"
 
 # Available AI models (single source of truth)
 # Note: Only update model names here.
-AVAILABLE_MODELS = ["gpt-5-nano-2025-08-07","gpt-5-mini-2025-08-07","gpt-5-2025-08-07"]
+AVAILABLE_MODELS = [
+    "gpt-5-nano-2025-08-07",
+    "gpt-5-mini-2025-08-07",
+    "gpt-5-2025-08-07",
+    "gemini-2.5-flash",          
+    "gemini-2.5-pro",            
+    "mistralai/Mistral-Small-24B-Instruct-2501",
+    "meta-llama/llama-3.3-70b-instruct" 
+]
 
 # Default model derived from AVAILABLE_MODELS
-DEFAULT_MODEL = AVAILABLE_MODELS[0] if AVAILABLE_MODELS else ""
+DEFAULT_MODEL = AVAILABLE_MODELS[6]
+
+# API key selected dynamically based on the default model/provider
+OPENAI_API_KEY = get_api_key_for_model(DEFAULT_MODEL)
 
 # Agent-specific configurations
 # Each agent can be configured with:
@@ -81,25 +90,25 @@ AGENT_CONFIGS = {
         "reasoning_summary": "auto",
         "text_verbosity": "medium"
     },
-    "lucim_operation_synthesizer": {
+    "lucim_operation_model_generator": {
         "model": DEFAULT_MODEL,
         "reasoning_effort": "medium",
         "reasoning_summary": "auto",
         "text_verbosity": "medium"
     },
-    "lucim_scenario_synthesizer": {
+    "lucim_scenario_generator": {
         "model": DEFAULT_MODEL,
         "reasoning_effort": "medium",
         "reasoning_summary": "auto",
         "text_verbosity": "medium"
     },
-    "plantuml_writer": {
+    "lucim_plantuml_diagram_generator": {
         "model": DEFAULT_MODEL,
         "reasoning_effort": "medium",
         "reasoning_summary": "auto",
         "text_verbosity": "medium"
     },
-    "plantuml_auditor": {
+    "lucim_plantuml_diagram_auditor": {
         "model": DEFAULT_MODEL,
         "reasoning_effort": "medium",  # Default medium for consistency
         "reasoning_summary": "auto",
@@ -120,10 +129,10 @@ AGENT_TIMEOUTS = {
     "netlogo_abstract_syntax_extractor": None,
     "netlogo_interface_image_analyzer": None,
     "behavior_extractor": None,
-    "lucim_operation_synthesizer": None,
-    "lucim_scenario_synthesizer": None,
-    "plantuml_writer": None,
-    "plantuml_auditor": None,
+    "lucim_operation_model_generator": None,
+    "lucim_scenario_generator": None,
+    "lucim_plantuml_diagram_generator": None,
+    "lucim_plantuml_diagram_auditor": None,
     "plantuml_corrector": None,
     "plantuml_final_auditor": None,
 }
@@ -148,7 +157,7 @@ def ensure_directories():
 
 def get_agent_config(agent_name: str) -> dict:
     """Get the complete configuration for a specific agent"""
-    return AGENT_CONFIGS.get(agent_name, AGENT_CONFIGS["netlogo_abstract_syntax_extractor"])
+    return AGENT_CONFIGS[agent_name]
 
 def get_reasoning_config(agent_name: str) -> dict:
     """Get the complete API configuration for an agent including reasoning, text and model"""
@@ -207,7 +216,7 @@ def validate_agent_response(agent_type: str, response: dict) -> list:
             if not isinstance(response[field], (list, dict, type(None))):
                 errors.append(f"Field {field} must be of type (list, dict, NoneType) for {agent_type}")
         # Special case: stage 4 and 5 also emit collections in data
-        elif field == "data" and agent_type in ("lucim_scenario_synthesizer", "plantuml_writer"):
+        elif field == "data" and agent_type in ("lucim_scenario_generator", "lucim_plantuml_diagram_generator"):
             if not isinstance(response[field], (list, dict, type(None))):
                 errors.append(f"Field {field} must be of type (list, dict, NoneType) for {agent_type}")
         # If schema permits multiple types, isinstance handles tuple typing
@@ -238,22 +247,22 @@ COMMON_KEYS = {
     # Include raw_usage as existing agents store it in reasoning payload, not in response.json
 }
 
-# Some agents might include raw_response dump for auditing
+# raw_response is part of the complete response
 OPTIONAL_KEYS = {"raw_response"}
 
 AGENT_KEYS: Dict[str, Set[str]] = {
-    "lucim_operation_synthesizer": COMMON_KEYS | OPTIONAL_KEYS,
-    "lucim_scenario_synthesizer": COMMON_KEYS | OPTIONAL_KEYS,
-    "plantuml_writer": COMMON_KEYS | OPTIONAL_KEYS,
-    "plantuml_auditor": COMMON_KEYS | OPTIONAL_KEYS,
-    "plantuml_corrector": COMMON_KEYS | OPTIONAL_KEYS,
-    "plantuml_final_auditor": COMMON_KEYS | OPTIONAL_KEYS,
+    "lucim_operation_model_generator": COMMON_KEYS | OPTIONAL_KEYS,
+    "lucim_operation_model_auditor": COMMON_KEYS | OPTIONAL_KEYS,
+    "lucim_scenario_generator": COMMON_KEYS | OPTIONAL_KEYS,
+    "lucim_scenario_auditor": COMMON_KEYS | OPTIONAL_KEYS,
+    "lucim_plantuml_diagram_generator": COMMON_KEYS | OPTIONAL_KEYS,
+    "lucim_plantuml_diagram_auditor": COMMON_KEYS | OPTIONAL_KEYS,
 }
 
 
 def expected_keys_for_agent(agent_type: str) -> Set[str]:
     """Get expected keys for a specific agent type."""
-    return AGENT_KEYS.get(agent_type, COMMON_KEYS | OPTIONAL_KEYS)
+    return AGENT_KEYS[agent_type]
 
 
 def get_persona_file_paths(persona_set: str = DEFAULT_PERSONA_SET) -> Dict[str, Path]:
@@ -274,7 +283,6 @@ def get_persona_file_paths(persona_set: str = DEFAULT_PERSONA_SET) -> Dict[str, 
         "lucim_scenario_generator": persona_dir / "PSN_LUCIM_Scenario_Generator.md",
         "lucim_plantuml_diagram_generator": persona_dir / "PSN_LUCIM_PlantUML_Diagram_Generator.md",
         "lucim_plantuml_diagram_auditor": persona_dir / "PSN_LUCIM_PlantUML_Diagram_Auditor.md",
-        "lucim_rules": persona_dir / "DSL_Target_LUCIM-full-definition-for-compliance.md",
         "netlogo_lucim_mapping": persona_dir / "RULES_MAPPING_NETLOGO_TO_OPERATION_MODEL.md",
     }
 
@@ -291,4 +299,4 @@ def get_persona_file_path(persona_set: str, file_type: str) -> Path:
         Path to the requested persona file
     """
     persona_paths = get_persona_file_paths(persona_set)
-    return persona_paths.get(file_type, Path())
+    return persona_paths[file_type]

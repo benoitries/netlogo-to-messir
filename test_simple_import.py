@@ -33,8 +33,8 @@ def test_imports():
         print("✅ LUCIMPlantUMLDiagramAuditorAgent imported and verified as class")
         
         # Test auditor function imports
-        from agent_lucim_operation_auditor import audit_environment_model
-        assert callable(audit_environment_model), "audit_environment_model should be callable"
+        from agent_lucim_operation_auditor import audit_operation_model
+        assert callable(audit_operation_model), "audit_environment_model should be callable"
         print("✅ audit_environment_model imported and verified as callable")
         
         from agent_lucim_scenario_auditor import audit_scenario_text
@@ -112,10 +112,10 @@ def test_basic_functionality():
         print(f"   - Name: {puml_aud_agent.name}")
         
         # Test auditor functions are callable
-        from agent_lucim_operation_auditor import audit_environment_model
+        from agent_lucim_operation_auditor import audit_operation_model
         from agent_lucim_scenario_auditor import audit_scenario_text
         
-        assert callable(audit_environment_model), "audit_environment_model should be callable"
+        assert callable(audit_operation_model), "audit_environment_model should be callable"
         assert callable(audit_scenario_text), "audit_scenario_text should be callable"
         print("✅ Auditor functions are callable")
         

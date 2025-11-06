@@ -31,12 +31,11 @@ def analyze_run_directory(run_dir: pathlib.Path) -> Dict[str, Any]:
     
     # Expected steps in v3 pipeline
     expected_steps = {
-        "01-lucim_operation_synthesizer": "Step 1: LUCIM Operation Synthesizer",
-        "02-lucim_scenario_synthesizer": "Step 2: LUCIM Scenario Synthesizer",
-        "03-plantuml_writer": "Step 3: PlantUML Writer",
+        "01-lucim_operation_model_generator": "Step 1: LUCIM Operation Model Generator",
+        "02-lucim_scenario_generator": "Step 2: LUCIM Scenario Generator",
+        "03-lucim_plantuml_diagram_generator": "Step 3: LUCIM PlantUML Diagram Generator",
         "04-plantuml_lucim_auditor": "Step 4: PlantUML LUCIM Auditor",
-        "05-plantuml_lucim_corrector": "Step 5: PlantUML LUCIM Corrector (conditional)",
-        "06-plantuml_lucim_final_auditor": "Step 6: PlantUML LUCIM Final Auditor (conditional)"
+        # v3 pipeline has no corrector or final auditor
     }
     
     # Analyze each step
@@ -85,13 +84,11 @@ def analyze_run_directory(run_dir: pathlib.Path) -> Dict[str, Any]:
         results["steps"][step_dir_name] = step_info
     
     # Determine pipeline status
-    step1_executed = results["steps"]["01-lucim_operation_synthesizer"]["executed"]
-    step2_executed = results["steps"]["02-lucim_scenario_synthesizer"]["executed"]
-    step3_executed = results["steps"]["03-plantuml_writer"]["executed"]
-    step4_executed = results["steps"]["04-plantuml_lucim_auditor"]["executed"]
-    step4_verdict = results["steps"]["04-plantuml_lucim_auditor"].get("verdict")
-    step5_executed = results["steps"]["05-plantuml_lucim_corrector"]["executed"]
-    step6_executed = results["steps"]["06-plantuml_lucim_final_auditor"]["executed"]
+    step1_executed = results["steps"]["01-lucim_operation_model_generator"]["executed"]
+    step2_executed = results["steps"]["02-lucim_scenario_generator"]["executed"]
+    step3_executed = results["steps"]["03-lucim_plantuml_diagram_generator"]["executed"]
+    step4_executed = results["steps"]["04-lucim_plantuml_diagram_auditor"]["executed"]
+    step4_verdict = results["steps"]["04-lucim_plantuml_diagram_auditor"].get("verdict")
     
     # Validate pipeline flow
     if not step1_executed:
@@ -99,9 +96,9 @@ def analyze_run_directory(run_dir: pathlib.Path) -> Dict[str, Any]:
     if not step2_executed:
         results["errors"].append("Step 2 (LUCIM Scenario Synthesizer) not executed")
     if not step3_executed:
-        results["errors"].append("Step 3 (PlantUML Writer) not executed")
+        results["errors"].append("Step 3 (LUCIM PlantUML Diagram Generator) not executed")
     if not step4_executed:
-        results["errors"].append("Step 4 (PlantUML LUCIM Auditor) not executed")
+        results["errors"].append("Step 4 (LUCIM PlantUML Diagram Auditor) not executed")
     
     # Conditional steps logic
     if step4_verdict == "compliant":

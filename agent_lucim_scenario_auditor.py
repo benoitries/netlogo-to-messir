@@ -2,48 +2,60 @@
 from typing import Dict, Any
 import json
 from openai import OpenAI
-from utils_openai_client import create_and_wait, get_output_text, format_prompt_for_responses_api
-from utils_task_loader import load_task_instruction
+from utils_openai_client import create_and_wait, get_output_text, format_prompt_for_responses_api, get_openai_client_for_model, build_error_raw_payload
 from utils_auditor_schema import normalize_auditor_like_response
-from utils_config_constants import LUCIM_RULES_FILE, DEFAULT_MODEL, OPENAI_API_KEY
+from utils_config_constants import DEFAULT_MODEL, PERSONA_LUCIM_SCENARIO_AUDITOR, OUTPUT_DIR, RULES_LUCIM_SCENARIO
+from utils_response_dump import write_input_instructions_before_api, serialize_response_to_dict
 from utils_audit_scenario import audit_scenario as _py_audit_scenario
 
 
-def audit_scenario_text(scenario_text: str) -> Dict[str, Any]:
-    """Audit Step 2 (Scenario) with LLM persona; fallback to deterministic Python."""
-    # Build prompt: TASK step 2 + persona + DSL + <SCENARIO-TEXT>
-    try:
-        task_content = load_task_instruction(2, "LUCIM Scenario Auditor (step 2)")
-    except Exception:
-        task_content = ""
+def audit_scenario_text(scenario_text: str, output_dir: str | None = None, model_name: str | None = None) -> Dict[str, Any]:
+    """Audit Step 2 (Scenario) with LLM persona; fallback to deterministic Python.
+
+    Args:
+        scenario_text: Textual scenario serialization (mandatory)
+        output_dir: Optional output directory (kept for interface parity; not used here)
+        model_name: Optional model name to use (defaults to DEFAULT_MODEL if not provided)
+    """
+    # Build prompt: persona + rules + <SCENARIO-TEXT>
     try:
         # Use dedicated Scenario auditor persona
-        persona_text = (LUCIM_RULES_FILE.parent / "PSN_LUCIM_Scenario_Auditor.md").read_text(encoding="utf-8")
+        persona_text = PERSONA_LUCIM_SCENARIO_AUDITOR.read_text(encoding="utf-8")
     except Exception:
         persona_text = ""
     try:
-        lucim_dsl_text = LUCIM_RULES_FILE.read_text(encoding="utf-8")
+        rules_text = RULES_LUCIM_SCENARIO.read_text(encoding="utf-8")
     except Exception:
-        lucim_dsl_text = ""
+        rules_text = ""
 
     scen_text = scenario_text or ""
-    instructions = f"{task_content}\n\n{persona_text}\n\n{lucim_dsl_text}"
+    instructions = f"{persona_text}\n\n{rules_text}".strip()
     input_text = f"""
 <SCENARIO-TEXT>
 {scen_text}
 </SCENARIO-TEXT>
 """
     system_prompt = f"{instructions}\n\n{input_text}"
+    try:
+        # Persist exact prompt before API call (prefer caller-provided folder)
+        target_dir = output_dir if isinstance(output_dir, str) and output_dir else OUTPUT_DIR
+        write_input_instructions_before_api(target_dir, system_prompt)
+    except Exception:
+        pass
 
     # Call LLM
     try:
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        # Use provided model or fallback to DEFAULT_MODEL
+        effective_model = model_name if model_name else DEFAULT_MODEL
+        client = get_openai_client_for_model(effective_model)
         api_config = {
-            "model": DEFAULT_MODEL,
+            "model": effective_model,
             "instructions": format_prompt_for_responses_api(system_prompt),
             "input": [{"role": "user", "content": system_prompt}],
         }
         resp = create_and_wait(client, api_config)
+        # Serialize raw response for output-raw_response.json
+        raw_response_serialized = serialize_response_to_dict(resp)
         content = get_output_text(resp) or ""
         content_clean = content.strip()
         if content_clean.startswith("```json"):
@@ -52,12 +64,26 @@ def audit_scenario_text(scenario_text: str) -> Dict[str, Any]:
             content_clean = content_clean.replace("```", "").strip()
         data = json.loads(content_clean)
         normalized = normalize_auditor_like_response(data).get("data") or {}
-        return normalized
-    except Exception:
+        # Return normalized audit result with raw_response included
+        return {
+            **normalized,
+            "raw_response": raw_response_serialized
+        }
+    except Exception as e:
         # Fallback to deterministic Python auditor
         try:
-            return _py_audit_scenario(scen_text)
-        except Exception:
-            return {"verdict": "non-compliant", "non-compliant-rules": [{"id": "SCEN-AUDIT-ERROR", "message": "Scenario audit failed"}], "coverage": {"total_rules_in_dsl": "0", "evaluated": [], "not_applicable": [], "missing_evaluation": []}}
+            py_result = _py_audit_scenario(scen_text)
+            # Include error raw payload for debugging
+            return {
+                **py_result,
+                "raw_response": build_error_raw_payload(e)
+            }
+        except Exception as py_e:
+            return {
+                "verdict": "non-compliant",
+                "non-compliant-rules": [{"id": "SCEN-AUDIT-ERROR", "message": "Scenario audit failed"}],
+                "coverage": {"total_rules_in_dsl": "0", "evaluated": [], "not_applicable": [], "missing_evaluation": []},
+                "raw_response": build_error_raw_payload(py_e)
+            }
 
 

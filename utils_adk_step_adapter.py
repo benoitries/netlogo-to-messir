@@ -58,7 +58,7 @@ class AgentStepAdapter:
                 skip_reason = "condition not met"
                 if self.agent_name == "plantuml_lucim_corrector":
                     # Check audit verdict to provide specific reason
-                    auditor_result = self.orchestrator.processed_results.get("plantuml_lucim_auditor", {})
+                    auditor_result = self.orchestrator.processed_results.get("lucim_plantuml_diagram_auditor", {})
                     if auditor_result and auditor_result.get("data", {}).get("verdict") == "compliant":
                         skip_reason = "diagrams already compliant (correction not needed)"
                     else:

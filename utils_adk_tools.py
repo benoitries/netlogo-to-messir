@@ -103,7 +103,7 @@ def get_adk_tools_for_agent(agent_name: str) -> List[Any]:
     Get list of ADK tools appropriate for a specific agent.
     
     Args:
-    agent_name: Name of the agent (e.g., 'lucim_operation_synthesizer')
+    agent_name: Name of the agent (e.g., 'lucim_operation_model_generator')
         
     Returns:
         List of ADK tools to add to the agent
@@ -113,8 +113,8 @@ def get_adk_tools_for_agent(agent_name: str) -> List[Any]:
     if not ADK_TOOLS_AVAILABLE:
         return tools
     
-    # Add Google Search tool to LUCIM Environment Synthesizer for context enhancement
-    if agent_name == "lucim_operation_synthesizer":
+    # Add Google Search tool to LUCIM Operation Model Generator for context enhancement
+    if agent_name == "lucim_operation_model_generator":
         search_tool = get_google_search_tool()
         if search_tool:
             tools.append(search_tool)

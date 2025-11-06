@@ -73,3 +73,31 @@ class FormatUtils:
             return f"{number:,}"
         else:
             return f"{number:,.{precision}f}"
+
+    @staticmethod
+    def to_identifier(value: Union[str, int, float]) -> str:
+        """Convert arbitrary input into a valid Python identifier.
+
+        - Replace any non [A-Za-z0-9_] char by '_'
+        - Collapse consecutive underscores
+        - Prefix with '_' if it starts with a digit or becomes empty
+        - Ensure final string satisfies str.isidentifier()
+        """
+        import re
+
+        if value is None:
+            return "_unnamed"
+
+        text = str(value)
+        ident = re.sub(r"\W", "_", text)
+        ident = re.sub(r"_+", "_", ident)
+        ident = ident.strip("_")
+        if not ident or ident[0].isdigit():
+            ident = f"_{ident}" if ident else "_unnamed"
+        if not ident.isidentifier():
+            ident = "_" + "".join(ch if (ch.isalnum() or ch == "_") else "_" for ch in ident)
+            ident = re.sub(r"_+", "_", ident)
+            if not ident or (not ident[0].isalpha() and ident[0] != "_"):
+                ident = f"_{ident}"
+
+        return ident

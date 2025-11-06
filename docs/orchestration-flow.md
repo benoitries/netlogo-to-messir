@@ -6,11 +6,12 @@ This document provides a precise, concise description of the end-to-end orchestr
 
 ## Pipeline Overview
 
-The system implements an 8-stage pipeline with parallel execution for stages 01-02, followed by sequential processing from stage 03 onwards.
+The system implements a 3-stage sequential pipeline in ADK v3 mode. Each stage runs iteratively as a pair "Generator ↔ Auditor" with feedback until compliance or a maximum number of iterations is reached.
 
-**Execution Order:**
-1. **Stages 01-02**: Parallel execution (Syntax Parser + Behavior Extractor)
-2. **Stages 03-08**: Sequential execution with conditional branches
+**Execution Order (sequential, each with audit-driven iterations):**
+1. Operation Model Generator (iterative with audit feedback)
+2. Scenario Generator (iterative with audit feedback)
+3. PlantUML Diagram Generator (iterative with audit feedback)
 
 **Output Structure:**
 ```
@@ -19,51 +20,15 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<case>-<mode
 
 ## Per-Agent I/O and Conditions
 
-### 01 — NetLogo Abstract Syntax Extractor (`agent_1_netlogo_abstract_syntax_extractor.py`)
+### 01 — LUCIM Operation Model (Generator ↔ Auditor iterations)
+
+Generator: `agent_lucim_operation_generator.py`
 
 **Inputs:**
-- NetLogo code content (string from `input-netlogo/<case>-netlogo-code.md`)
-- IL-SYN mapping file: `input-persona/<PERSONA-SET>/DSL_IL_SYN-mapping.md`
-- IL-SYN description file: `input-persona/<PERSONA-SET>/DSL_IL_SYN-description.md`
-- Persona instructions: `input-persona/<PERSONA-SET>/PSN_1_NetLogoAbstractSyntaxExtractor.md`
-
-**Outputs:**
-- `output-response.json` (agent response)
-- `output-reasoning.md` (reasoning trace)
-- `output-data.json` (AST structure)
-- `output-raw_response.json` (raw API response)
-- `input-instructions.md` (exact system prompt given to the AI model)
-
-**Conditions:**
-- If IL-SYN reference files are missing: warning logged, processing continues with reduced context
-- Always executes in parallel with Behavior Extractor (stage 02)
-
-### 02 — Behavior Extractor (`agent_2_netlogo_behavior_extractor.py`)
-
-**Inputs:**
-- IL-SEM mapping file: `input-persona/<PERSONA-SET>/DSL_IL_SEM-mapping.md`
-- IL-SEM description file: `input-persona/<PERSONA-SET>/DSL_IL_SEM-description.md`
-- UI interface images: `input-netlogo/<case>-netlogo-interface-1.png`, `input-netlogo/<case>-netlogo-interface-2.png`
-- Persona instructions: `input-persona/<PERSONA-SET>/PSN_2b_NetlogoBehaviorExtractor.md`
-
-**Outputs:**
-- `output-response.json` (agent response)
-- `output-reasoning.md` (reasoning trace)
-- `output-data.json` (state machine)
-- `output-raw_response.json` (raw API response)
-- `input-instructions.md` (exact system prompt given to the AI model)
-
-**Conditions:**
-- Forbids AST/raw code input (deprecated paths raise `NotImplementedError`)
-- Always executes in parallel with Syntax Parser (stage 01)
-- If UI images are missing: processing continues with reduced context
-
-### 03 — LUCIM Operation Synthesizer (`agent_lucim_operation_generator.py`)
-
-**Inputs:**
-- State machine from Stage 02: `../02-behavior_extractor/output-data.json`
+- NetLogo source code: `experimentation/input/input-netlogo/<case>-netlogo-code.md`
+- NetLogo→LUCIM mapping: loaded via orchestrator (`load_netlogo_lucim_mapping`)
+- Persona instructions: `input-persona/<PERSONA-SET>/PSN_LUCIM_Operation_Model_Generator.md`
 - LUCIM/UCI rules: `input-persona/<PERSONA-SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
-- Persona instructions: `input-persona/<PERSONA-SET>/PSN_3_LUCIMEnvironmentSynthesizer.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
@@ -73,17 +38,23 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<case>-<mode
 - `input-instructions.md` (exact system prompt given to the AI model)
 
 **Conditions:**
-- Executes sequentially after stages 01-02 completion
+- Executes first; mandatory inputs must be present
 - No iCrash references are required or expected
 
-### 04 — LUCIM Scenario Synthesizer (`agent_4_lucim_scenario_synthesizer.py`)
+Audit sub-step (per iteration):
+- Auditor (LLM) function: `agent_lucim_operation_auditor.audit_operation_model`
+- Python deterministic audit: `utils_audit_operation_model.audit_environment`
+- Outputs stored under `1_lucim_operation_model/iter-<k>/2-auditor/` (normalized audit JSON, reasoning.md, raw response)
+
+### 02 — LUCIM Scenario (Generator ↔ Auditor iterations)
+
+Generator: `agent_lucim_scenario_generator.py`
 
 **Inputs:**
-- State machine from Stage 02: `../02-behavior_extractor/output-data.json`
-- LUCIM operation model from Stage 03: `../03-lucim_operation_synthesizer/output-data.json`
-- LUCIM DSL definition: `input-persona/<PERSONA-SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
-- iCrash references: removed
-- Persona instructions: `input-persona/<PERSONA-SET>/PSN_4_LUCIMScenarioSynthesizer.md`
+- LUCIM operation model from Stage 01: `../lucim_operation_model_generator/output-data.json`
+- Persona instructions: `input-persona/<PERSONA-SET>/PSN_LUCIM_Scenario_Generator.md`
+- Scenario rules (mandatory): `input-persona/<PERSONA-SET>/RULES_LUCIM_Scenario.md`
+- Scenario rules (mandatory): `input-persona/<PERSONA-SET>/RULES_LUCIM_Scenario.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
@@ -94,17 +65,25 @@ code-netlogo-to-lucim/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<case>-<mode
 
 **Conditions:**
 - All inputs are MANDATORY; failure if any are missing
-- Executes sequentially after stage 03 completion
+- No agent consumes `LUCIM-DSL-DESCRIPTION`; Scenario Generator relies on persona + scenario rules only.
+- Executes sequentially after stage 01 completion
+
+Audit sub-step (per iteration):
+- Auditor (LLM) function: `agent_lucim_scenario_auditor.audit_scenario_text`
+- Python deterministic audit: `utils_audit_scenario.audit_scenario`
+- Inputs for audit include a textual rendering of scenario messages and scenario rules
+- Outputs stored under `2_lucim_scenario/iter-<k>/2-auditor/` (normalized audit JSON, reasoning.md, raw response)
 
 Note on Correctors:
 - There is no LLM-based corrector for Operation Model or Scenarios in this pipeline. Audit steps may report issues; corrections must be handled via deterministic tools or manual iteration. Do not add `agent_lucim_operation_corrector.py` or `agent_lucim_scenario_corrector.py`.
 
-### 05 —LUCIM PlantUML Diagram Generator (`agent_lucim_plantuml_diagram_generator.py`)
+### 03 — LUCIM PlantUML Diagram (Writer ↔ Auditor iterations)
+
+Generator/Writer: `agent_lucim_plantuml_diagram_generator.py`
 
 **Inputs:**
-- Scenarios from Stage 04: `../04-lucim_scenario_synthesizer/output-data.json`
-- LUCIM/UCI rules: `input-persona/<PERSONA-SET>/DSL_Target_LUCIM-full-definition-for-compliance.md`
-- Persona instructions: `input-persona/<PERSONA-SET>/PSN_5_PlantUMLWriter.md`
+- Scenarios from Stage 02: `../lucim_scenario_generator/output-data.json`
+- Persona instructions: `input-persona/<PERSONA-SET>/PSN_LUCIM_PlantUML_Diagram_Generator.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
@@ -116,14 +95,19 @@ Note on Correctors:
 
 **Conditions:**
 - If JSON payload lacks clear diagram field: falls back to extracting `@startuml...@enduml` blocks
-- Executes sequentially after stage 04 completion
+- Executes sequentially after stage 02 completion
 
-### 06 — LUCIM PlantUML Diagram Auditor (`agent_lucim_plantuml_diagram_auditor.py`)
+Audit sub-step (per iteration):
+- Auditor (LLM) method: `lucim_plantuml_diagram_auditor_agent.audit_plantuml_diagrams`
+- Python deterministic audit: `utils_audit_diagram.audit_diagram`
+- Inputs: standalone `diagram.puml` produced by the writer
+- Outputs stored under `3_lucim_plantuml_diagram/iter-<k>/2-auditor/` (normalized audit JSON, reasoning.md, raw response)
+
+### 04 — LUCIM PlantUML Diagram Auditor (`agent_lucim_plantuml_diagram_auditor.py`)
 
 **Inputs:**
-- Standalone PlantUML file from Stage 05: `../05-plantuml_writer/diagram.puml` (MANDATORY)
-- LUCIM DSL definition: `input-persona/<PERSONA-SET>/DSL_Target_LUCIM-full-definition-for-compliance.md` (MANDATORY)
-- Persona instructions: `input-persona/<PERSONA-SET>/PSN_6_PlantUMLLUCIMAuditor.md`
+- Standalone PlantUML file from Stage 05: `../lucim_plantuml_diagram_generator/diagram.puml` (MANDATORY)
+- Persona instructions: `input-persona/<PERSONA-SET>/PSN_LUCIM_Scenario_Auditor.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
@@ -139,23 +123,13 @@ Note on Correctors:
 
 
 
-## Conditional Branching Logic
+## Iteration & Branching Logic
 
-### Parallel Execution (Stages 01-02)
-- **Condition**: Always parallel for optimal throughput
-- **Timeout**: Configurable via `ORCHESTRATOR_PARALLEL_TIMEOUT` (default: no timeout)
-- **Heartbeat**: Optional heartbeat logging every `HEARTBEAT_SECONDS` seconds
-- **Error Handling**: If either stage fails, the other continues; both results are processed
-
-### Sequential Execution (Stages 03-08)
-- **Condition**: Always sequential after parallel stages complete
-- **Dependencies**: Each stage depends on outputs from previous stages
-- **Error Propagation**: If any stage fails, subsequent stages may be skipped or use fallback data
-
-### Correction Branching (Stage 07)
-- **Condition**: Only executes if Stage 06 audit finds non-compliance
-- **Skip Condition**: If Stage 06 passes compliance, Stage 07 is skipped entirely
-- **Fallback**: If Stage 07 fails, Stage 08 still executes with original diagrams
+- Each stage runs in a loop up to `MAX_AUDIT` iterations.
+- After each Generator run, the corresponding Auditor evaluates compliance.
+- If compliant: proceed to the next stage immediately.
+- If non-compliant and iteration < `MAX_AUDIT`: feed back the audit report into the next Generator attempt.
+- If non-compliant at `MAX_AUDIT`: proceed to the next stage with the latest artifact.
 
 ## File Naming Patterns
 
@@ -195,4 +169,4 @@ This flow has been validated against:
 
 ---
 
-*Generated on 2025-01-27. For authoritative findings and detailed inconsistencies, see `orchestrator_workflow_summary.md`.*
+*Generated on 2025-01-27. This document is the Single Source of Truth (SSOT) for the orchestrated workflow; other docs must reference this file.*

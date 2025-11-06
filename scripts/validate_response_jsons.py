@@ -73,7 +73,7 @@ def main(argv):
         return 2
 
     errors = []
-    for response_file in run_dir.rglob("output-response.json"):
+    for response_file in run_dir.rglob("output-response-full.json"):
         err = validate_response_file(response_file)
         if err:
             errors.append(err)
@@ -84,7 +84,7 @@ def main(argv):
             print(f"- {e}")
         return 1
 
-    print("OK: All output-response.json files have exact expected keys")
+    print("OK: All output-response-full.json files have exact expected keys")
     return 0
 
 

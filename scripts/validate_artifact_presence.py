@@ -3,10 +3,10 @@
 Validate presence of renamed artifacts per stage directory.
 
 Checks for:
-- output-response.json
+- output-response-full.json
 - output-data.json (when data exists)
 - output-reasoning.md
-- output-raw_response.json
+- output-response-raw.json
 - input-instructions.md
 
 Usage:
@@ -18,9 +18,9 @@ from pathlib import Path
 from typing import List
 
 REQUIRED_ALWAYS = [
-    "output-response.json",
+    "output-response-full.json",
     "output-reasoning.md",
-    "output-raw_response.json",
+    "output-response-raw.json",
     "input-instructions.md",
 ]
 

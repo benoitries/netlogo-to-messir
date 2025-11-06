@@ -198,6 +198,19 @@ class ADKMonitor:
         self.external_logger.info(f"[ADK] Total Retries: {summary['total_retries']}")
         self.external_logger.info(f"[ADK] Agents Monitored: {len(summary['agents'])}")
         self.external_logger.info("")
+
+        # Guard against misleading zero counters when monitoring ran but no executions were tracked
+        if (
+            summary.get('monitoring_duration', 0) > 0
+            and summary.get('total_agents_executed', 0) == 0
+            and len(summary.get('agents', {})) == 0
+        ):
+            self.external_logger.warning(
+                "[ADK] No agent executions were recorded by ADK monitor during this session."
+            )
+            self.external_logger.warning(
+                "[ADK] Counters may be unavailable if steps bypassed the adapter or monitoring scope."
+            )
         
         for agent_name, agent_metrics in summary["agents"].items():
             self.external_logger.info(f"[ADK] Agent: {agent_name}")

@@ -7,10 +7,10 @@ Note: All references to "messir" have been updated to "lucim" for consistency
 with the LUCIM/UCI domain modeling approach.
 """
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import os
 from pathlib import Path
-from utils_config_constants import AVAILABLE_MODELS, DEFAULT_MODEL, INPUT_NETLOGO_DIR, INPUT_PERSONA_DIR
+from utils_config_constants import AVAILABLE_MODELS, DEFAULT_MODEL, DEFAULT_PERSONA_SET, INPUT_NETLOGO_DIR, INPUT_PERSONA_DIR
 
 
 class OrchestratorUI:
@@ -18,16 +18,39 @@ class OrchestratorUI:
     
     def __init__(self):
         """Initialize the orchestrator UI utilities."""
-        pass
+        # Track last selected reasoning effort to link default verbosity
+        self._last_reasoning_efforts: List[str] = []
     
-    def validate_openai_key(self) -> bool:
-        """Validate OpenAI API key before any user interaction."""
-        from utils_openai_client import validate_openai_key
-        print("Validating OpenAI API key...")
-        if not validate_openai_key():
-            print("Exiting due to invalid OpenAI API key")
-            return False
-        return True
+    def validate_openai_key(self, model_name: Optional[str] = None) -> bool:
+        """
+        Validate API key for the specified model (or OpenAI by default).
+        
+        Args:
+            model_name: Optional model name to validate provider-specific key.
+                       If None, validates OpenAI key only (backward compatibility).
+        
+        Returns:
+            bool: True if API key is valid, False otherwise
+        """
+        if model_name:
+            # Minimal check: ensure a key exists for the model's provider
+            from utils_api_key import get_provider_for_model, get_api_key_for_model
+            provider = get_provider_for_model(model_name)
+            print(f"Checking API key presence for provider '{provider}' (model: {model_name})...")
+            try:
+                _ = get_api_key_for_model(model_name)
+                return True
+            except Exception:
+                print(f"Exiting due to missing API key for provider: {provider}")
+                return False
+        else:
+            # Backward compatibility: validate OpenAI key only
+            from utils_openai_client import validate_openai_key
+            print("Validating OpenAI API key...")
+            if not validate_openai_key():
+                print("Exiting due to invalid OpenAI API key")
+                return False
+            return True
     
     def get_available_base_names(self) -> List[str]:
         """
@@ -259,15 +282,20 @@ class OrchestratorUI:
         if selected_reasoning == "all":
             print(f"\nSelected: ALL reasoning effort levels (runs efforts sequentially for comparison)")
             print("This will run each effort level sequentially for comprehensive analysis.")
+            print("Verbosity will be auto-paired: minimal→low, low→low, medium→medium, high→high")
             reasoning_levels = [
                 {"effort": "minimal", "summary": "auto"},
                 {"effort": "low", "summary": "auto"},
                 {"effort": "medium", "summary": "auto"},
                 {"effort": "high", "summary": "auto"}
             ]
+            # Multiple efforts; clear linkage
+            self._last_reasoning_efforts = []
         else:
             print(f"\nSelected: {selected_reasoning['effort'].title()} effort")
             reasoning_levels = [selected_reasoning]
+            # Store for default verbosity linkage
+            self._last_reasoning_efforts = [selected_reasoning["effort"]]
         
         return reasoning_levels
     
@@ -278,18 +306,42 @@ class OrchestratorUI:
         Returns:
             List of selected verbosity levels
         """
+        # Determine linked default based on last reasoning selection
+        linked_default = None
+        if len(self._last_reasoning_efforts) == 1:
+            r = self._last_reasoning_efforts[0]
+            if r in ("minimal", "low"):
+                linked_default = "low"
+            elif r == "medium":
+                linked_default = "medium"
+            elif r == "high":
+                linked_default = "high"
         print("\nTEXT VERBOSITY SELECTION")
         print("0. All verbosities (low, medium, high)")
         print("1. Low verbosity")
-        print("2. Medium verbosity - DEFAULT")
+        print("2. Medium verbosity")
         print("3. High verbosity")
-        print("Enter your choice (0-3, or press Enter for default medium):")
+        if linked_default:
+            print(f"Press Enter for default linked to reasoning ('{linked_default}'):")
+        else:
+            print("Enter your choice (0-3, or press Enter for default 'medium'):")
         
         while True:
             text_input = input("Text verbosity > ").strip()
             if text_input == "":
-                text_choice = 2
-                print("Using default: Medium verbosity")
+                # Apply linked default
+                if linked_default == "low":
+                    text_choice = 1
+                    print("Using default: Low verbosity (linked to reasoning)")
+                elif linked_default == "high":
+                    text_choice = 3
+                    print("Using default: High verbosity (linked to reasoning)")
+                elif linked_default == "medium":
+                    text_choice = 2
+                    print("Using default: Medium verbosity (linked to reasoning)")
+                else:
+                    text_choice = 2
+                    print("Using default: Medium verbosity")
                 break
             try:
                 text_choice = int(text_input)
@@ -382,7 +434,7 @@ class OrchestratorUI:
         # Analyze audit results
         audit_analysis = self._analyze_audit_results(all_results)
         
-        # Successful runs (step 6 or 8 audit = compliant)
+        # Successful runs (now derived from final compliance when available; fallback to step 6)
         successful_runs = audit_analysis['successful_runs']
         total_runs = audit_analysis['total_runs']
         success_percentage = (successful_runs / total_runs * 100) if total_runs > 0 else 0
@@ -390,7 +442,7 @@ class OrchestratorUI:
         print(f"📊 RUN SUCCESS ANALYSIS:")
         print(f"   Successful runs: {successful_runs}/{total_runs} ({success_percentage:.1f}%)")
         print(f"   Failed runs: {total_runs - successful_runs}/{total_runs} ({100 - success_percentage:.1f}%)")
-        print(f"   Success criteria: Step 6 OR Step 8 audit = compliant")
+        print(f"   Success criteria: Final compliance VERIFIED (fallback: Step 6 compliant)")
         
         # Non-compliant rules per run
         print(f"\n📋 NON-COMPLIANT RULES PER RUN:")
@@ -403,7 +455,11 @@ class OrchestratorUI:
             for rule, count in audit_analysis['rule_frequency']:
                 print(f"   {rule}: {count} violations")
         else:
-            print(f"\n✅ No rule violations found across all runs!")
+            # Only declare clean state if all runs succeeded; otherwise avoid contradictory messaging
+            if successful_runs == total_runs and total_runs > 0:
+                print(f"\n✅ No rule violations found across all runs!")
+            else:
+                print(f"\nℹ️  No rule frequency data available (audits missing or non-compliant)")
     
     def _analyze_audit_results(self, all_results: dict) -> dict:
         """
@@ -448,26 +504,26 @@ class OrchestratorUI:
                 
             total_runs += 1
             
-            # Check step 4/6 (plantuml_lucim_auditor) and step 6/8 (plantuml_lucim_final_auditor)
-            step6_compliant = self._is_audit_compliant(run_results.get("plantuml_lucim_auditor"))
-            step8_compliant = self._is_audit_compliant(run_results.get("plantuml_lucim_final_auditor"))
-            
-            # Run is successful if either step 6 OR step 8 is compliant
-            if step6_compliant or step8_compliant:
+            # Prefer overall final compliance when available; fallback to step 6
+            final_compliance = None
+            if isinstance(result, dict) and isinstance(result.get("final_compliance"), dict):
+                final_compliance = result.get("final_compliance")
+            if final_compliance is None and isinstance(run_results.get("final_compliance"), dict):
+                final_compliance = run_results.get("final_compliance")
+
+            if isinstance(final_compliance, dict) and final_compliance.get("status") == "VERIFIED":
                 successful_runs += 1
+            else:
+                step6_compliant = self._is_audit_compliant(run_results.get("lucim_plantuml_diagram_auditor"))
+                if step6_compliant:
+                    successful_runs += 1
             
             # Count non-compliant rules for this run
-            # Only count from the final auditor if it exists, otherwise from the initial auditor
+            # Count from the single auditor (step 6) in v3 pipeline
             non_compliant_count = 0
-            final_auditor_result = run_results.get("plantuml_lucim_final_auditor")
-            initial_auditor_result = run_results.get("plantuml_lucim_auditor")
+            auditor_result = run_results.get("lucim_plantuml_diagram_auditor")
             
-            # Prefer final auditor, fallback to initial auditor
-            audit_results_to_check = []
-            if final_auditor_result:
-                audit_results_to_check.append(("final", final_auditor_result))
-            elif initial_auditor_result:
-                audit_results_to_check.append(("initial", initial_auditor_result))
+            audit_results_to_check = [("initial", auditor_result)] if auditor_result else []
             
             for audit_type, step_result in audit_results_to_check:
                 if step_result and isinstance(step_result, dict):
@@ -551,7 +607,7 @@ class OrchestratorUI:
         
         if not available_persona_sets:
             print("❌ No persona sets found in input-persona directory")
-            return "persona-v1"  # Fallback to default
+            return DEFAULT_PERSONA_SET  # Fallback to SSOT
         
         # Always ask even if only one persona set is available, to enforce explicit confirmation
         
@@ -562,8 +618,8 @@ class OrchestratorUI:
         for i, persona_set in enumerate(available_persona_sets, 1):
             print(f"  {i}. {persona_set}")
         
-        # Prefer persona-v2-after-ng-meeting as default if available, otherwise fallback to persona-v1
-        default_persona = "persona-v2-after-ng-meeting" if "persona-v2-after-ng-meeting" in available_persona_sets else "persona-v1"
+        # Use SSOT default; if not present in available list, fallback to first available
+        default_persona = DEFAULT_PERSONA_SET if DEFAULT_PERSONA_SET in available_persona_sets else (available_persona_sets[0] if available_persona_sets else DEFAULT_PERSONA_SET)
         print(f"\nDefault: {default_persona} (press Enter to use default)")
         
         while True:

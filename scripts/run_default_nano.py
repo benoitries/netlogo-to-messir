@@ -19,9 +19,9 @@ import subprocess
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from orchestrator_simplified import NetLogoOrchestratorSimplified  # noqa: E402
-from utils_config_constants import AGENT_CONFIGS, DEFAULT_MODEL, AGENT_TIMEOUTS, ORCHESTRATOR_PARALLEL_TIMEOUT  # noqa: E402
+from utils_config_constants import AGENT_CONFIGS, DEFAULT_MODEL, DEFAULT_PERSONA_SET, AGENT_TIMEOUTS, ORCHESTRATOR_PARALLEL_TIMEOUT  # noqa: E402
 from utils_logging import format_parameter_bundle  # noqa: E402
+from orchestrator_persona_v3_adk import NetLogoOrchestratorPersonaV3ADK  # noqa: E402
 
 
 async def run_default(args: argparse.Namespace) -> None:
@@ -29,26 +29,25 @@ async def run_default(args: argparse.Namespace) -> None:
 
     Defaults: reasoning=medium, summary=auto, text_verbosity=low.
     """
-    # Validate OpenAI API key before any processing
-    from utils_openai_client import validate_openai_key
-    print("Validating OpenAI API key...")
-    if not validate_openai_key():
-        print("ERROR: OpenAI API key validation failed: Connection error.")
-        print("Please check your API key and try again")
-        print("Exiting due to invalid OpenAI API key")
+    # Preflight: validate model/provider before any processing
+    from utils_openai_client import validate_model_name_and_connectivity
+    # Allow overriding DEFAULT_MODEL via --model
+    model_name = args.model or DEFAULT_MODEL
+    print(f"Preflight validation for model: {model_name}")
+    ok, provider, message = validate_model_name_and_connectivity(model_name, verbose=True)
+    if not ok:
+        print(f"ERROR: Model preflight failed for provider '{provider}'. {message}")
         sys.exit(1)
-    
-    model_name = DEFAULT_MODEL
     base_name = args.base
 
-    orchestrator = NetLogoOrchestratorSimplified(model_name=model_name, persona_set=args.persona_set)
+    orchestrator = NetLogoOrchestratorPersonaV3ADK(model_name=model_name)
 
     # Apply requested configuration globally via unified API
-    orchestrator.update_agent_configs(
-        reasoning_effort=args.reasoning,
-        reasoning_summary=args.summary,
-        text_verbosity=args.verbosity,
-    )
+    #orchestrator.update_agent_configs(
+    #    reasoning_effort=args.reasoning,
+    #    reasoning_summary=args.summary,
+    #    text_verbosity=args.verbosity,
+    #)
 
     # Emit a single parameter bundle line (console) for visibility
     bundle_line = format_parameter_bundle(
@@ -88,7 +87,7 @@ async def run_default(args: argparse.Namespace) -> None:
         )
         if candidates:
             last_run_dir = candidates[0]
-            print(f"Validating output-response.json keys under: {last_run_dir}")
+            print(f"Validating output-response-full.json keys under: {last_run_dir}")
             proc = subprocess.run([
                 "python3",
                 str(Path(__file__).resolve().parent / "validate_response_jsons.py"),
@@ -101,10 +100,11 @@ async def run_default(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run default nano orchestrator")
     parser.add_argument("--base", type=str, default="boiling", help="Base (case study) name, e.g., 'boiling' or 'my-ecosys'")
+    parser.add_argument("--model", type=str, default=None, help="Model name override (e.g., 'meta-llama/llama-3.3-70b-instruct')")
     parser.add_argument("--reasoning", choices=["low", "medium", "high"], default="medium", help="Reasoning effort")
     parser.add_argument("--summary", choices=["auto", "manual"], default="auto", help="Reasoning summary mode")
     parser.add_argument("--verbosity", choices=["low", "medium", "high"], default="low", help="Text verbosity level")
-    parser.add_argument("--persona-set", type=str, default="persona-v2-after-ng-meeting", help="Persona set to use (default: persona-v2-after-ng-meeting). Remove or set to empty to enable interactive selection")
+    parser.add_argument("--persona-set", type=str, default=DEFAULT_PERSONA_SET, help="Persona set to use (default: DEFAULT_PERSONA_SET). Remove or set to empty to enable interactive selection")
     args = parser.parse_args()
     asyncio.run(run_default(args))
 

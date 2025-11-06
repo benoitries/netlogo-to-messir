@@ -232,12 +232,12 @@ async def execute(self, *args, **kwargs):
 ```python
 self.execution_times = {
     "total_orchestration": 0,
-    "lucim_operation_synthesizer": 0,
+    "lucim_operation_model_generator": 0,
     # ... per-agent timing
 }
 
 self.token_usage = {
-    "lucim_operation_synthesizer": {"used": 0, ...},
+    "lucim_operation_model_generator": {"used": 0, ...},
     # ... per-agent token usage
 }
 ```
@@ -412,8 +412,8 @@ from utils_adk_tools import configure_agent_with_adk_tools
 
 # In orchestrator initialization
 configure_agent_with_adk_tools(
-    self.lucim_operation_synthesizer_agent,
-    "lucim_operation_synthesizer"
+    self.lucim_operation_model_generator_agent,
+    "lucim_operation_model_generator"
 )
 ```
 
@@ -577,7 +577,7 @@ def get_google_search_tool():
     return google_search  # ADK's built-in search tool
 
 # Configured for LUCIM Environment Synthesizer
-if agent_name == "lucim_operation_synthesizer":
+if agent_name == "lucim_operation_model_generator":
     tools.append(get_google_search_tool())
 ```
 

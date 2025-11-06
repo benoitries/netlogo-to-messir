@@ -70,13 +70,13 @@ The orchestrator uses a hybrid approach:
 
 ```python
 from orchestrator_persona_v3_adk import NetLogoOrchestratorPersonaV3ADK
+from utils_orchestrator_v3_agent_config import update_agent_configs
 
 # Create orchestrator (ADK enabled by default if available)
 orchestrator = NetLogoOrchestratorPersonaV3ADK(model_name="gpt-5-mini")
 
 # Configure reasoning and verbosity
-orchestrator.update_reasoning_config("high", "auto")
-orchestrator.update_text_config("medium")
+update_agent_configs(orchestrator, reasoning_effort="high", reasoning_summary="auto", text_verbosity="medium")
 
 # Run pipeline
 results = await orchestrator.run("base_name")

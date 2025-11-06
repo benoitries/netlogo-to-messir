@@ -3,7 +3,7 @@
 Validate that reasoning.md files include all available API reasoning fields.
 
 Rules:
-- For each stage output directory containing output-response.json and output-reasoning.md,
+- For each stage output directory containing output-response-full.json and output-reasoning.md,
   if a reasoning-related field is present in response.json (or derived payload),
   the reasoning.md must include the corresponding section heading.
 - Missing sections are allowed only when the corresponding data is absent.
@@ -81,7 +81,7 @@ def build_payload_from_response(response_json: Dict[str, Any]) -> Dict[str, Any]
 
 def validate_stage(stage_dir: Path) -> List[str]:
     errors: List[str] = []
-    response_path = stage_dir / "output-response.json"
+    response_path = stage_dir / "output-response-full.json"
     reasoning_md_path = stage_dir / "output-reasoning.md"
 
     if not response_path.exists() or not reasoning_md_path.exists():

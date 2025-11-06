@@ -28,16 +28,14 @@ from utils_logging import format_parameter_bundle  # noqa: E402
 
 async def run_default(args: argparse.Namespace) -> None:
     """Run orchestrator for a given base with a configurable model and parameters."""
-    # Validate OpenAI API key before any processing
-    from utils_openai_client import validate_openai_key
-    print("Validating OpenAI API key...")
-    if not validate_openai_key():
-        print("ERROR: OpenAI API key validation failed: Connection error.")
-        print("Please check your API key and try again")
-        print("Exiting due to invalid OpenAI API key")
-        sys.exit(1)
-
+    # Preflight: validate model/provider before any processing
+    from utils_openai_client import validate_model_name_and_connectivity
     model_name = args.model or DEFAULT_MODEL
+    print(f"Preflight validation for model: {model_name}")
+    ok, provider, message = validate_model_name_and_connectivity(model_name, verbose=True)
+    if not ok:
+        print(f"ERROR: Model preflight failed for provider '{provider}'. {message}")
+        sys.exit(1)
     base_name = args.base
 
     orchestrator = NetLogoOrchestratorSimplified(model_name=model_name, persona_set=args.persona_set)
@@ -87,7 +85,7 @@ async def run_default(args: argparse.Namespace) -> None:
         )
         if candidates:
             last_run_dir = candidates[0]
-            print(f"Validating output-response.json keys under: {last_run_dir}")
+            print(f"Validating output-response-full.json keys under: {last_run_dir}")
             proc = subprocess.run([
                 "python3",
                 str(Path(__file__).resolve().parent / "validate_response_jsons.py"),

@@ -5,6 +5,11 @@ Manages agent configuration updates (reasoning, verbosity, etc.).
 """
 
 from typing import Dict, Any, Optional
+try:
+    # Late import to avoid circulars at module import time
+    import utils_config_constants as _cfg
+except Exception:  # pragma: no cover
+    _cfg = None  # Fallback when imported by linters/tests
 
 
 def update_agent_configs(orchestrator_instance,
@@ -20,7 +25,18 @@ def update_agent_configs(orchestrator_instance,
         reasoning_summary: Reasoning summary mode (auto/manual)
         text_verbosity: Text verbosity level (low/medium/high)
     """
-    # Update agent_configs dictionary
+    # 0) Ensure global AGENT_CONFIGS uses the orchestrator-selected model
+    #    This is required because agents call get_reasoning_config(), which reads
+    #    from the module-level AGENT_CONFIGS in utils_config_constants.
+    if _cfg is not None and hasattr(orchestrator_instance, "model") and orchestrator_instance.model:
+        try:
+            for agent_name in _cfg.AGENT_CONFIGS.keys():
+                _cfg.AGENT_CONFIGS[agent_name]["model"] = orchestrator_instance.model
+        except Exception:
+            # Non-fatal: continue with local updates even if global sync fails
+            pass
+
+    # 1) Update orchestrator-local agent_configs dictionary
     for agent_name in orchestrator_instance.agent_configs:
         if reasoning_effort is not None:
             orchestrator_instance.agent_configs[agent_name]["reasoning_effort"] = reasoning_effort
@@ -30,18 +46,25 @@ def update_agent_configs(orchestrator_instance,
             orchestrator_instance.agent_configs[agent_name]["text_verbosity"] = text_verbosity
     
     agent_list = [
-        ("lucim_operation_synthesizer_agent", True),
-        ("lucim_scenario_synthesizer_agent", True),
-        ("plantuml_writer_agent", True),
-        ("plantuml_lucim_auditor_agent", True),
-        ("plantuml_lucim_corrector_agent", True),
-        ("plantuml_lucim_final_auditor_agent", True),
+        ("lucim_operation_model_generator_agent", True),
+        ("lucim_scenario_generator_agent", True),
+        ("lucim_plantuml_diagram_generator_agent", True),
+        ("lucim_plantuml_diagram_auditor_agent", True),
     ]
     
+    # 2) Push updates down to live agent instances
     for agent_attr, supports_text in agent_list:
         agent = getattr(orchestrator_instance, agent_attr, None)
         if agent is not None:
             bundle = {}
+            # Always keep agent.model aligned with orchestrator.model if possible
+            try:
+                if hasattr(agent, "update_model") and hasattr(orchestrator_instance, "model") and orchestrator_instance.model:
+                    agent.update_model(orchestrator_instance.model)
+                elif hasattr(agent, "model") and hasattr(orchestrator_instance, "model") and orchestrator_instance.model:
+                    agent.model = orchestrator_instance.model  # best-effort alignment
+            except Exception:
+                pass
             if reasoning_effort is not None:
                 bundle["reasoning_effort"] = reasoning_effort
             if reasoning_summary is not None:

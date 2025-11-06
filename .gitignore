@@ -52,6 +52,10 @@ output/
 *.tmp
 today_rows.txt
 
+# Generated input-instructions files (debugging artifacts)
+input-instructions*.md
+*input-instructions-UNI*.md
+
 # Jupyter Notebook
 .ipynb_checkpoints
 

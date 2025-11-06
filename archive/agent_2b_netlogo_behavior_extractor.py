@@ -28,9 +28,6 @@ PERSONA_FILE = PERSONA_BEHAVIOR_EXTRACTOR
 WRITE_FILES = True
 
 
-def sanitize_model_name(model_name: str) -> str:
-    """Sanitize model name by replacing hyphens with underscores for valid identifier."""
-    return model_name.replace("-", "_")
 
 class NetLogoBehaviorExtractorAgent(LlmAgent):
     model: str = DEFAULT_MODEL
@@ -48,9 +45,8 @@ class NetLogoBehaviorExtractorAgent(LlmAgent):
     persona_text: str = ""
     
     def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
-        sanitized_name = sanitize_model_name(model_name)
         super().__init__(
-            name=f"netlogo_behavior_extractor_agent_{sanitized_name}",
+            name=f"netlogo_behavior_extractor_agent_{model_name}",
             description="Behavior extraction agent building state machine from IL-SEM and structured interface description"
         )
         self.model = model_name

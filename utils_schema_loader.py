@@ -25,8 +25,8 @@ from utils_config_constants import (
 
 
 AGENT_TO_PERSONA = {
-    "lucim_operation_generator": PERSONA_LUCIM_OPERATION_MODEL_GENERATOR,
-    "lucim_operation_auditor": PERSONA_LUCIM_OPERATION_MODEL_AUDITOR,
+    "lucim_operation_model_generator": PERSONA_LUCIM_OPERATION_MODEL_GENERATOR,
+    "lucim_operation_model_auditor": PERSONA_LUCIM_OPERATION_MODEL_AUDITOR,
     "lucim_scenario_generator": PERSONA_LUCIM_SCENARIO_GENERATOR,
     "lucim_scenario_auditor": PERSONA_LUCIM_SCENARIO_AUDITOR,
     "lucim_plantuml_diagram_generator": PERSONA_LUCIM_PLANTUML_DIAGRAM_GENERATOR,

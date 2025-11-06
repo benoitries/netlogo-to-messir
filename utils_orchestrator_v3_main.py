@@ -5,12 +5,14 @@ Main execution function for the V3 ADK orchestrator.
 """
 
 import os
+import asyncio
 import pathlib
 import time
 from typing import Dict, Any
 
 from utils_orchestrator_ui import OrchestratorUI
 from orchestrator_persona_v3_adk import NetLogoOrchestratorPersonaV3ADK
+from utils_orchestrator_v3_agent_config import update_agent_configs
 
 
 async def main():
@@ -24,8 +26,8 @@ async def main():
         pass
     
     ui = OrchestratorUI()
-    if not ui.validate_openai_key():
-        return
+    # Note: API key validation will be done per-model after selection
+    # to support different providers (OpenAI, Gemini, OpenRouter)
     
     base_names = ui.get_available_base_names()
     if not base_names:
@@ -34,6 +36,23 @@ async def main():
     selected_models = ui.select_models()
     if not selected_models:
         return
+    
+    # Validate API keys for selected models (supports different providers)
+    print("\n🔍 Validating API keys for selected models...")
+    for model in selected_models:
+        if not ui.validate_openai_key(model_name=model):
+            print(f"❌ API key validation failed for model: {model}")
+            print("   Please ensure the appropriate API key is set in your .env file:")
+            from utils_api_key import get_provider_for_model
+            provider = get_provider_for_model(model)
+            if provider == "gemini":
+                print("   GEMINI_API_KEY=your-gemini-api-key")
+            elif provider == "router":
+                print("   OPENROUTER_API_KEY=your-openrouter-api-key")
+            else:
+                print("   OPENAI_API_KEY=your-openai-api-key")
+            return
+    print("✅ API key validation successful for all selected models")
     
     selected_base_names = ui.select_base_names(base_names)
     if not selected_base_names:
@@ -45,19 +64,19 @@ async def main():
         return
     
     selected_verbosity_levels = ui.select_text_verbosity()
-    # Ask for max_correction when running orchestrator directly
+    # Ask for MAX_AUDIT when running orchestrator directly
     try:
-        mc_input = input("Max correction iterations [Enter for 2]: ").strip()
-        if mc_input:
-            mc_val = int(mc_input)
-            if mc_val < 0:
-                raise ValueError("max_correction must be >= 0")
-            os.environ["MAX_CORRECTION"] = str(mc_val)
+        ma_input = input("Max audit iterations (MAX_AUDIT) [Enter for 3]: ").strip()
+        if ma_input:
+            ma_val = int(ma_input)
+            if ma_val < 0:
+                raise ValueError("MAX_AUDIT must be >= 0")
+            os.environ["MAX_AUDIT"] = str(ma_val)
         else:
-            os.environ.setdefault("MAX_CORRECTION", "2")
+            os.environ.setdefault("MAX_AUDIT", "3")
     except Exception as e:
-        print(f"[WARN] Invalid max_correction input, using default 2 ({e})")
-        os.environ["MAX_CORRECTION"] = "2"
+        print(f"[WARN] Invalid MAX_AUDIT input, using default 3 ({e})")
+        os.environ["MAX_AUDIT"] = "3"
     all_results = {}
     total_combinations = (
         len(selected_models) * len(selected_base_names) *
@@ -70,12 +89,22 @@ async def main():
         for base_name in selected_base_names:
             for reasoning_config in reasoning_levels:
                 orchestrator = NetLogoOrchestratorPersonaV3ADK(model_name=model)
-                orchestrator.update_reasoning_config(reasoning_config["effort"], reasoning_config["summary"])
+                update_agent_configs(
+                    orchestrator,
+                    reasoning_effort=reasoning_config["effort"],
+                    reasoning_summary=reasoning_config["summary"],
+                    text_verbosity=None,
+                )
                 
                 for verbosity in selected_verbosity_levels:
                     current_combination += 1
                     ui.print_combination_header(current_combination, total_combinations)
-                    orchestrator.update_text_config(verbosity)
+                    update_agent_configs(
+                        orchestrator,
+                        reasoning_effort=None,
+                        reasoning_summary=None,
+                        text_verbosity=verbosity,
+                    )
                     ui.print_parameter_bundle(
                         model=model, base_name=base_name,
                         reasoning_effort=reasoning_config["effort"],
@@ -95,8 +124,7 @@ async def main():
     total_successful_agents = 0
     
     agent_keys = [
-        "lucim_operation_synthesizer", "lucim_scenario_synthesizer",
-        "plantuml_writer", "plantuml_lucim_auditor", "plantuml_lucim_corrector", "plantuml_lucim_final_auditor"
+        "lucim_operation_model_generator", "lucim_operation_model_auditor", "lucim_scenario_generator", "lucim_scenario_auditor", "lucim_plantuml_diagram_generator", "lucim_plantuml_diagram_auditor",
     ]
     
     for result_key, result in all_results.items():
@@ -117,3 +145,9 @@ async def main():
         total_successful_agents, overall_success_rate, all_results
     )
 
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n[INFO] Orchestrator interrupted by user.")

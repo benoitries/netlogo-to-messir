@@ -8,6 +8,7 @@ import asyncio
 import sys
 import pathlib
 import pytest
+from utils_orchestrator_v3_agent_config import update_agent_configs
 try:
     from orchestrator_persona_v3 import NetLogoOrchestratorPersonaV3  # legacy path
 except Exception:
@@ -42,8 +43,8 @@ async def test_orchestrator_persona_v3():
         orchestrator = NetLogoOrchestratorPersonaV3(model_name="gpt-5-mini")
         
         # Configure for low effort to speed up testing
-        orchestrator.update_reasoning_config("low", "auto")
-        orchestrator.update_text_config("medium")
+        update_agent_configs(orchestrator, reasoning_effort="low", reasoning_summary="auto", text_verbosity=None)
+        update_agent_configs(orchestrator, reasoning_effort=None, reasoning_summary=None, text_verbosity="medium")
         
         print(f"✅ Orchestrator created successfully")
         print(f"📁 Persona set: {orchestrator.selected_persona_set}")
@@ -68,10 +69,10 @@ async def test_orchestrator_persona_v3():
                 
                 # Check each step in the v3 pipeline
                 v3_steps = [
-                    "lucim_operation_synthesizer",
-                    "lucim_scenario_synthesizer",
-                    "plantuml_writer",
-                    "plantuml_lucim_auditor",
+                    "lucim_operation_model_generator",
+                    "lucim_scenario_generator",
+                    "lucim_plantuml_diagram_generator",
+                    "lucim_plantuml_diagram_auditor",
                     "plantuml_lucim_corrector",
                     "plantuml_lucim_final_auditor"
                 ]

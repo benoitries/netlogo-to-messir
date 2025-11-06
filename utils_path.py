@@ -13,8 +13,47 @@ for output folder computation across modules.
 
 from pathlib import Path
 from typing import Optional
+import re
 
-from utils_config_constants import OUTPUT_DIR
+from utils_config_constants import OUTPUT_DIR, DEFAULT_PERSONA_SET
+
+
+def sanitize_path_component(value: str) -> str:
+    """Return a filesystem-safe component string.
+
+    Replaces any character not in [A-Za-z0-9._-] with '_', then collapses consecutive underscores
+    and strips leading/trailing underscores. This keeps names readable/stable while safe for paths.
+    """
+    if value is None:
+        return ""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(value))
+    safe = re.sub(r"_+", "_", safe).strip("_")
+    return safe or "unnamed"
+
+
+def sanitize_agent_name(value: str) -> str:
+    """Return a Python identifier-safe string for agent names.
+    
+    Replaces any character not in [A-Za-z0-9_] with '_', then collapses consecutive underscores
+    and strips leading/trailing underscores. This ensures the name is a valid Python identifier
+    suitable for Pydantic validation (must start with letter/underscore, contain only alphanumeric/underscore).
+    
+    Args:
+        value: Original string (e.g., "mistral-medium" or "llama-3.3-70b-instruct")
+        
+    Returns:
+        Sanitized identifier (e.g., "mistral_medium" or "llama_3_3_70b_instruct")
+    """
+    if value is None:
+        return ""
+    # Replace all non-alphanumeric (except underscore) with underscore
+    safe = re.sub(r"[^A-Za-z0-9_]", "_", str(value))
+    # Collapse consecutive underscores
+    safe = re.sub(r"_+", "_", safe).strip("_")
+    # Ensure it starts with letter or underscore (Python identifier requirement)
+    if safe and not (safe[0].isalpha() or safe[0] == "_"):
+        safe = "_" + safe
+    return safe or "unnamed"
 
 
 def build_combination_folder_name(
@@ -27,7 +66,9 @@ def build_combination_folder_name(
 
     Example: "boiling-<model>-reason-medium-verb-high"
     """
-    return f"{case_name}-{model_name}-reason-{reasoning_effort}-verb-{text_verbosity}"
+    case_safe = sanitize_path_component(case_name)
+    model_safe = sanitize_path_component(model_name)
+    return f"{case_safe}-{model_safe}-reason-{reasoning_effort}-verb-{text_verbosity}"
 
 
 def get_run_base_dir(
@@ -36,7 +77,7 @@ def get_run_base_dir(
     model_name: str,
     reasoning_effort: str,
     text_verbosity: str,
-    persona_set: str = "persona-v1",
+    persona_set: str = DEFAULT_PERSONA_SET,
     version: Optional[str] = None,
     output_dir: Optional[Path] = None,
 ) -> Path:
@@ -48,7 +89,7 @@ def get_run_base_dir(
         model_name: Model name (from AVAILABLE_MODELS)
         reasoning_effort: minimal|low|medium|high
         text_verbosity: low|medium|high
-        persona_set: Persona set name (default: persona-v1)
+        persona_set: Persona set name (default: DEFAULT_PERSONA_SET)
         version: Optional orchestrator version (e.g., "v2", "v3-no-adk", "v3-adk")
         output_dir: Override for OUTPUT_DIR mainly for testing
 

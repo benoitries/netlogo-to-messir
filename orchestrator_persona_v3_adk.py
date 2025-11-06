@@ -71,19 +71,13 @@ class NetLogoOrchestratorPersonaV3ADK:
         self.ui = OrchestratorUI()
         self.fileio = OrchestratorFileIO()
         initialize_v3_orchestrator_components(self, model_name)
-        # Iterative correction guard
+        # Iterative audit cap (MAX_AUDIT)
         try:
-            self.max_correction = int(os.getenv("MAX_CORRECTION", "2"))
+            self.max_audit = int(os.environ.get("MAX_AUDIT") or 3)
         except Exception:
-            self.max_correction = 2
+            self.max_audit = 3
     
-    def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
-        """Backward-compatible wrapper to update reasoning across agents."""
-        update_agent_configs(self, reasoning_effort=reasoning_effort, reasoning_summary=reasoning_summary)
     
-    def update_text_config(self, text_verbosity: str):
-        """Backward-compatible wrapper to update text verbosity across agents."""
-        update_agent_configs(self, text_verbosity=text_verbosity)
     
     async def process_netlogo_file_v3_adk(self, file_info: Dict[str, Any]) -> Dict[str, Any]:
         """Process a single NetLogo file using ADK Sequential workflow."""

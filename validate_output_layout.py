@@ -92,17 +92,19 @@ def validate_case_folder(case_dir: Path) -> List[str]:
         errors.append(f"No orchestrator log found in {case_dir}")
 
     # Ensure Step 5 produced a standalone .puml file
-    step5_dir = case_dir / "05-plantuml_writer"
+    step5_dir = case_dir / "05-lucim_plantuml_diagram_generator"
     if step5_dir.exists() and step5_dir.is_dir():
         # Accept legacy filename pattern and new simplified name
-        puml_candidates = list(step5_dir.glob("*_plantuml_writer_diagram.puml"))
+        puml_candidates = list(step5_dir.glob("*_lucim_plantuml_diagram_generator_diagram.puml"))
+        if not puml_candidates:
+            puml_candidates = list(step5_dir.glob("*_plantuml_writer_diagram.puml"))  # Legacy pattern
         if not puml_candidates:
             puml_candidates = list(step5_dir.glob("diagram.puml"))
         if not puml_candidates:
-            errors.append(f"Missing PlantUML .puml file in {step5_dir} (expected diagram.puml or legacy *_plantuml_writer_diagram.puml)")
+            errors.append(f"Missing PlantUML .puml file in {step5_dir} (expected diagram.puml or legacy *_plantuml_writer_diagram.puml or *_lucim_plantuml_diagram_generator_diagram.puml)")
 
     # Ensure Step 7 produced a corrected standalone .puml file
-    step7_dir = case_dir / "07-plantuml_lucim_corrector"
+    # v3 pipeline has no corrector/final auditor
     if step7_dir.exists() and step7_dir.is_dir():
         # Accept timestamped corrected filename or simplified name
         puml7_candidates = list(step7_dir.glob("*_plantuml_corrector_diagram.puml"))

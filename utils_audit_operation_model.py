@@ -11,22 +11,20 @@ Minimal schema (tolerant):
   "events": [
       {
         "kind": "ie" | "oe",
+        "name": str,     # optional event name
         "sender": str,   # instance name ("system" or actor instance)
         "receiver": str  # instance name ("system" or actor instance)
       }
   ]
 }
 
-Rules implemented (from persona Step 1 doc):
-- AS1-SYS-UNIQUE: exactly one System named "System"
-- SS3-SYS-UNIQUE-IDENTITY: one logical System lifeline, canonical rendered name "System"
-- AS7/NAM2 actor type format: FirstCapitalLetterFormat prefixed by "Act"
-- NAM1 actor instance format: camelCase
-- AS3 allowed events System↔Actor only
-- AS4 no System→System
-- AS6 no Actor→Actor
-- AS8 IE direction: System→Actor
-- AS9 OE direction: Actor→System
+Rules implemented (from RULES_LUCIM_Operation_model.md):
+- LEM1-ACT-TYPE-FORMAT: actor type names FirstCapitalLetterFormat, prefixed by "Act"
+- LEM2-ACT-INSTANCE-FORMAT: actor instance names in camelCase
+- LEM2-IE-EVENT-NAME-FORMAT: input event names in camelCase
+- LEM3-OE-EVENT-NAME-FORMAT: output event names in camelCase
+- LEM4-IE-EVENT-DIRECTION: IE must be System → Actor
+- LEM5-OE-EVENT-DIRECTION: OE must be Actor → System
 """
 from __future__ import annotations
 
@@ -84,21 +82,9 @@ def _location(item: Any, fallback: str) -> str:
 def audit_environment(env: Dict[str, Any]) -> Dict[str, Any]:
     violations: List[Dict[str, str]] = []
 
-    system = (env or {}).get("system") or {}
-    system_name = (system.get("name") or "").strip()
-
-    # AS1 / SS3 — exactly one System named "System"
-    if system_name != "System":
-        violations.append({
-            "id": "AS1-SYS-UNIQUE",
-            "message": 'There must be exactly one System per model that is always named "System".',
-            "location": "system.name"
-        })
-        violations.append({
-            "id": "SS3-SYS-UNIQUE-IDENTITY",
-            "message": 'There SHALL be exactly one logical System lifeline named "System".',
-            "location": "system.name"
-        })
+    # Note: The current ruleset (RULES_LUCIM_Operation_model.md) does not define
+    # a normative check for unique System naming; we therefore do not emit
+    # violations about System identity here to stay aligned with the rules file.
 
     actors_node = env.get("actors") or []
     # Normalize to list of dicts for iteration
@@ -161,6 +147,7 @@ def audit_environment(env: Dict[str, Any]) -> Dict[str, Any]:
             kind = (evt.get("kind") or "").lower().strip()  # "ie" or "oe" expected
             sender = (evt.get("sender") or "").strip()
             receiver = (evt.get("receiver") or "").strip()
+            evt_name = (evt.get("name") or "").strip()
 
             sender_l = sender.lower()
             receiver_l = receiver.lower()
@@ -170,29 +157,20 @@ def audit_environment(env: Dict[str, Any]) -> Dict[str, Any]:
             sender_is_actor = sender_l in actor_index
             receiver_is_actor = receiver_l in actor_index
 
-            # AS4 — System→System forbidden
-            if sender_is_system and receiver_is_system:
-                violations.append({
-                    "id": "AS4-SYS-NO-SELF-LOOP",
-                    "message": "Events must never be from System to System.",
-                    "location": _location(evt, "event")
-                })
-
-            # AS6 — Actor→Actor forbidden
-            if sender_is_actor and receiver_is_actor:
-                violations.append({
-                    "id": "AS6-ACT-NO-ACT-ACT-EVENTS",
-                    "message": "Events must never be from Actor to Actor.",
-                    "location": _location(evt, "event")
-                })
-
-            # AS3 — System↔Actor only
-            if not ((sender_is_system and receiver_is_actor) or (sender_is_actor and receiver_is_system)):
-                violations.append({
-                    "id": "AS3-SYS-ACT-ALLOWED-EVENTS",
-                    "message": "Events must always be between the System and an Actor (no Actor↔Actor, no System↔System).",
-                    "location": _location(evt, "event")
-                })
+            # LEM2 / LEM3 — event name format checks when provided
+            if evt_name:
+                if kind == "ie" and not _is_camel_case(evt_name):
+                    violations.append({
+                        "id": "LEM2-IE-EVENT-NAME-FORMAT",
+                        "message": "All input event names must be human-readable, in camelCase.",
+                        "location": _location(evt, "event.name")
+                    })
+                if kind == "oe" and not _is_camel_case(evt_name):
+                    violations.append({
+                        "id": "LEM3-OE-EVENT-NAME-FORMAT",
+                        "message": "All output event names must be human-readable, in camelCase.",
+                        "location": _location(evt, "event.name")
+                    })
 
             # LEM4 — IE direction System→Actor
             if kind == "ie":

@@ -75,28 +75,28 @@ class NetLogoOrchestratorPersonaV3:
         # Timing tracking (only for agents used in v3 pipeline)
         self.execution_times = {
             "total_orchestration": 0,
-            "lucim_environment_synthesizer": 0,
-            "lucim_scenario_synthesizer": 0,
-            "plantuml_writer": 0,
-            "plantuml_lucim_auditor": 0,
+            "lucim_environment_generator": 0,
+            "lucim_scenario_generator": 0,
+            "lucim_plantuml_diagram_generator": 0,
+            "lucim_plantuml_diagram_auditor": 0,
             "plantuml_lucim_final_auditor": 0
         }
         
         # Token usage tracking (only for agents used in v3 pipeline)
         self.token_usage = {
-            "lucim_environment_synthesizer": {"used": 0},
-            "lucim_scenario_synthesizer": {"used": 0},
-            "plantuml_writer": {"used": 0},
-            "plantuml_lucim_auditor": {"used": 0},
+            "lucim_environment_generator": {"used": 0},
+            "lucim_scenario_generator": {"used": 0},
+            "lucim_plantuml_diagram_generator": {"used": 0},
+            "lucim_plantuml_diagram_auditor": {"used": 0},
             "plantuml_lucim_final_auditor": {"used": 0}
         }
         
         # Detailed timing tracking with start/end timestamps (only for agents used in v3 pipeline)
         self.detailed_timing = {
-            "lucim_environment_synthesizer": {"start": 0, "end": 0, "duration": 0},
-            "lucim_scenario_synthesizer": {"start": 0, "end": 0, "duration": 0},
-            "plantuml_writer": {"start": 0, "end": 0, "duration": 0},
-            "plantuml_lucim_auditor": {"start": 0, "end": 0, "duration": 0},
+            "lucim_environment_generator": {"start": 0, "end": 0, "duration": 0},
+            "lucim_scenario_generator": {"start": 0, "end": 0, "duration": 0},
+            "lucim_plantuml_diagram_generator": {"start": 0, "end": 0, "duration": 0},
+            "lucim_plantuml_diagram_auditor": {"start": 0, "end": 0, "duration": 0},
             "plantuml_lucim_final_auditor": {"start": 0, "end": 0, "duration": 0}
         }
         
@@ -153,16 +153,16 @@ class NetLogoOrchestratorPersonaV3:
         
         # Update persona paths for agents used in v3
         if hasattr(self.lucim_operation_model_generator_agent, 'update_persona_path'):
-            self.lucim_operation_model_generator_agent.update_persona_path(str(v3_persona_paths["lucim_environment_synthesizer"]))
+            self.lucim_operation_model_generator_agent.update_persona_path(str(v3_persona_paths["lucim_environment_generator"]))
         
         if hasattr(self.lucim_scenario_generator_agent, 'update_persona_path'):
-            self.lucim_scenario_generator_agent.update_persona_path(str(v3_persona_paths["lucim_scenario_synthesizer"]))
+            self.lucim_scenario_generator_agent.update_persona_path(str(v3_persona_paths["lucim_scenario_generator"]))
         
         if hasattr(self.plantuml_writer_agent, 'update_persona_path'):
-            self.plantuml_writer_agent.update_persona_path(str(v3_persona_paths["plantuml_writer"]))
+            self.plantuml_writer_agent.update_persona_path(str(v3_persona_paths["lucim_plantuml_diagram_generator"]))
         
         if hasattr(self.plantuml_lucim_auditor_agent, 'update_persona_path'):
-            self.plantuml_lucim_auditor_agent.update_persona_path(str(v3_persona_paths["plantuml_auditor"]))
+            self.plantuml_lucim_auditor_agent.update_persona_path(str(v3_persona_paths["lucim_plantuml_diagram_auditor"]))
         
         if hasattr(self.plantuml_lucim_final_auditor_agent, 'update_persona_path'):
             self.plantuml_lucim_final_auditor_agent.update_persona_path(str(v3_persona_paths["plantuml_final_auditor"]))
@@ -338,8 +338,8 @@ class NetLogoOrchestratorPersonaV3:
         base_name = file_info["base_name"]
         
         # Create run directory
-        tv = self.agent_configs["lucim_environment_synthesizer"].get("text_verbosity", "medium")
-        reff = self.agent_configs["lucim_environment_synthesizer"].get("reasoning_effort", "medium")
+        tv = self.agent_configs["lucim_environment_generator"].get("text_verbosity", "medium")
+        reff = self.agent_configs["lucim_environment_generator"].get("reasoning_effort", "medium")
         run_dir = self.fileio.create_run_directory(self.timestamp, base_name, self.model, reff, tv, self.selected_persona_set, version="v3-no-adk")
         
         # Start timing the total orchestration
@@ -395,7 +395,7 @@ class NetLogoOrchestratorPersonaV3:
             
             lucim_operation_model_result = self._execute_agent_with_tracking(
                 "lucim_operation_model_generator",
-                self.lucim_operation_model_generator_agent.synthesize_lucim_operation_from_source_code,
+                self.lucim_operation_model_generator_agent.generate_lucim_operation_model,
                 code_content,  # NetLogo source code (MANDATORY)
                 lucim_dsl_content,  # LUCIM DSL content (MANDATORY)
                 netlogo_lucim_mapping_content,  # NetLogo to LUCIM mapping (MANDATORY)
@@ -412,116 +412,116 @@ class NetLogoOrchestratorPersonaV3:
             
         except Exception as e:
             error_result = {
-                "agent_type": "lucim_environment_synthesizer",
+                "agent_type": "lucim_environment_generator",
                 "reasoning_summary": f"LUCIM Environment synthesis failed: {str(e)}",
                 "data": None,
                 "errors": [f"LUCIM Environment synthesis error: {str(e)}"]
             }
             self.logger.error(f"✗ Step 1: LUCIM Environment Synthesizer agent failed for {base_name}: {str(e)}")
-            processed_results["lucim_environment_synthesizer"] = error_result
+            processed_results["lucim_environment_generator"] = error_result
         
         # Step 2: LUCIM Scenario Synthesizer Agent
-        if processed_results.get("lucim_environment_synthesizer", {}).get("data"):
+        if processed_results.get("lucim_environment_generator", {}).get("data"):
             self.logger.info(f"Step 2: Running LUCIM Scenario Synthesizer agent for {base_name}...")
             
             try:
                 # Create agent output directory before the call
-                agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 2, "lucim_scenario_synthesizer")
+                agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 2, "lucim_scenario_generator")
                 
                 scenario_result = self._execute_agent_with_tracking(
-                    "lucim_scenario_synthesizer",
-                    self.lucim_scenario_generator_agent.write_scenarios,
-                    processed_results["lucim_environment_synthesizer"]["data"],  # LUCIM environment from step 1
+                    "lucim_scenario_generator",
+                    self.lucim_scenario_generator_agent.generate_scenarios,
+                    processed_results["lucim_environment_generator"]["data"],  # LUCIM environment from step 1
                     lucim_dsl_content,  # LUCIM DSL full definition
                     output_dir=agent_output_dir
                 )
                 
-                scenario_result["agent_type"] = "lucim_scenario_synthesizer"
+                scenario_result["agent_type"] = "lucim_scenario_generator"
                 self.lucim_scenario_generator_agent.save_results(scenario_result, base_name, self.model, "2", output_dir=agent_output_dir)
-                processed_results["lucim_scenario_synthesizer"] = scenario_result
+                processed_results["lucim_scenario_generator"] = scenario_result
                 
             except Exception as e:
                 error_result = {
-                    "agent_type": "lucim_scenario_synthesizer",
+                    "agent_type": "lucim_scenario_generator",
                     "reasoning_summary": f"Scenario writing failed: {str(e)}",
                     "data": None,
                     "errors": [f"Scenario writing error: {str(e)}"]
                 }
                 self.logger.error(f"✗ Step 2: LUCIM Scenario Synthesizer agent failed for {base_name}: {str(e)}")
-                processed_results["lucim_scenario_synthesizer"] = error_result
+                processed_results["lucim_scenario_generator"] = error_result
         else:
             self.logger.info(f"Skipping Step 2: LUCIM Scenario Synthesizer agent for {base_name} (LUCIM Environment synthesis failed)")
         
         # Step 3: PlantUML Writer Agent
-        if processed_results.get("lucim_scenario_synthesizer", {}).get("data"):
+        if processed_results.get("lucim_scenario_generator", {}).get("data"):
             self.logger.info(f"Step 3: Running PlantUML Writer agent for {base_name}...")
             
             try:
                 # Create agent output directory before the call
-                agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 3, "plantuml_writer")
+                agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 3, "lucim_plantuml_diagram_generator")
                 
                 plantuml_result = self._execute_agent_with_tracking(
-                    "plantuml_writer",
+                    "lucim_plantuml_diagram_generator",
                     self.plantuml_writer_agent.generate_plantuml_diagrams,
-                    processed_results["lucim_scenario_synthesizer"]["data"],  # Scenarios from step 2
+                    processed_results["lucim_scenario_generator"]["data"],  # Scenarios from step 2
                     output_dir=agent_output_dir
                 )
                 
-                plantuml_result["agent_type"] = "plantuml_writer"
+                plantuml_result["agent_type"] = "lucim_plantuml_diagram_generator"
                 self.plantuml_writer_agent.save_results(plantuml_result, base_name, self.model, "3", output_dir=agent_output_dir)
-                processed_results["plantuml_writer"] = plantuml_result
+                processed_results["lucim_plantuml_diagram_generator"] = plantuml_result
                 
             except Exception as e:
                 error_result = {
-                    "agent_type": "plantuml_writer",
+                    "agent_type": "lucim_plantuml_diagram_generator",
                     "reasoning_summary": f"PlantUML generation failed: {str(e)}",
                     "data": None,
                     "errors": [f"PlantUML generation error: {str(e)}"]
                 }
                 self.logger.error(f"✗ Step 3: PlantUML Writer agent failed for {base_name}: {str(e)}")
-                processed_results["plantuml_writer"] = error_result
+                processed_results["lucim_plantuml_diagram_generator"] = error_result
         else:
             self.logger.info(f"Skipping Step 3: PlantUML Writer agent for {base_name} (Scenario writing failed)")
         
         # Step 4: PlantUML LUCIM Auditor Agent
-        if processed_results.get("plantuml_writer", {}).get("data"):
+        if processed_results.get("lucim_plantuml_diagram_generator", {}).get("data"):
             self.logger.info(f"Step 4: Running PlantUML LUCIM Auditor agent for {base_name}...")
             
             # Get PlantUML file path
             plantuml_file_path = self.fileio.get_plantuml_file_path(
-                self.fileio.create_agent_output_directory(run_dir, 3, "plantuml_writer")
+                self.fileio.create_agent_output_directory(run_dir, 3, "lucim_plantuml_diagram_generator")
             )
             
             if plantuml_file_path and self.fileio.validate_plantuml_file(plantuml_file_path):
                 try:
                     # Create agent output directory before the call
-                    agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 4, "plantuml_lucim_auditor")
+                    agent_output_dir = self.fileio.create_agent_output_directory(run_dir, 4, "lucim_plantuml_diagram_auditor")
                     
                     audit_result = self._execute_agent_with_tracking(
-                        "plantuml_lucim_auditor",
+                        "lucim_plantuml_diagram_auditor",
                         self.plantuml_lucim_auditor_agent.audit_plantuml_diagrams,
                         plantuml_file_path,
                         str(LUCIM_RULES_FILE),  # Path to LUCIM DSL file (not content)
                         output_dir=agent_output_dir
                     )
                     
-                    audit_result["agent_type"] = "plantuml_lucim_auditor"
+                    audit_result["agent_type"] = "lucim_plantuml_diagram_auditor"
                     self.plantuml_lucim_auditor_agent.save_results(audit_result, base_name, self.model, "4", output_dir=agent_output_dir)
-                    processed_results["plantuml_lucim_auditor"] = audit_result
+                    processed_results["lucim_plantuml_diagram_auditor"] = audit_result
                     
                 except Exception as e:
                     error_result = {
-                        "agent_type": "plantuml_lucim_auditor",
+                        "agent_type": "lucim_plantuml_diagram_auditor",
                         "reasoning_summary": f"PlantUML audit failed: {str(e)}",
                         "data": None,
                         "errors": [f"PlantUML audit error: {str(e)}"]
                     }
                     self.logger.error(f"✗ Step 4: PlantUML LUCIM Auditor agent failed for {base_name}: {str(e)}")
-                    processed_results["plantuml_lucim_auditor"] = error_result
+                    processed_results["lucim_plantuml_diagram_auditor"] = error_result
             else:
                 self.logger.error(f"✗ Step 4: PlantUML file not found or invalid for {base_name}")
-                processed_results["plantuml_lucim_auditor"] = {
-                    "agent_type": "plantuml_lucim_auditor",
+                processed_results["lucim_plantuml_diagram_auditor"] = {
+                    "agent_type": "lucim_plantuml_diagram_auditor",
                     "reasoning_summary": "PlantUML file not found or invalid",
                     "data": None,
                     "errors": ["PlantUML file not found or invalid"]
@@ -530,8 +530,8 @@ class NetLogoOrchestratorPersonaV3:
             self.logger.info(f"Skipping Step 4: PlantUML LUCIM Auditor agent for {base_name} (PlantUML generation failed)")
         
         # Step 5: PlantUML LUCIM Corrector Agent (conditional)
-        if (processed_results.get("plantuml_lucim_auditor", {}).get("data") and 
-            processed_results["plantuml_lucim_auditor"].get("data", {}).get("verdict") == "non-compliant"):
+        if (processed_results.get("lucim_plantuml_diagram_auditor", {}).get("data") and 
+            processed_results["lucim_plantuml_diagram_auditor"].get("data", {}).get("verdict") == "non-compliant"):
             
             self.logger.info(f"Step 5: Running PlantUML LUCIM Corrector agent for {base_name}...")
             
@@ -542,8 +542,8 @@ class NetLogoOrchestratorPersonaV3:
                 corrector_result = self._execute_agent_with_tracking(
                     "plantuml_lucim_corrector",
                     self.plantuml_lucim_corrector_agent.correct_plantuml_diagrams,
-                    processed_results["plantuml_writer"]["data"],  # Original diagrams
-                    processed_results["plantuml_lucim_auditor"]["data"],  # Audit results
+                    processed_results["lucim_plantuml_diagram_generator"]["data"],  # Original diagrams
+                    processed_results["lucim_plantuml_diagram_auditor"]["data"],  # Audit results
                     lucim_dsl_content,
                     output_dir=agent_output_dir
                 )
@@ -667,7 +667,7 @@ class NetLogoOrchestratorPersonaV3:
                 }
         
         # Fallback to initial auditor (step 4)
-        initial_auditor_result = processed_results.get("plantuml_lucim_auditor")
+        initial_auditor_result = processed_results.get("lucim_plantuml_diagram_auditor")
         if initial_auditor_result and isinstance(initial_auditor_result, dict):
             data = initial_auditor_result.get("data")
             if isinstance(data, dict) and "verdict" in data:
@@ -703,10 +703,10 @@ class NetLogoOrchestratorPersonaV3:
     def _log_workflow_status_v3(self, base_name: str, results: Dict[str, Any]) -> None:
         """Log workflow status for v3 pipeline (steps 1-6 only)."""
         # Determine success status for each step in v3 pipeline
-        lucim_environment_success = results.get("lucim_environment_synthesizer", {}).get("data") is not None
-        lucim_scenario_synthesizer_success = results.get("lucim_scenario_synthesizer", {}).get("data") is not None
-        plantuml_writer_success = results.get("plantuml_writer", {}).get("data") is not None
-        plantuml_lucim_auditor_success = results.get("plantuml_lucim_auditor", {}).get("data") is not None
+        lucim_environment_success = results.get("lucim_environment_generator", {}).get("data") is not None
+        lucim_scenario_synthesizer_success = results.get("lucim_scenario_generator", {}).get("data") is not None
+        plantuml_writer_success = results.get("lucim_plantuml_diagram_generator", {}).get("data") is not None
+        plantuml_lucim_auditor_success = results.get("lucim_plantuml_diagram_auditor", {}).get("data") is not None
         plantuml_lucim_corrector_success = results.get("plantuml_lucim_corrector", {}).get("data") is not None
         plantuml_lucim_final_auditor_success = results.get("plantuml_lucim_final_auditor", {}).get("data") is not None
         
@@ -735,10 +735,10 @@ class NetLogoOrchestratorPersonaV3:
         self.logger.info(f"\n🔍 DETAILED AGENT STATUS:")
         
         # Determine status for each agent in v3 pipeline
-        lucim_environment_success = results.get("lucim_environment_synthesizer", {}).get("data") is not None
-        lucim_scenario_synthesizer_success = results.get("lucim_scenario_synthesizer", {}).get("data") is not None
-        plantuml_writer_success = results.get("plantuml_writer", {}).get("data") is not None
-        plantuml_lucim_auditor_success = results.get("plantuml_lucim_auditor", {}).get("data") is not None
+        lucim_environment_success = results.get("lucim_environment_generator", {}).get("data") is not None
+        lucim_scenario_synthesizer_success = results.get("lucim_scenario_generator", {}).get("data") is not None
+        plantuml_writer_success = results.get("lucim_plantuml_diagram_generator", {}).get("data") is not None
+        plantuml_lucim_auditor_success = results.get("lucim_plantuml_diagram_auditor", {}).get("data") is not None
         plantuml_lucim_corrector_success = results.get("plantuml_lucim_corrector", {}).get("data") is not None
         plantuml_lucim_final_auditor_success = results.get("plantuml_lucim_final_auditor", {}).get("data") is not None
         
@@ -772,8 +772,8 @@ class NetLogoOrchestratorPersonaV3:
             Dictionary containing all processing results
         """
         # Set up logging for this orchestration run, including reasoning and text verbosity
-        tv = self.agent_configs["lucim_environment_synthesizer"].get("text_verbosity", "medium")
-        reff = self.agent_configs["lucim_environment_synthesizer"].get("reasoning_effort", "medium")
+        tv = self.agent_configs["lucim_environment_generator"].get("text_verbosity", "medium")
+        reff = self.agent_configs["lucim_environment_generator"].get("reasoning_effort", "medium")
         rsum = self.agent_configs["lucim_environment_synthesizer"].get("reasoning_summary", "auto")
 
         self.logger = setup_orchestration_logger(
@@ -973,8 +973,8 @@ async def main():
     total_successful_agents = 0
     
     agent_keys = [
-        "lucim_environment_synthesizer", "lucim_scenario_synthesizer",
-        "plantuml_writer", "plantuml_lucim_auditor", "plantuml_lucim_corrector", "plantuml_lucim_final_auditor"
+        "lucim_environment_generator", "lucim_scenario_generator",
+        "lucim_plantuml_diagram_generator", "lucim_plantuml_diagram_auditor", "plantuml_lucim_corrector", "plantuml_lucim_final_auditor"
     ]
     
     for result_key, result in all_results.items():

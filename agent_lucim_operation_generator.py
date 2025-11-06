@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-NetLogo LUCIM Operation Synthesizer Agent using OpenAI models
-Synthesizes LUCIM operation model concepts from NetLogo source using OpenAI models.
+NetLogo LUCIM Operation Model Generator Agent using OpenAI models
+Generates / Corrects LUCIM operation model from NetLogo source using OpenAI models.
 """
 
 import os
@@ -12,25 +12,20 @@ import tiktoken
 from typing import Dict, Any
 from google.adk.agents import LlmAgent
 from openai import OpenAI
-from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens, format_prompt_for_responses_api
 from utils_response_dump import serialize_response_to_dict, write_input_instructions_before_api, write_all_output_files
-from utils_config_constants import expected_keys_for_agent
-from utils_task_loader import load_task_instruction
 
 from utils_config_constants import (
-    PERSONA_LUCIM_OPERATION_MODEL_GENERATOR, OUTPUT_DIR, LUCIM_RULES_FILE,
-    get_reasoning_config, DEFAULT_MODEL)
+    PERSONA_LUCIM_OPERATION_MODEL_GENERATOR, OUTPUT_DIR,
+    get_reasoning_config, DEFAULT_MODEL, RULES_LUCIM_OPERATION_MODEL)
+from utils_path import sanitize_agent_name
 
 
-def sanitize_model_name(model_name: str) -> str:
-    """Sanitize model name by replacing hyphens with underscores for valid identifier."""
-    return model_name.replace("-", "_")
 
 
 class LucimOperationModelGeneratorAgent(LlmAgent):
     model: str = DEFAULT_MODEL
     timestamp: str = ""
-    name: str = "NetLogo LUCIM Operation Synthesizer"
+    name: str = "NetLogo LUCIM Operation Model Generator"
 
     client: OpenAI = None
     reasoning_effort: str = "medium"
@@ -42,22 +37,22 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
     lucim_rules_text: str = ""
 
     def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
-        sanitized_name = sanitize_model_name(model_name)
         super().__init__(
-            name=f"netlogo_lucim_operation_synthesizer_agent_{sanitized_name}",
-            description="LUCIM Operation Synthesizer agent for NetLogo models"
+            name=f"netlogo_lucim_operation_model_generator_agent_{sanitize_agent_name(model_name)}",
+            description="LUCIM Operation Model Generator agent for NetLogo models"
         )
         self.model = model_name
         self.timestamp = external_timestamp or datetime.datetime.now().strftime("%Y%m%d_%H%M")
-        from utils_config_constants import OPENAI_API_KEY
-        self.client = OpenAI(api_key=OPENAI_API_KEY)
+        # Configure OpenAI client with automatic provider detection based on model
+        from utils_openai_client import get_openai_client_for_model
+        self.client = get_openai_client_for_model(self.model)
         try:
             self.persona_path = str(PERSONA_LUCIM_OPERATION_MODEL_GENERATOR)
             self.persona_text = pathlib.Path(self.persona_path).read_text(encoding="utf-8")
         except Exception:
             self.persona_text = ""
         try:
-            self.lucim_rules_path = str(LUCIM_RULES_FILE)
+            self.lucim_rules_path = str(RULES_LUCIM_OPERATION_MODEL)
             self.lucim_rules_text = pathlib.Path(self.lucim_rules_path).read_text(encoding="utf-8")
         except Exception:
             self.lucim_rules_text = ""
@@ -101,31 +96,45 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4
             return estimated_tokens
 
-    def synthesize_lucim_operation_from_source_code(
+    def generate_lucim_operation_model(
         self,
         netlogo_source_code: str,
-        lucim_dsl_definition: str,
         netlogo_lucim_mapping: str,
+        auditor_feedback: Dict[str, Any],
+        previous_operation_model: Dict[str, Any] | None,
         output_dir: str = None,
     ) -> Dict[str, Any]:
         """
-        Synthesize LUCIM operation model directly from NetLogo source code.
-        Used by persona-v3-limited-agents workflow.
+        Generate / Correct LUCIM operation model
         """
+        # Lazy-import heavy client utilities with retry to avoid transient FS timeouts
+        def _import_utils_openai_client():
+            import time as _time
+            last_err = None
+            for _ in range(3):
+                try:
+                    from utils_openai_client import (
+                        create_and_wait as _create_and_wait,
+                        get_output_text as _get_output_text,
+                        get_reasoning_summary as _get_reasoning_summary,
+                        get_usage_tokens as _get_usage_tokens,
+                        format_prompt_for_responses_api as _format_prompt_for_responses_api,
+                    )
+                    return _create_and_wait, _get_output_text, _get_reasoning_summary, _get_usage_tokens, _format_prompt_for_responses_api
+                except TimeoutError as e:  # Errno 60 on network FS
+                    last_err = e
+                    _time.sleep(0.5)
+                except Exception as e:
+                    last_err = e
+                    break
+            raise last_err if last_err else RuntimeError("Failed to import utils_openai_client")
+
+        create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens, format_prompt_for_responses_api = _import_utils_openai_client()
         if not netlogo_source_code or netlogo_source_code.strip() == "":
             return {
                 "reasoning_summary": "MISSING MANDATORY INPUT: NetLogo source code is required",
                 "data": None,
                 "errors": ["MANDATORY INPUT MISSING: NetLogo source code must be provided"],
-                "tokens_used": 0,
-                "input_tokens": 0,
-                "output_tokens": 0
-            }
-        if not lucim_dsl_definition or lucim_dsl_definition.strip() == "":
-            return {
-                "reasoning_summary": "MISSING MANDATORY INPUT: LUCIM DSL definition is required",
-                "data": None,
-                "errors": ["MANDATORY INPUT MISSING: LUCIM DSL definition must be provided"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
@@ -139,27 +148,55 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
                 "input_tokens": 0,
                 "output_tokens": 0
             }
+        if not self.persona_text or self.persona_text.strip() == "":
+            return {
+                "reasoning_summary": "MISSING MANDATORY INPUT: Persona file is required",
+                "data": None,
+                "errors": ["MANDATORY INPUT MISSING: Persona PSN_LUCIM_Operation_Model_Generator.md must be provided"],
+                "tokens_used": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+            }
 
-        task_content = load_task_instruction(3, "LUCIM Operation Synthesizer")
         instructions = (
-            f"{task_content}\n\n{self.persona_text}\n\n"
-            f"<LUCIM-DSL-DESCRIPTION>\n{lucim_dsl_definition}\n</LUCIM-DSL-DESCRIPTION>\n\n"
-            f"<NL-LUCIM-ENV-MAPPING>\n{netlogo_lucim_mapping}\n</NL-LUCIM-ENV-MAPPING>"
+            f"{self.persona_text}\n\n"
+            f"{netlogo_lucim_mapping}\n\n"
+            f"{self.lucim_rules_text}\n\n"
         )
         input_text = f"""
+
 <NETLOGO-SOURCE-CODE>
 ```
 {netlogo_source_code}
 ```
 </NETLOGO-SOURCE-CODE>
+
 """
+        # Always include auditor report and previous model blocks (empty on first call)
+        try:
+            auditor_json = json.dumps(auditor_feedback, indent=2) if isinstance(auditor_feedback, dict) and auditor_feedback else "{}"
+        except Exception:
+            auditor_json = "{}"
+        input_text += ("\n<AUDIT-REPORT>\n" "```json\n" + auditor_json + "\n```\n" "</AUDIT-REPORT>\n")
+
+        try:
+            prev_model_json = json.dumps(previous_operation_model, indent=2) if previous_operation_model is not None else "{}"
+        except Exception:
+            prev_model_json = "{}"
+        input_text += (
+            "\n<PREVIOUS-LUCIM-OPERATION-MODEL>\n"
+            "```json\n" + prev_model_json + "\n```\n"
+            "</PREVIOUS-LUCIM-OPERATION-MODEL>\n"
+        )
         system_prompt = f"{instructions}\n\n{input_text}"
         base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
         write_input_instructions_before_api(base_output_dir, system_prompt)
 
         exact_input_tokens = self.count_input_tokens(instructions, input_text)
         try:
-            api_config = get_reasoning_config("lucim_operation_synthesizer")
+            api_config = get_reasoning_config("lucim_operation_model_generator")
+            # Force the run-selected model (overrides DEFAULT_MODEL from configs)
+            api_config["model"] = self.model
             if "reasoning" in api_config:
                 api_config["reasoning"]["effort"] = self.reasoning_effort
                 api_config["reasoning"]["summary"] = self.reasoning_summary
@@ -168,7 +205,7 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
                 "input": [{"role": "user", "content": system_prompt}]
             })
             from utils_config_constants import AGENT_TIMEOUTS
-            timeout = AGENT_TIMEOUTS.get("lucim_operation_synthesizer")
+            timeout = AGENT_TIMEOUTS.get("lucim_operation_model_generator")
             response = create_and_wait(self.client, api_config, timeout_seconds=timeout)
 
             content = get_output_text(response)
@@ -227,13 +264,15 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
                     "raw_response": raw_response_serialized
                 }
         except Exception as e:
+            from utils_openai_client import build_error_raw_payload
             return {
                 "reasoning_summary": f"Error during model inference: {e}",
                 "data": None,
                 "errors": [f"Model inference error: {e}", f"Model used: {self.model}"],
                 "tokens_used": 0,
                 "input_tokens": 0,
-                "output_tokens": 0
+                "output_tokens": 0,
+                "raw_response": build_error_raw_payload(e)
             }
 
     def save_results(self, results: Dict[str, Any], base_name: str, model_name: str, step_number = None, output_dir = None):
@@ -242,7 +281,7 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
         write_all_output_files(
             output_dir=output_dir,
             results=results,
-            agent_type="lucim_operation_synthesizer",
+            agent_type="lucim_operation_model_generator",
             base_name=base_name,
             model=self.model,
             timestamp=self.timestamp,

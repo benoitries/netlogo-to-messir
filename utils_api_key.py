@@ -1,285 +1,163 @@
 #!/usr/bin/env python3
 """
-OpenAI API Key Management Utility
-Centralized handling of OpenAI API keys with automatic .env loading and validation
+Minimal API key loader
+
+Responsibilities:
+- Load environment variables from .env files (few common locations)
+- Return API keys for a given model/provider without validation
 """
 
 import os
-import sys
 from pathlib import Path
-from typing import Optional, List
+from typing import List
 from dotenv import load_dotenv
 
-# Try to import OpenAI, but don't fail if not available
-try:
-    from openai import OpenAI
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
-    OpenAI = object  # type: ignore
+
+def _env_locations() -> List[Path]:
+    """Return .env file locations in priority order (workspace root first)."""
+    code_dir = Path(__file__).parent  # code-netlogo-to-lucim-agentic-workflow/
+    workspace_root = code_dir.parent  # Workspace root where .env should be
+    return [
+        workspace_root,  # PRIORITY 1: Workspace root (where .env should be)
+        Path.cwd(),      # Current working directory
+        code_dir,        # Code directory
+    ]
 
 
 def load_env_files() -> None:
-    """
-    Load environment variables from multiple .env file locations.
-    
-    Searches for .env files in:
-    1. Current working directory
-    2. Code directory (where this file is located)
-    3. Parent directory of code directory
-    4. Project root (parent of parent)
-    
-    Stops loading once a valid API key is found.
-    """
-    # Get the directory where this utility is located
-    code_dir = Path(__file__).parent
-    
-    # List of potential .env file locations
-    env_locations = [
-        Path.cwd(),  # Current working directory
-        code_dir,    # Code directory
-        code_dir.parent,  # Parent directory
-        code_dir.parent.parent,  # Project root
-    ]
-    
-    # Load .env files from all locations
-    for location in env_locations:
-        env_file = location / '.env'
-        if env_file.exists():
-            load_dotenv(env_file)
-            print(f"✓ Loaded environment variables from: {env_file}")
-            
-            # Check if we have a valid API key after loading this file
-            api_key = os.getenv('OPENAI_API_KEY')
-            if api_key and api_key.startswith('sk-'):
-                print(f"✓ Found valid API key, stopping search")
-                break
-
-
-def get_openai_api_key() -> str:
-    """
-    Get OpenAI API key with automatic .env loading and validation.
-    
-    Returns:
-        str: The OpenAI API key
-        
-    Raises:
-        ValueError: If no API key is found or if validation fails
-    """
-    # Clear any existing environment variable to avoid conflicts
-    if 'OPENAI_API_KEY' in os.environ:
-        del os.environ['OPENAI_API_KEY']
-    
-    # Load environment variables from .env files
-    load_env_files()
-    
-    # Try multiple environment variable names
-    api_key = (
-        os.getenv('OPENAI_API_KEY') or 
-        os.getenv('OPENAI_KEY') or 
-        os.getenv('API_KEY')
-    )
-    
-    if not api_key:
-        raise ValueError(
-            "No OpenAI API key found. Please create a .env file with:\n"
-            "OPENAI_API_KEY=your-api-key-here\n\n"
-            "The .env file should be placed in one of these locations:\n"
-            f"- {Path.cwd() / '.env'}\n"
-            f"- {Path(__file__).parent / '.env'}\n"
-            f"- {Path(__file__).parent.parent / '.env'}"
-        )
-    
-    # Clean up the API key (remove export statements, quotes, etc.)
-    api_key = clean_api_key(api_key)
-    
-    # Basic format validation
-    if not api_key.startswith('sk-'):
-        print("⚠️  Warning: API key doesn't start with 'sk-' - this might not be a valid OpenAI API key")
-    
-    return api_key
+    """Load .env files from common locations in order (workspace root first, override system env)."""
+    seen: set[str] = set()
+    locations = _env_locations()
+    for i, base in enumerate(locations):
+        env_path = (base / ".env").resolve()
+        if str(env_path) in seen:
+            continue
+        seen.add(str(env_path))
+        if env_path.exists():
+            # First file (workspace root): override=True to override system environment variables
+            # Subsequent files: override=False so workspace root wins
+            override = (i == 0)
+            load_dotenv(env_path, override=override)
 
 
 def clean_api_key(raw_key: str) -> str:
     """
     Clean up API key by removing common formatting issues.
     
-    Args:
-        raw_key: Raw API key string that might contain export statements, quotes, etc.
-        
-    Returns:
-        str: Cleaned API key
+    Simple logic: extract sk-... from anywhere in the string, remove shell fragments.
     """
+    if not raw_key:
+        return ""
+    
     key = raw_key.strip()
     
-    # Remove leading export statements
+    # Detect and reject shell commands (security find-generic-password, etc.)
+    if key.startswith("$(") or "security find" in key.lower() or "find-generic-password" in key.lower():
+        return ""  # Return empty to trigger error message
+    
+    # Remove "export " prefix if present (handles "export OPENAI_API_KEY=...")
     if key.lower().startswith("export "):
-        key = key[len("export "):].strip()
+        key = key[7:].strip()  # Remove "export "
     
-    # If provided as KEY=VALUE, split and take the value part
-    if "=" in key:
+    # Handle KEY=VALUE format (multiple times if nested)
+    while "=" in key:
         parts = key.split("=", 1)
-        # If the left side looks like the key name, use right side
-        if parts[0].strip().upper() in {"OPENAI_API_KEY", "API_KEY", "KEY"}:
+        left = parts[0].strip().upper()
+        if left in {"OPENAI_API_KEY", "API_KEY", "KEY", "EXPORT", "EXPORT OPENAI_API_KEY"}:
             key = parts[1].strip()
+        else:
+            break
     
-    # Strip surrounding quotes
-    if (key.startswith('"') and key.endswith('"')) or (key.startswith("'") and key.endswith("'")):
-        key = key[1:-1].strip()
+    # Extract sk-... if present (handles sk-proj-... or sk-...)
+    if 'sk-' in key:
+        start = key.find('sk-')
+        key = key[start:]
+        
+        # Stop at first whitespace, quote, or paren
+        for term in [' ', '\n', '\t', '"', "'", ')', ';']:
+            if term in key:
+                key = key.split(term)[0]
+        
+        # Remove trailing shell fragments
+        for suffix in [' -w"', ' -w)', ' -w', ')"', '"', ')', '`']:
+            if key.endswith(suffix):
+                key = key[:-len(suffix)]
+        
+        key = key.strip()
+        if key.startswith('sk-') and len(key) >= 10:
+            return key
     
-    # Remove command substitution syntax $(...) and similar
-    if key.startswith("$(") and key.endswith(")"):
-        key = key[2:-1].strip()
+    # Remove quotes
+    key = key.strip('"\'`')
     
-    # Handle macOS security command patterns
-    if "security find-generic-password" in key:
-        print("⚠️  Warning: Found macOS security command in API key")
-        print("   This suggests the .env file contains a security command instead of the actual key")
-        print("   Please replace with the actual API key value")
-        # Try to extract the actual key by executing the security command
-        try:
-            import subprocess
-            # Extract the security command and execute it
-            if key.startswith("security "):
-                result = subprocess.run(key.split(), capture_output=True, text=True, timeout=5)
-                if result.returncode == 0:
-                    key = result.stdout.strip()
-                    print(f"   ✓ Successfully retrieved key from macOS keychain")
-                else:
-                    print(f"   ❌ Failed to retrieve key from keychain: {result.stderr}")
-        except Exception as e:
-            print(f"   ❌ Error executing security command: {e}")
+    # Remove shell fragments
+    for suffix in [' -w"', ' -w)', ' -w', ')"', '"', ')', '`']:
+        if key.endswith(suffix):
+            key = key[:-len(suffix)].strip()
     
-    # Remove security command patterns
-    if key.startswith("$(security ") and key.endswith('" -w'):
-        # Extract the actual key from security command
-        key = key[len("$(security "):-len('" -w')].strip()
-    
-    # Handle complex export patterns like "export OPENAI_API_KEY=sk-..." -w)"
-    if " -w)" in key:
-        key = key.split(" -w)")[0].strip()
-    
-    # Final cleanup of stray characters like trailing parentheses, semicolons, quotes
-    key = key.strip().strip(";").strip(")").strip('"').strip("'")
-    
+    return key.strip()
+
+
+def get_openai_api_key() -> str:
+    """Return OpenAI API key from environment after loading .env files."""
+    load_env_files()
+    key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY") or os.getenv("API_KEY")
+    if not key:
+        raise ValueError("OPENAI_API_KEY not found in environment variables")
+    # Clean the key to remove any formatting issues
+    original_key = key
+    key = clean_api_key(key)
+    if not key:
+        raise ValueError(
+            f"OPENAI_API_KEY is invalid. It may contain a shell command instead of the actual key.\n"
+            f"Original value starts with: {original_key[:50]}...\n"
+            f"Please ensure your .env file contains: OPENAI_API_KEY=sk-proj-... (not a shell command)"
+        )
+    # Validate: must start with sk-
+    if not key.startswith('sk-'):
+        raise ValueError(
+            f"OPENAI_API_KEY does not start with 'sk-'. Got: {key[:20]}... (first 20 chars)\n"
+            f"Original value: {original_key[:50]}...\n"
+            f"Please check your .env file at: {_env_locations()[0] / '.env'}"
+        )
     return key
 
 
-def validate_openai_key(api_key: Optional[str] = None) -> bool:
-    """
-    Validate OpenAI API key with a test API call.
-    
-    Args:
-        api_key: Optional API key to validate. If None, will load from environment.
-        
-    Returns:
-        bool: True if key is valid and API is accessible, False otherwise
-    """
-    if not OPENAI_AVAILABLE:
-        print("❌ OpenAI package not available. Install with: pip install openai")
-        return False
-    
-    try:
-        # Get API key if not provided
-        if api_key is None:
-            api_key = get_openai_api_key()
-        
-        # Create client and test with minimal API call
-        client = OpenAI(api_key=api_key)
-        
-        print("🔄 Testing OpenAI API key...")
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": "test"}],
-            max_tokens=1
-        )
-        
-        print("✅ OpenAI API key validation successful")
-        return True
-        
-    except Exception as e:
-        print(f"❌ OpenAI API key validation failed: {e}")
-        print("Please check your API key and try again")
-        return False
+def get_provider_for_model(model_name: str) -> str:
+    """Infer provider from model name: "openai" | "gemini" | "router"."""
+    name = (model_name or "").lower()
+    if name.startswith("gpt-5") or name.startswith("gpt-"):
+        return "openai"
+    if "gemini" in name:
+        return "gemini"
+    # All other models (Mistral, Llama, etc.) are routed through OpenRouter
+    return "router"
 
 
-def create_openai_client() -> OpenAI:
-    """
-    Create an OpenAI client with automatic API key loading and validation.
-    
-    Returns:
-        OpenAI: Configured OpenAI client
-        
-    Raises:
-        ValueError: If API key is not found or invalid
-        ImportError: If OpenAI package is not installed
-    """
-    if not OPENAI_AVAILABLE:
-        raise ImportError(
-            "OpenAI package not available. Install with: pip install openai"
-        )
-    
-    api_key = get_openai_api_key()
-    return OpenAI(api_key=api_key)
-
-
-def check_env_setup() -> bool:
-    """
-    Check if the environment is properly set up for OpenAI API usage.
-    
-    Returns:
-        bool: True if environment is properly configured, False otherwise
-    """
-    print("🔍 Checking OpenAI API environment setup...")
-    
-    # Check if OpenAI package is available
-    if not OPENAI_AVAILABLE:
-        print("❌ OpenAI package not installed")
-        print("   Install with: pip install openai")
-        return False
-    
-    # Check if API key is available
-    try:
-        api_key = get_openai_api_key()
-        print(f"✅ API key found: {api_key[:8]}...{api_key[-4:]}")
-    except ValueError as e:
-        print(f"❌ API key not found: {e}")
-        return False
-    
-    # Validate the API key
-    if not validate_openai_key(api_key):
-        return False
-    
-    print("✅ Environment setup complete!")
-    return True
-
-
-def main():
-    """Command-line interface for API key management."""
-    if len(sys.argv) > 1:
-        command = sys.argv[1]
-        
-        if command == "validate":
-            success = check_env_setup()
-            sys.exit(0 if success else 1)
-        
-        elif command == "test":
-            try:
-                client = create_openai_client()
-                print("✅ OpenAI client created successfully")
-            except Exception as e:
-                print(f"❌ Failed to create OpenAI client: {e}")
-                sys.exit(1)
-        
-        else:
-            print(f"Unknown command: {command}")
-            print("Available commands: validate, test")
-            sys.exit(1)
+def get_api_key_for_model(model_name: str) -> str:
+    """Return API key for the inferred provider (no validation)."""
+    load_env_files()
+    provider = get_provider_for_model(model_name)
+    if provider == "openai":
+        key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY") or os.getenv("API_KEY")
+        if key:
+            original_key = key
+            key = clean_api_key(key)
+            # Validate: OpenAI keys must start with sk-
+            if key and not key.startswith('sk-'):
+                raise ValueError(
+                    f"OPENAI_API_KEY does not start with 'sk-'. Got: {key[:20]}... (first 20 chars)\n"
+                    f"Original value: {original_key[:50]}...\n"
+                    f"Please check your .env file at: {_env_locations()[0] / '.env'}"
+                )
+    elif provider == "gemini":
+        key = os.getenv("GOOGLE_GEMINI_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_KEY")
+        if key:
+            key = clean_api_key(key)
     else:
-        # Default: check environment setup
-        success = check_env_setup()
-        sys.exit(0 if success else 1)
-
-
-if __name__ == "__main__":
-    main()
+        key = os.getenv("ROUTER_API_KEY") or os.getenv("ROUTER_KEY") or os.getenv("ROUTER") or os.getenv("OPENROUTER_API_KEY")
+        if key:
+            key = clean_api_key(key)
+    if not key:
+        raise ValueError(f"No API key found for provider '{provider}'.")
+    return key

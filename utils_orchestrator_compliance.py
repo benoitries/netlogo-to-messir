@@ -17,33 +17,57 @@ def extract_compliance_from_results(processed_results: Dict[str, Any]) -> Dict[s
     Returns:
         Dictionary with compliance status, source, and details
     """
-    # Try final auditor first
-    final_auditor_result = processed_results.get("plantuml_lucim_final_auditor")
-    if final_auditor_result and isinstance(final_auditor_result, dict):
-        data = final_auditor_result.get("data")
-        if isinstance(data, dict) and "verdict" in data:
+    # Prefer the v3 PlantUML LUCIM auditor result (step 6 in limited-agents pipeline)
+    # Current key naming in v3: "lucim_plantuml_diagram_auditor"
+    # Backward-compat keys kept for older runs: "lucim_plantuml_diagram_auditor", "plantuml_lucim_final_auditor"
+
+    def _evaluate_auditor(auditor_obj: Dict[str, Any], source: str, step: int) -> Dict[str, Any] | None:
+        if not auditor_obj or not isinstance(auditor_obj, dict):
+            return None
+        data = auditor_obj.get("data")
+        if isinstance(data, dict):
             verdict = data.get("verdict")
-            if verdict == "compliant":
-                return {"status": "VERIFIED", "source": "final_auditor", "details": {"verdict": verdict, "step": 6}}
-            elif verdict == "non-compliant":
-                return {"status": "NON-COMPLIANT", "source": "final_auditor", "details": {"verdict": verdict, "step": 6}}
-        errors = final_auditor_result.get("errors", [])
+            if isinstance(verdict, str):
+                v = verdict.strip().lower()
+                if v == "compliant":
+                    return {"status": "VERIFIED", "source": source, "details": {"verdict": verdict, "step": step}}
+                if v == "non-compliant":
+                    return {"status": "NON-COMPLIANT", "source": source, "details": {"verdict": verdict, "step": step}}
+        # If explicit errors exist, treat as non-compliant
+        errors = auditor_obj.get("errors", [])
         if errors:
-            return {"status": "NON-COMPLIANT", "source": "final_auditor", "details": {"reason": "auditor_errors", "errors": errors, "step": 6}}
-    
-    # Fallback to initial auditor
-    initial_auditor_result = processed_results.get("plantuml_lucim_auditor")
-    if initial_auditor_result and isinstance(initial_auditor_result, dict):
-        data = initial_auditor_result.get("data")
-        if isinstance(data, dict) and "verdict" in data:
-            verdict = data.get("verdict")
-            if verdict == "compliant":
-                return {"status": "VERIFIED", "source": "initial_auditor", "details": {"verdict": verdict, "step": 4}}
-            elif verdict == "non-compliant":
-                return {"status": "NON-COMPLIANT", "source": "initial_auditor", "details": {"verdict": verdict, "step": 4}}
-        errors = initial_auditor_result.get("errors", [])
-        if errors:
-            return {"status": "NON-COMPLIANT", "source": "initial_auditor", "details": {"reason": "auditor_errors", "errors": errors, "step": 4}}
-    
-    return {"status": "UNKNOWN", "source": "none", "details": {"reason": "no_auditor_verdict_found"}}
+            return {"status": "NON-COMPLIANT", "source": source, "details": {"reason": "auditor_errors", "errors": errors, "step": step}}
+        return None
+
+    # 1) v3 key
+    res = _evaluate_auditor(processed_results.get("lucim_plantuml_diagram_auditor"), "diagram_auditor_v3", 6)
+    if res:
+        return res
+
+    # 2) backward-compat: initial auditor (older naming)
+    res = _evaluate_auditor(processed_results.get("lucim_plantuml_diagram_auditor"), "diagram_auditor_legacy", 6)
+    if res:
+        return res
+
+    # 3) backward-compat: final auditor (if ever present in older flows)
+    res = _evaluate_auditor(processed_results.get("plantuml_lucim_final_auditor"), "final_auditor_legacy", 6)
+    if res:
+        return res
+
+    # 4) Deterministic python audits (if provided) as a last resort
+    py_audits = processed_results.get("python_audits")
+    if isinstance(py_audits, dict):
+        diagram_py = py_audits.get("diagram")
+        if isinstance(diagram_py, dict):
+            verdict = diagram_py.get("verdict")
+            if isinstance(verdict, str):
+                v = verdict.strip().lower()
+                if v == "compliant":
+                    return {"status": "VERIFIED", "source": "python_audit", "details": {"verdict": verdict, "step": 6}}
+                if v == "non-compliant":
+                    return {"status": "NON-COMPLIANT", "source": "python_audit", "details": {"verdict": verdict, "step": 6}}
+
+    # Binary fallback: if no authoritative verdict was found, mark as NON-COMPLIANT
+    # Rationale: UNKNOWN is disallowed; absence of proof of compliance => non-compliant.
+    return {"status": "NON-COMPLIANT", "source": "fallback", "details": {"reason": "no_auditor_verdict_found", "step": 6}}
 

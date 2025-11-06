@@ -9,6 +9,7 @@ Requires Google ADK to be installed. No fallback if ADK is not available.
 import sys
 import asyncio
 import pathlib
+from utils_orchestrator_v3_agent_config import update_agent_configs
 
 # Verify ADK is available first
 print("Testing ADK availability...")
@@ -57,12 +58,10 @@ async def test_orchestrator_adk():
     print("Test 2: Checking agent initialization...")
     try:
         agents = [
-            ("LUCIM Operation Synthesizer", orchestrator.lucim_operation_synthesizer_agent),
-            ("LUCIM Scenario Synthesizer", orchestrator.lucim_scenario_synthesizer_agent),
-            ("PlantUML Writer", orchestrator.plantuml_writer_agent),
-            ("PlantUML Auditor", orchestrator.plantuml_lucim_auditor_agent),
-            ("PlantUML Corrector", orchestrator.plantuml_lucim_corrector_agent),
-            ("PlantUML Final Auditor", orchestrator.plantuml_lucim_final_auditor_agent),
+            ("LUCIM Operation Model Generator", orchestrator.lucim_operation_model_generator_agent),
+            ("LUCIM Scenario Generator", orchestrator.lucim_scenario_generator_agent),
+            ("PlantUML Diagram Generator", orchestrator.lucim_plantuml_diagram_generator_agent),
+            ("PlantUML Diagram Auditor", orchestrator.lucim_plantuml_diagram_auditor_agent),
         ]
         
         for name, agent in agents:
@@ -78,8 +77,7 @@ async def test_orchestrator_adk():
     # Test 3: Configuration updates
     print("Test 3: Testing configuration updates...")
     try:
-        orchestrator.update_reasoning_config("high", "auto")
-        orchestrator.update_text_config("high")
+        update_agent_configs(orchestrator, reasoning_effort="high", reasoning_summary="auto", text_verbosity="high")
         print("✓ Configuration updates successful")
         print()
     except Exception as e:

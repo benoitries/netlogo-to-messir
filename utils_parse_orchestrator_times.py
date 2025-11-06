@@ -14,12 +14,12 @@ COMP_LINE = re.compile(r'^.*completed in\s+([0-9]+\.[0-9]+|[0-9]+)s')
 DETAIL_LINE = re.compile(r'^.*SUCCESS\s+([0-9]+\.[0-9]+|[0-9]+)s')
 
 STEP_ORDER = [
-    ('netlogo_abstract_syntax_extractor', 1),
-    ('behavior_extractor', 2),
-    ('lucim_environment_synthesizer', 3),
-    ('lucim_scenario_synthesizer', 4),
-    ('plantuml_writer', 5),
-    ('plantuml_lucim_auditor', 6)
+    ('lucim_operation_model_generator', 1),
+    ('lucim_operation_model_auditor', 2),
+    ('lucim_scenario_generator', 3),
+    ('lucim_scenario_auditor', 4),
+    ('lucim_plantuml_diagram_generator', 5),
+    ('lucim_plantuml_diagram_auditor', 6)
 ]
 
 # Accept any model token (no hard-coded names); model part excludes underscores

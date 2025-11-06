@@ -4,7 +4,7 @@ A sophisticated multi-agent AI system that automatically converts NetLogo agent-
 
 ## 🚀 Overview
 
-This project implements a 6-agent orchestration pipeline that transforms NetLogo simulation models into standardized LUCIM PlantUML diagrams. Each artifact is produced by a Generator and validated by its paired Auditor. When non-compliance is detected, the corresponding Generator performs minimal auto-corrections (there is no separate Corrector agent).
+This project implements an ADK v3 3-stage iterative orchestration pipeline that transforms NetLogo simulation models into standardized LUCIM PlantUML diagrams. Each stage runs as Generator ↔ Auditor iterations with feedback until compliance or cap.
 
 ### Key Features
 
@@ -18,15 +18,14 @@ This project implements a 6-agent orchestration pipeline that transforms NetLogo
 
 ### Workflow Summary
 
-For a concise overview of the orchestration flow, per-agent inputs/outputs, and known ambiguities/inconsistencies, see:
+Single Source of Truth (SSOT) for the orchestration flow, per-agent inputs/outputs, and iteration logic:
 
-- `code-netlogo-to-lucim-agentic-workflow/docs/orchestration-flow.md` (detailed per-agent I/O and conditions)
-- `code-netlogo-to-lucim-agentic-workflow/docs/orchestrator_workflow_summary.md` (findings and inconsistencies)
+- `code-netlogo-to-lucim-agentic-workflow/docs/orchestration-flow.md`
 
 ### Reference Orchestrator (Canonical)
 The canonical reference implementation of the multi-agent workflow is:
 
-- `code-netlogo-to-lucim-agentic-workflow/archive/orchestrator_persona_v3.py`
+- `code-netlogo-to-lucim-agentic-workflow/orchestrator_persona_v3_adk.py`
 
 See `code-netlogo-to-lucim-agentic-workflow/docs/ORCHESTRATOR_REFERENCE.md` for rationale and run instructions.
 
@@ -42,14 +41,11 @@ This order is enforced across all agents and is reflected in saved `input-instru
 
 ## 🏗️ Architecture
 
-### The Orchestration Pipeline (6 Agents)
+### The Orchestration Pipeline (ADK v3 — 3 Stages, Iterative)
 
-1. **LUCIM Operation Model Generator** — Produces the operation model; performs precise and exhaustive corrections when auditor flags issues
-2. **LUCIM Operation Model Auditor** — Audits the operation model for LUCIM compliance
-3. **LUCIM Scenario Generator** — Produces scenarios; performs precise and exhaustive corrections when auditor flags issues
-4. **LUCIM Scenario Auditor** — Audits scenarios for LUCIM compliance
-5. **LUCIM PlantUML Diagram Generator** — Produces PlantUML diagrams; performs precise and exhaustive corrections when auditor flags issues
-6. **LUCIM PlantUML Diagram Auditor** — Audits PlantUML diagrams for LUCIM compliance
+1. **LUCIM Operation Model (Generator ↔ Auditor)** — Iterative until compliant or cap
+2. **LUCIM Scenario (Generator ↔ Auditor)** — Iterative until compliant or cap
+3. **LUCIM PlantUML Diagram (Writer ↔ Auditor)** — Iterative until compliant or cap
 
 ### AI Agents
 
@@ -62,7 +58,7 @@ This order is enforced across all agents and is reflected in saved `input-instru
 
 ## 📁 Project Structure
 
-Note: Persona directories under `input-persona/` are symbolic links to `experimentation/input/input-persona/`. The default persona set is `persona-v1`; you can change it at runtime via the interactive selection menu.
+Note: Persona directories under `input-persona/` are symbolic links to `experimentation/input/input-persona/`. The default persona set is `persona-v3-limited-agents`; you can change it at runtime via the interactive selection menu.
 
 ```
 code-netlogo-to-lucim-agentic-workflow/
@@ -148,16 +144,30 @@ This will persist outputs under the canonical structure in `code-netlogo-to-luci
 
 - Reasoning: `reasoning: { effort: "minimal" | "low" | "medium" | "high" }` (default: `medium`)
 - Text: `text: { verbosity: "low" | "medium" | "high" }` (default: `medium`)
-- Persona Set: Interactive selection from available persona sets in `input-persona/` (default: `persona-v1`)
+- Persona Set: Interactive selection from available persona sets in `input-persona/` (default: `persona-v3-limited-agents`)
 
 These parameters are supported through:
-- Direct programmatic calls: use `orchestrator.update_reasoning_config(effort, summary)` and `orchestrator.update_text_config(verbosity)`
+- Direct programmatic calls: use `update_agent_configs(orchestrator, reasoning_effort=..., reasoning_summary=..., text_verbosity=...)` from `utils_orchestrator_v3_agent_config`
 - Terminal interactive flow: select reasoning effort (now including "minimal") and text verbosity when prompted
-- Persona set selection: Interactive menu listing all available persona sets, with `persona-v1` as default
+- Persona set selection: Interactive menu listing all available persona sets, with `persona-v3-limited-agents` as default
 
 ### OpenAI API Usage
 
-This project uses the OpenAI Responses API for all model inferences. There are no remaining usages of the legacy Chat Completions API.
+This project uses a provider-aware routing strategy:
+
+- OpenAI and Gemini models → OpenAI Responses API with polling.
+- OpenRouter models (e.g., Mistral, Llama) → Chat Completions endpoint.
+
+Rationale: Many OpenRouter-provided models (notably Mistral/Llama) do not expose the Responses API path and would return HTTP 404 when called there. Chat Completions is the canonical, widely supported endpoint for those models.
+
+Defaults for OpenRouter Chat Completions calls:
+- `max_tokens = 10000`
+- `temperature = 0.2`
+- `top_p` left as provider default
+
+Required OpenRouter headers are passed per call:
+- `HTTP-Referer` (from `OPENROUTER_HTTP_REFERER`, fallback to repository URL)
+- `X-Title` (from `OPENROUTER_X_TITLE`, fallback to a project name)
 
 #### Automatic API Key Management
 
@@ -263,8 +273,9 @@ code-netlogo-to-lucim-agentic-workflow/
                 output-raw_response.json
                 output-reasoning.md
                 output-response.json
-              1_iter/                 # Iteration 1 (if corrections needed)
-                iter-1-auditor/       # Operation Model Auditor
+              iter-1/                 # Iteration 1 (if corrections needed)
+                1-generator/
+                2-auditor/            # Operation Model Auditor
                   input-instructions.md
                   output-data.json
                   ...
@@ -279,8 +290,9 @@ code-netlogo-to-lucim-agentic-workflow/
                 input-instructions.md
                 output-data.json
                 ...
-              1_iter/                 # Iteration 1 (if corrections needed)
-                iter-1-auditor/       # Scenario Auditor
+              iter-1/                 # Iteration 1 (if corrections needed)
+                1-generator/
+                2-auditor/            # Scenario Auditor
                   ...
                 output_python_scenario.md
             plantuml/
@@ -289,8 +301,9 @@ code-netlogo-to-lucim-agentic-workflow/
                 input-instructions.md
                 output-data.json
                 ...
-              1_iter/                 # Iteration 1 (if corrections needed)
-                iter-1-auditor/       # PlantUML Diagram Auditor
+              iter-1/                 # Iteration 1 (if corrections needed)
+                1-generator/
+                2-auditor/            # PlantUML Diagram Auditor
                   output_python_diagram.md
                   ...
           <another-case>-<model>-<DATE>-reason-<X>-verb-<Y>/
@@ -309,20 +322,20 @@ Validation script: `code-netlogo-to-lucim/validate_output_layout.py` (simulated 
 Success Criteria rule validation executed on 2025-09-25 09:45 (local time).
 Validation script: `code-netlogo-to-lucim/validate_task_success_criteria.py` (checks checked criteria have end-of-line timestamps and unchecked ones do not).
 
-### Reference: LUCIM/UCI Rules Path (Consistency Check)
+### Reference: LUCIM/UCI Rules Files (per agent)
 
-The canonical LUCIM/UCI compliance rules file is referenced through the `LUCIM_RULES_FILE` constant in `utils_config_constants.py` and must point to:
+New code paths use explicit rules files per stage under the active persona set (single source of truth in `utils_config_constants.py`):
 
-`code-netlogo-to-lucim-agentic-workflow/input-persona/DSL_Target_LUCIM-full-definition-for-compliance.md`
+- Operation Model rules: `RULES_LUCIM_OPERATION_MODEL`
+- Scenario rules: `RULES_LUCIM_SCENARIO`
+- Diagram rules: `RULES_LUCIM_PLANTUML_DIAGRAM`
+- NetLogo→Operation mapping: `RULES_MAPPING_NETLOGO_TO_OPERATION_MODEL`
 
 Quick verification commands:
 
 ```bash
-rg -n "LUCIM_RULES_FILE" code-netlogo-to-lucim-agentic-workflow
-rg -n "DSL_Target_LUCIM-full-definition-for-compliance.md" .
+rg -n "RULES_LUCIM_" code-netlogo-to-lucim-agentic-workflow
 ```
-
-If either command shows mismatches, update the references in Python agents and Markdown docs accordingly.
 
 Cursor Rules validation executed on 2025-09-25 10:15 (local time).
 Created rules:

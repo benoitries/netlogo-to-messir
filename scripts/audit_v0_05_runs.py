@@ -52,10 +52,10 @@ DEFAULT_OUTPUT_V005_DIR = REPO_ROOT / "output" / "v0.05"
 STAGE_DIR_PREFIXES = [
     "01-netlogo_abstract_syntax_extractor",
     "02-behavior_extractor",
-    "03-lucim_environment_synthesizer",
-    "04-lucim_scenario_synthesizer",
-    "05-plantuml_writer",
-    "06-plantuml_lucim_auditor",
+    "03-lucim_environment_generator",
+    "04-lucim_scenario_generator",
+    "05-lucim_plantuml_diagram_generator",
+    "06-lucim_plantuml_diagram_auditor",
     "07-plantuml_lucim_corrector",
     "08-plantuml_lucim_final_auditor",
 ]

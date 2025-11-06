@@ -10,6 +10,7 @@ import asyncio
 import sys
 import pathlib
 from orchestrator_persona_v3_adk import NetLogoOrchestratorPersonaV3ADK
+from utils_orchestrator_v3_agent_config import update_agent_configs
 
 
 async def test_integration_adk():
@@ -44,8 +45,7 @@ async def test_integration_adk():
         orchestrator = NetLogoOrchestratorPersonaV3ADK(model_name="gpt-5-mini")
         
         # Configure for low effort to speed up testing
-        orchestrator.update_reasoning_config("low", "auto")
-        orchestrator.update_text_config("medium")
+        update_agent_configs(orchestrator, reasoning_effort="low", reasoning_summary="auto", text_verbosity="medium")
         
         print(f"✅ Orchestrator created successfully")
         print(f"📁 Persona set: {orchestrator.persona_set}")
@@ -74,35 +74,27 @@ async def test_integration_adk():
         steps_completed = []
         steps_failed = []
         
-        if processed_results.get("lucim_operation_synthesizer"):
-            steps_completed.append("Step 1: LUCIM Environment Synthesizer")
+        if processed_results.get("lucim_operation_model_generator"):
+            steps_completed.append("Step 1: LUCIM Operation Model Generator")
         else:
-            steps_failed.append("Step 1: LUCIM Environment Synthesizer")
+            steps_failed.append("Step 1: LUCIM Operation Model Generator")
         
-        if processed_results.get("lucim_scenario_synthesizer"):
-            steps_completed.append("Step 2: LUCIM Scenario Synthesizer")
+        if processed_results.get("lucim_scenario_generator"):
+            steps_completed.append("Step 2: LUCIM Scenario Generator")
         else:
-            steps_failed.append("Step 2: LUCIM Scenario Synthesizer")
+            steps_failed.append("Step 2: LUCIM Scenario Generator")
         
-        if processed_results.get("plantuml_writer"):
-            steps_completed.append("Step 3: PlantUML Writer")
+        if processed_results.get("lucim_plantuml_diagram_generator"):
+            steps_completed.append("Step 3: LUCIM PlantUML Diagram Generator")
         else:
-            steps_failed.append("Step 3: PlantUML Writer")
+            steps_failed.append("Step 3: LUCIM PlantUML Diagram Generator")
         
-        if processed_results.get("plantuml_lucim_auditor"):
+        if processed_results.get("lucim_plantuml_diagram_auditor"):
             steps_completed.append("Step 4: PlantUML LUCIM Auditor")
         else:
             steps_failed.append("Step 4: PlantUML LUCIM Auditor")
         
-        if processed_results.get("plantuml_lucim_corrector"):
-            steps_completed.append("Step 5: PlantUML LUCIM Corrector (conditional)")
-        else:
-            print("⏭  Step 5: PlantUML LUCIM Corrector - skipped (not needed)")
-        
-        if processed_results.get("plantuml_lucim_final_auditor"):
-            steps_completed.append("Step 6: PlantUML LUCIM Final Auditor (conditional)")
-        else:
-            print("⏭  Step 6: PlantUML LUCIM Final Auditor - skipped (not needed)")
+        # v3 pipeline: no corrector/final auditor
         
         print()
         print(f"✅ Steps completed ({len(steps_completed)}):")

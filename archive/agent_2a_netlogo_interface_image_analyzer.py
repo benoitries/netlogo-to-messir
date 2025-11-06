@@ -33,9 +33,6 @@ ALLOWED_WIDGET_TYPES = {
     "Monitor", "Plot", "Output", "Note"
 }
 
-def sanitize_model_name(model_name: str) -> str:
-    """Sanitize model name by replacing hyphens with underscores for valid identifier."""
-    return model_name.replace("-", "_")
 
 class NetLogoInterfaceImageAnalyzerAgent(LlmAgent):
     model: str = DEFAULT_MODEL
@@ -51,9 +48,8 @@ class NetLogoInterfaceImageAnalyzerAgent(LlmAgent):
     persona_text: str = ""
     
     def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
-        sanitized_name = sanitize_model_name(model_name)
         super().__init__(
-            name=f"netlogo_interface_image_analyzer_agent_{sanitized_name}",
+            name=f"netlogo_interface_image_analyzer_agent_{model_name}",
             description="Interface image analyzer extracting widget information from NetLogo UI screenshots"
         )
         self.model = model_name

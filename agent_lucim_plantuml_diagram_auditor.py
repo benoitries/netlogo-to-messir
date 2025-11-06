@@ -14,20 +14,17 @@ from google.adk.agents import LlmAgent
 from openai import OpenAI
 from utils_response_dump import serialize_response_to_dict, write_all_output_files, write_input_instructions_before_api
 from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, format_prompt_for_responses_api
-from utils_task_loader import load_task_instruction
 
 from utils_config_constants import (
-    PERSONA_LUCIM_PLANTUML_DIAGRAM_AUDITOR, OUTPUT_DIR, LUCIM_RULES_FILE,
-    get_reasoning_config, DEFAULT_MODEL, AGENT_TIMEOUTS)
+    PERSONA_LUCIM_PLANTUML_DIAGRAM_AUDITOR, OUTPUT_DIR,
+    get_reasoning_config, DEFAULT_MODEL, AGENT_TIMEOUTS, RULES_LUCIM_PLANTUML_DIAGRAM)
+from utils_path import sanitize_agent_name
 
 # Configuration
 PERSONA_FILE = PERSONA_LUCIM_PLANTUML_DIAGRAM_AUDITOR
 WRITE_FILES = True
 
 
-def sanitize_model_name(model_name: str) -> str:
-    """Sanitize model name by replacing hyphens with underscores for valid identifier."""
-    return model_name.replace("-", "_")
 
 class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
     model: str = DEFAULT_MODEL
@@ -40,13 +37,12 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
     text_verbosity: str = "medium"
     persona_path: str = ""
     persona_text: str = ""
-    lucim_rules_path: str = ""
-    lucim_rules_text: str = ""
+    rules_path: str = ""
+    rules_text: str = ""
     
     def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
-        sanitized_name = sanitize_model_name(model_name)
         super().__init__(
-            name=f"netlogo_plantuml_auditor_agent_{sanitized_name}",
+            name=f"netlogo_lucim_plantuml_diagram_auditor_agent_{sanitize_agent_name(model_name)}",
             description="PlantUML auditor agent for LUCIM UCI compliance checking"
         )
         self.model = model_name
@@ -58,9 +54,9 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
             # Format: YYYYMMDD_HHMM for better readability
             self.timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
         
-        # Configure OpenAI client (assumes key already validated by orchestrator)
-        from utils_config_constants import OPENAI_API_KEY
-        self.client = OpenAI(api_key=OPENAI_API_KEY)
+        # Configure OpenAI client with automatic provider detection based on model
+        from utils_openai_client import get_openai_client_for_model
+        self.client = get_openai_client_for_model(self.model)
         # Initialize persona and rules from defaults; orchestrator can override
         try:
             self.persona_path = str(PERSONA_FILE)
@@ -68,10 +64,11 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
         except Exception:
             self.persona_text = ""
         try:
-            self.lucim_rules_path = str(LUCIM_RULES_FILE)
-            self.lucim_rules_text = pathlib.Path(self.lucim_rules_path).read_text(encoding="utf-8")
+            self.rules_path = str(RULES_LUCIM_PLANTUML_DIAGRAM)
+            self.rules_text = pathlib.Path(self.rules_path).read_text(encoding="utf-8")
         except Exception:
-            self.lucim_rules_text = ""
+            self.rules_text = ""
+        
     
     def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
         """
@@ -111,15 +108,7 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
             print(f"[WARNING] Failed to load persona file: {persona_path} ({e})")
             self.persona_text = ""
     
-    def update_lucim_rules_path(self, rules_path: str) -> None:
-        if not rules_path:
-            return
-        self.lucim_rules_path = rules_path
-        try:
-            self.lucim_rules_text = pathlib.Path(rules_path).read_text(encoding="utf-8")
-        except Exception as e:
-            print(f"[WARNING] Failed to load LUCIM rules file: {rules_path} ({e})")
-            self.lucim_rules_text = ""
+    
     
     def count_input_tokens(self, instructions: str, input_text: str) -> int:
         """
@@ -153,7 +142,7 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def audit_plantuml_diagrams(self, plantuml_diagram_file_path: str, lucim_dsl_file_path: str, step: int = 6, output_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
+    def audit_plantuml_diagrams(self, plantuml_diagram_file_path: str, step: int = 6, output_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
         """
         Audit PlantUML sequence diagrams for LUCIM UCI compliance using the PlantUML Auditor persona.
 
@@ -167,13 +156,22 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
             Dictionary containing reasoning, non-compliant rules, and any errors
         """
         # Resolve base output directory (use provided output_dir or fall back to OUTPUT_DIR)
-        base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
+        if output_dir is not None:
+            if isinstance(output_dir, str):
+                base_output_dir = pathlib.Path(output_dir)
+            else:
+                base_output_dir = output_dir
+        else:
+            base_output_dir = OUTPUT_DIR
         
-        # Load TASK instruction using utility function
-        task_content = load_task_instruction(step, f"PlantUML Auditor (step {step})")
-
-        # Build canonical instructions order: task_content → persona → LUCIM rules (use instance values)
-        instructions = f"{task_content}\n\n{self.persona_text}\n\n{self.lucim_rules_text}"
+        # Ensure output directory exists before writing files
+        try:
+            base_output_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            print(f"[WARNING] Failed to create output directory {base_output_dir}: {e}")
+        
+        # Build canonical instructions: persona + rules (required for audit)
+        instructions = f"{self.persona_text}\n\n{self.rules_text}".strip()
 
         # Read .puml file content
         try:
@@ -192,28 +190,6 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
                 "reasoning_summary": f"Error reading .puml file: {e}",
                 "data": None,
                 "errors": [f"Failed to read .puml file {plantuml_diagram_file_path}: {e}"],
-                "tokens_used": 0,
-                "input_tokens": 0,
-                "output_tokens": 0
-            }
-        
-        # Read LUCIM DSL file content
-        try:
-            lucim_dsl_content = pathlib.Path(lucim_dsl_file_path).read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return {
-                "reasoning_summary": f"Error: LUCIM DSL file not found at {lucim_dsl_file_path}",
-                "data": None,
-                "errors": [f"Required LUCIM DSL file not found: {lucim_dsl_file_path}"],
-                "tokens_used": 0,
-                "input_tokens": 0,
-                "output_tokens": 0
-            }
-        except Exception as e:
-            return {
-                "reasoning_summary": f"Error reading LUCIM DSL file: {e}",
-                "data": None,
-                "errors": [f"Failed to read LUCIM DSL file {lucim_dsl_file_path}: {e}"],
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0
@@ -239,7 +215,9 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
         
         try:
             # Create response using OpenAI Responses API
-            api_config = get_reasoning_config("plantuml_auditor")
+            api_config = get_reasoning_config("lucim_plantuml_diagram_auditor")
+            # Force the run-selected model (overrides DEFAULT_MODEL from configs)
+            api_config["model"] = self.model
             # Update reasoning configuration with agent's settings
             if "reasoning" in api_config:
                 api_config["reasoning"]["effort"] = self.reasoning_effort
@@ -250,7 +228,7 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
             })
             
             # Use unified helper with configured timeout
-            timeout = AGENT_TIMEOUTS.get("plantuml_auditor")
+            timeout = AGENT_TIMEOUTS.get("lucim_plantuml_diagram_auditor")
             response = create_and_wait(self.client, api_config, timeout_seconds=timeout)
             
             # Extract content and reasoning via helpers
@@ -350,7 +328,7 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
         write_all_output_files(
             output_dir=base_output_dir,
             results=results,
-            agent_type="plantuml_auditor",
+            agent_type="lucim_plantuml_diagram_auditor",
             base_name=base_name,
             model=self.model,
             timestamp=self.timestamp,

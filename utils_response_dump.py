@@ -117,12 +117,12 @@ def write_input_instructions_before_api(output_dir, system_prompt: str) -> None:
 def write_minimal_artifacts(output_dir, raw_response: Any, instructions_text: str = None) -> None:
     """Write minimal artifacts alongside the full response outputs.
 
-    - output-raw_response.json: contains only the JSON value of raw_response
+    - output-response-raw.json: contains only the JSON value of raw_response
     - Note: input-instructions.md is now generated separately before API calls
     """
     try:
-        # output-raw_response.json (value only)
-        raw_path = output_dir / "output-raw_response.json"
+        # output-response-raw.json (value only)
+        raw_path = output_dir / "output-response-raw.json"
         # Ensure JSON-serializable; raw_response is expected to be a dict
         raw_path.write_text(json.dumps(raw_response if raw_response is not None else {}, indent=2, ensure_ascii=False), encoding="utf-8")
     except Exception as e:
@@ -144,10 +144,10 @@ def write_all_output_files(
     """Unified function to write all output files for any agent.
     
     Generates:
-    - output-response.json (complete response structure)
+    - output-response-full.json (complete response structure)
     - output-reasoning.md (reasoning payload with token metrics)
     - output-data.json (data field only)
-    - output-raw_response.json (raw API response)
+    - output-response-raw.json (raw API response)
     - Optional special files (.puml for agents 5 and 7)
     
     Args:
@@ -167,7 +167,7 @@ def write_all_output_files(
         from utils_logging import write_reasoning_md_from_payload
         from utils_plantuml import process_plantuml_file
         
-        # Create complete response structure
+        # Create complete response structure (includes raw_response)
         complete_response = {
             "agent_type": agent_type,
             "model": model,
@@ -182,7 +182,7 @@ def write_all_output_files(
             "total_output_tokens": results.get("total_output_tokens", 0),
             "reasoning_tokens": results.get("reasoning_tokens", 0),
             "visible_output_tokens": results.get("visible_output_tokens", max(0, results.get("total_output_tokens", 0) - results.get("reasoning_tokens", 0))),
-            "raw_response": results.get("raw_response")
+            "raw_response": results.get("raw_response"),
         }
         
         # Validate response before saving
@@ -196,10 +196,10 @@ def write_all_output_files(
         if not ok:
             raise ValueError(f"response.json keys mismatch for {agent_type}. Missing: {sorted(missing)} Extra: {sorted(extra)}")
 
-        # 1) Write output-response.json
-        json_file = output_dir / "output-response.json"
+        # 1) Write output-response-full.json
+        json_file = output_dir / "output-response-full.json"
         json_file.write_text(json.dumps(complete_response, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"OK: {base_name} -> output-response.json")
+        print(f"OK: {base_name} -> output-response-full.json")
         
         # 2) Write output-reasoning.md using centralized function
         payload = {
@@ -243,10 +243,10 @@ def write_all_output_files(
             else:
                 print(f"WARNING: No data to save for {base_name}")
 
-        # 4) Write output-raw_response.json
-        raw_path = output_dir / "output-raw_response.json"
+        # 4) Write output-response-raw.json
+        raw_path = output_dir / "output-response-raw.json"
         raw_path.write_text(json.dumps(results.get("raw_response") if results.get("raw_response") is not None else {}, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"OK: {base_name} -> output-raw_response.json")
+        print(f"OK: {base_name} -> output-response-raw.json")
         
         # 5) Handle special files (e.g., .puml for agents 5 and 7)
         if special_files:

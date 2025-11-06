@@ -2,7 +2,7 @@
 """
 Validate that recent agent outputs include a canonical reasoning_tokens value.
 
-This script scans output-response.json files under code-netlogo-to-lucim-agentic-workflow/output/runs/
+This script scans output-response-full.json files under code-netlogo-to-lucim-agentic-workflow/output/runs/
 and checks that each JSON has an integer field reasoning_tokens (>= 0), and that
 usage was extracted consistently. It prints a summary report and a non-zero exit
 code if any violations are found.
@@ -27,7 +27,7 @@ from typing import List, Tuple
 def find_output_response_files(root: Path) -> List[Path]:
     if not root.exists():
         return []
-    return list(root.rglob("output-response.json"))
+    return list(root.rglob("output-response-full.json"))
 
 
 def validate_file(path: Path) -> Tuple[bool, str]:
@@ -72,7 +72,7 @@ def main() -> int:
 
     total = len(files)
     if total == 0:
-        print(f"No output-response.json files found under {root}")
+        print(f"No output-response-full.json files found under {root}")
         return 0
 
     failures = 0
