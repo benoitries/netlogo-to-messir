@@ -34,7 +34,7 @@ Generator: `agent_lucim_operation_generator.py`
 **Outputs:**
 - `output-response.json` (agent response)
 - `output-reasoning.md` (reasoning trace)
-- `output-data.json` (LUCIM operation model)
+- `output-data.json` (raw LLM text content containing LUCIM operation model, plain text)
 - `output-raw_response.json` (raw API response)
 - `input-instructions.md` (exact system prompt given to the AI model)
 
@@ -45,14 +45,14 @@ Generator: `agent_lucim_operation_generator.py`
 Audit sub-step (per iteration):
 - Auditor (LLM) function: `agent_lucim_operation_auditor.audit_operation_model`
 - Python deterministic audit: `utils_audit_operation_model.audit_environment`
- - Outputs stored under `1_lucim_operation_model/iter-<k>/2-auditor/` (raw audit data in `output-data.json` verbatim from LLM, `output-reasoning.md`, raw response). Orchestrator derives `verdict` and `non-compliant-rules` for logs/branching via `utils_audit_core.extract_audit_core`.
+ - Outputs stored under `1_lucim_operation_model/iter-<k>/2-auditor/` (raw audit text content in `output-data.json` verbatim from LLM as plain text, `output-reasoning.md`, raw response). Orchestrator derives `verdict` and `non-compliant-rules` for logs/branching via `utils_audit_core.extract_audit_core`.
 
 ### 02 — LUCIM Scenario (Generator ↔ Auditor iterations)
 
 Generator: `agent_lucim_scenario_generator.py`
 
 **Inputs:**
-- LUCIM operation model from Stage 01: `../lucim_operation_model_generator/output-data.json`
+- LUCIM operation model raw text from Stage 01: `../lucim_operation_model_generator/output-data.json` (plain text)
 - Persona instructions: `input-persona/<PERSONA-SET>/PSN_LUCIM_Scenario_Generator.md`
 - Scenario rules (mandatory): `input-persona/<PERSONA-SET>/RULES_LUCIM_Scenario.md`
 - Scenario rules (mandatory): `input-persona/<PERSONA-SET>/RULES_LUCIM_Scenario.md`
@@ -60,7 +60,7 @@ Generator: `agent_lucim_scenario_generator.py`
 **Outputs:**
 - `output-response.json` (agent response)
 - `output-reasoning.md` (reasoning trace)
-- `output-data.json` (scenarios)
+- `output-data.json` (raw LLM text content containing scenarios, plain text)
 - `output-raw_response.json` (raw API response)
 - `input-instructions.md` (exact system prompt given to the AI model)
 
@@ -73,7 +73,7 @@ Audit sub-step (per iteration):
 - Auditor (LLM) function: `agent_lucim_scenario_auditor.audit_scenario_text`
 - Python deterministic audit: `utils_audit_scenario.audit_scenario`
 - Inputs for audit include a textual rendering of scenario messages and scenario rules
- - Outputs stored under `2_lucim_scenario/iter-<k>/2-auditor/` (raw audit data in `output-data.json` verbatim from LLM, `output-reasoning.md`, raw response). Orchestrator derives `verdict` and `non-compliant-rules` via `utils_audit_core.extract_audit_core`.
+ - Outputs stored under `2_lucim_scenario/iter-<k>/2-auditor/` (raw audit text content in `output-data.json` verbatim from LLM as plain text, `output-reasoning.md`, raw response). Orchestrator derives `verdict` and `non-compliant-rules` via `utils_audit_core.extract_audit_core`.
 
 Note on Correctors:
 - There is no LLM-based corrector for Operation Model or Scenarios in this pipeline. Audit steps may report issues; corrections must be handled via deterministic tools or manual iteration. Do not add `agent_lucim_operation_corrector.py` or `agent_lucim_scenario_corrector.py`.
@@ -83,13 +83,13 @@ Note on Correctors:
 Generator/Writer: `agent_lucim_plantuml_diagram_generator.py`
 
 **Inputs:**
-- Scenarios from Stage 02: `../lucim_scenario_generator/output-data.json`
+- Scenarios raw text from Stage 02: `../lucim_scenario_generator/output-data.json` (plain text)
 - Persona instructions: `input-persona/<PERSONA-SET>/PSN_LUCIM_PlantUML_Diagram_Generator.md`
 
 **Outputs:**
 - `output-response.json` (agent response)
 - `output-reasoning.md` (reasoning trace)
-- `output-data.json` (diagram payload including PlantUML text)
+- `output-data.json` (raw LLM text content containing diagram payload including PlantUML text, plain text)
 - `diagram.puml` (standalone PlantUML diagram)
 - `output-raw_response.json` (raw API response)
 - `input-instructions.md` (exact system prompt given to the AI model)
@@ -102,7 +102,7 @@ Audit sub-step (per iteration):
 - Auditor (LLM) method: `lucim_plantuml_diagram_auditor_agent.audit_plantuml_diagrams`
 - Python deterministic audit: `utils_audit_diagram.audit_diagram`
 - Inputs: standalone `diagram.puml` produced by the writer
- - Outputs stored under `3_lucim_plantuml_diagram/iter-<k>/2-auditor/` (raw audit data in `output-data.json` verbatim from LLM, `output-reasoning.md`, raw response). Orchestrator derives `verdict` and `non-compliant-rules` via `utils_audit_core.extract_audit_core`.
+ - Outputs stored under `3_lucim_plantuml_diagram/iter-<k>/2-auditor/` (raw audit text content in `output-data.json` verbatim from LLM as plain text, `output-reasoning.md`, raw response). Orchestrator derives `verdict` and `non-compliant-rules` via `utils_audit_core.extract_audit_core`.
 
 ### 04 — LUCIM PlantUML Diagram Auditor (`agent_lucim_plantuml_diagram_auditor.py`)
 
@@ -113,7 +113,7 @@ Audit sub-step (per iteration):
 **Outputs:**
 - `output-response.json` (agent response)
 - `output-reasoning.md` (reasoning trace)
-- `output-data.json` (audit results with non-compliant rules and verdict)
+- `output-data.json` (raw LLM audit text content, plain text; orchestrator extracts verdict and non-compliant rules)
 - `output-raw_response.json` (raw API response)
 - `input-instructions.md` (exact system prompt given to the AI model)
 
@@ -137,7 +137,7 @@ Audit sub-step (per iteration):
 ### Standard Artifacts (All Stages)
 - `output-response.json`: Structured agent response
 - `output-reasoning.md`: Human-readable reasoning trace
- - `output-data.json`: Stage-specific data payload. For Auditor steps this is the verbatim LLM `data` (may include fields like `fix_suggestions`); the orchestrator extracts `verdict` and rules with `utils_audit_core.extract_audit_core` for logging/decisions.
+ - `output-data.json`: Stage-specific raw LLM text content (plain text, not JSON-encoded). For Auditor steps this is the verbatim LLM response text; the orchestrator extracts `verdict` and rules with `utils_audit_core.extract_audit_core` for logging/decisions.
 - `output-raw_response.json`: Raw OpenAI API response
 - `input-instructions.md`: Exact system prompt given to the AI model
 

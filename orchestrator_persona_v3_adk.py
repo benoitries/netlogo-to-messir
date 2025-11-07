@@ -73,9 +73,9 @@ class NetLogoOrchestratorPersonaV3ADK:
         initialize_v3_orchestrator_components(self, model_name)
         # Iterative audit cap (MAX_AUDIT)
         try:
-            self.max_audit = int(os.environ.get("MAX_AUDIT") or 3)
+            self.max_audit = int(os.environ.get("MAX_AUDIT") or 2)
         except Exception:
-            self.max_audit = 3
+            self.max_audit = 2
     
     
     

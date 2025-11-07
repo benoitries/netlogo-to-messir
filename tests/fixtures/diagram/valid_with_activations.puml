@@ -1,12 +1,12 @@
 @startuml
 participant System as system
-participant "bill:ActOperator" as bill
+participant "bill:ActAdministrator" as bill
 
-bill -> system : oeAck()
+bill -> system : oeLogin()
 activate bill
 deactivate bill
 
-system --> bill : ieHello()
+system --> bill : ieWelcome()
 activate bill
 deactivate bill
 @enduml

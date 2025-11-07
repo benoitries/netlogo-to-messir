@@ -252,65 +252,36 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
                     "raw_response": raw_response_serialized
                 }
             
-            # Parse JSON response
-            try:
-                # Debug: Log the raw response for troubleshooting
-                # Note: These debug prints are kept as they provide useful debugging information
-                print(f"[DEBUG] Raw response length: {len(content)}")
-                print(f"[DEBUG] Raw response preview: {content[:500]}...")
-                
-                # Clean up the content
-                content_clean = content.strip()
-                if content_clean.startswith("```json"):
-                    content_clean = content_clean.replace("```json", "").replace("```", "").strip()
-                elif content_clean.startswith("```"):
-                    content_clean = content_clean.replace("```", "").strip()
-                
-                # Parse the response as JSON
-                response_data = json.loads(content_clean)
-                print(f"[DEBUG] Successfully parsed response as JSON")
-                
-                core = extract_audit_core(response_data)
+            # Store raw LLM response text directly (no JSON parsing)
+            # extract_audit_core will handle the raw text content
+            core = extract_audit_core(content)
 
-                # Extract token usage from response (centralized helper)
-                from utils_openai_client import get_usage_tokens
-                usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
-                tokens_used = usage.get("total_tokens", 0)
-                input_tokens = usage.get("input_tokens", 0)
-                api_output_tokens = usage.get("output_tokens", 0)
-                reasoning_tokens = usage.get("reasoning_tokens", 0)
-                total_output_tokens = api_output_tokens if api_output_tokens is not None else 0
-                visible_output_tokens = max((total_output_tokens or 0) - (reasoning_tokens or 0), 0)
-                usage_dict = usage
+            # Extract token usage from response (centralized helper)
+            from utils_openai_client import get_usage_tokens
+            usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
+            tokens_used = usage.get("total_tokens", 0)
+            input_tokens = usage.get("input_tokens", 0)
+            api_output_tokens = usage.get("output_tokens", 0)
+            reasoning_tokens = usage.get("reasoning_tokens", 0)
+            total_output_tokens = api_output_tokens if api_output_tokens is not None else 0
+            visible_output_tokens = max((total_output_tokens or 0) - (reasoning_tokens or 0), 0)
+            usage_dict = usage
 
-                return {
-                    "reasoning_summary": reasoning_summary,
-                    "data": core["data"],
-                    "verdict": core["verdict"],
-                    "non-compliant-rules": core["non_compliant_rules"],
-                    "coverage": core["coverage"],
-                    "errors": core["errors"],
-                    "tokens_used": tokens_used,
-                    "input_tokens": input_tokens,
-                    "visible_output_tokens": visible_output_tokens,
-                    "raw_usage": usage_dict,
-                    "reasoning_tokens": reasoning_tokens,
-                    "total_output_tokens": total_output_tokens,
-                    "raw_response": raw_response_serialized
-                }
-            except json.JSONDecodeError as e:
-                return {
-                    "reasoning_summary": reasoning_summary,
-                    "data": None,
-                    "errors": [f"Failed to parse audit results JSON: {e}", f"Raw response: {content[:200]}..."],
-                    "verdict": "non-compliant",
-                    "non-compliant-rules": [],
-                    "coverage": {"total_rules_in_dsl": "0", "evaluated": [], "not_applicable": [], "missing_evaluation": []},
-                    "tokens_used": 0,
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "raw_response": raw_response_serialized
-                }
+            return {
+                "reasoning_summary": reasoning_summary,
+                "data": core["data"],
+                "verdict": core["verdict"],
+                "non-compliant-rules": core["non_compliant_rules"],
+                "coverage": core["coverage"],
+                "errors": core["errors"],
+                "tokens_used": tokens_used,
+                "input_tokens": input_tokens,
+                "visible_output_tokens": visible_output_tokens,
+                "raw_usage": usage_dict,
+                "reasoning_tokens": reasoning_tokens,
+                "total_output_tokens": total_output_tokens,
+                "raw_response": raw_response_serialized
+            }
                 
         except Exception as e:
             return {

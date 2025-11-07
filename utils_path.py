@@ -164,15 +164,14 @@ def get_run_base_dir(
         output_dir: Override for OUTPUT_DIR mainly for testing
 
     Returns:
-        Path to: OUTPUT_DIR/runs/YYYY-MM-DD/HHMM-<PSvX>[-<VERSION>]/<combination-folder>
-        Where PSvX is short format (e.g., PSv3 for persona-v3-limited-agents-v3-adk)
+        Path to: OUTPUT_DIR/runs/YYYY-MM-DD/HHMM[-<VERSION>]/<combination-folder>
+        Format: HHMM or HHMM-VERSION (e.g., "1126" or "1126-v3-adk")
     """
     odir = output_dir if output_dir is not None else OUTPUT_DIR
     day_folder = f"{timestamp[0:4]}-{timestamp[4:6]}-{timestamp[6:8]}"
     # Extract HHMM from timestamp (format: YYYYMMDD_HHMM or YYYYMMDD-HHMM)
     time_part = timestamp.split('_')[1] if '_' in timestamp else timestamp.split('-')[1] if '-' in timestamp else timestamp[-4:]
-    persona_short = _get_persona_set_short(persona_set)
-    time_folder = f"{time_part}-{persona_short}"
+    time_folder = time_part
     if version:
         time_folder = f"{time_folder}-{version}"
     combo = build_combination_folder_name(case_name, model_name, reasoning_effort, text_verbosity)

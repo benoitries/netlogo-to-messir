@@ -114,6 +114,90 @@ def write_input_instructions_before_api(output_dir, system_prompt: str) -> None:
         print(f"[WARNING] Failed to write input-instructions.md before API call: {e}")
 
 
+def extract_raw_text_from_raw_response_dict(raw_response: Dict[str, Any]) -> str:
+    """Extract plain text content from a serialized raw_response dictionary.
+    
+    Handles multiple response formats from different LLM providers:
+    - OpenAI/GPT-5 (Responses API): raw_response["output"][1]["content"][0]["text"]
+    - OpenAI/GPT-5 (ChatCompletion): raw_response["choices"][0]["message"]["content"]
+    - Gemini: raw_response["_gemini_response"]["candidates"][0]["content"]["parts"][0]["text"]
+    - MistralAI/Llama via OpenRouter: raw_response["choices"][0]["message"]["content"] or raw_response["output"][1]["content"][0]["text"]
+    
+    Args:
+        raw_response: Serialized response dictionary from serialize_response_to_dict()
+    
+    Returns:
+        Plain text string from the LLM response, or empty string if extraction fails
+    """
+    if raw_response is None or not isinstance(raw_response, dict):
+        return ""
+    
+    try:
+        # 1) OpenAI Responses API structure: output[1].content[0].text
+        # Usually output[0] is reasoning, output[1] is the message
+        if 'output' in raw_response:
+            output = raw_response.get('output')
+            if isinstance(output, list):
+                text_chunks = []
+                for output_item in output:
+                    if isinstance(output_item, dict):
+                        content_list = output_item.get('content', [])
+                        if isinstance(content_list, list):
+                            for content_item in content_list:
+                                if isinstance(content_item, dict):
+                                    # Check for text field
+                                    text_val = content_item.get('text')
+                                    if isinstance(text_val, str):
+                                        text_chunks.append(text_val)
+                                elif isinstance(content_item, str):
+                                    text_chunks.append(content_item)
+                if text_chunks:
+                    return "".join(text_chunks).strip()
+        
+        # 2) OpenAI ChatCompletion structure: choices[0].message.content
+        if 'choices' in raw_response:
+            choices = raw_response.get('choices')
+            if isinstance(choices, list) and len(choices) > 0:
+                first_choice = choices[0]
+                if isinstance(first_choice, dict):
+                    message = first_choice.get('message', {})
+                    if isinstance(message, dict):
+                        content_val = message.get('content')
+                        if isinstance(content_val, str):
+                            return content_val.strip()
+        
+        # 3) Gemini structure: _gemini_response.candidates[0].content.parts[0].text
+        if '_gemini_response' in raw_response:
+            gemini_resp = raw_response.get('_gemini_response')
+            if isinstance(gemini_resp, dict):
+                candidates = gemini_resp.get('candidates')
+                if isinstance(candidates, list) and len(candidates) > 0:
+                    candidate = candidates[0]
+                    if isinstance(candidate, dict):
+                        content = candidate.get('content')
+                        if isinstance(content, dict):
+                            parts = content.get('parts')
+                            if isinstance(parts, list) and len(parts) > 0:
+                                part = parts[0]
+                                if isinstance(part, dict):
+                                    text_val = part.get('text')
+                                    if isinstance(text_val, str):
+                                        return text_val.strip()
+        
+        # 4) Check nested structures (response, result, body)
+        for key in ['response', 'result', 'body']:
+            if key in raw_response:
+                nested_text = extract_raw_text_from_raw_response_dict(raw_response[key])
+                if nested_text:
+                    return nested_text
+        
+    except (KeyError, IndexError, TypeError, AttributeError) as e:
+        # Silently fail and return empty string
+        pass
+    
+    return ""
+
+
 def write_minimal_artifacts(output_dir, raw_response: Any, instructions_text: str = None) -> None:
     """Write minimal artifacts alongside the full response outputs.
 
@@ -168,6 +252,15 @@ def write_all_output_files(
         from utils_plantuml import process_plantuml_file
         
         # Create complete response structure (includes raw_response)
+        # If data is a string, try to parse it as JSON to avoid double-encoding
+        data_value = results.get("data", "")
+        if isinstance(data_value, str):
+            try:
+                data_value = json.loads(data_value)
+            except (json.JSONDecodeError, TypeError):
+                # If parsing fails, keep the string as-is
+                pass
+        
         complete_response = {
             "agent_type": agent_type,
             "model": model,
@@ -175,7 +268,7 @@ def write_all_output_files(
             "base_name": base_name,
             "step_number": step_number,
             "reasoning_summary": results.get("reasoning_summary", "").replace("\\n", "\n"),
-            "data": results.get("data", ""),
+            "data": data_value,
             "errors": results.get("errors", []),
             "tokens_used": results.get("tokens_used", 0),
             "input_tokens": results.get("input_tokens", 0),
@@ -225,13 +318,19 @@ def write_all_output_files(
         )
         print(f"OK: {base_name} -> output-reasoning.md")
         
-        # 3) Write output-data.json (with fallback if special_files contains a diagram)
+        # 3) Write output-data.json (raw LLM text content, not JSON-encoded)
         data_file = output_dir / "output-data.json"
-        if results.get("data"):
-            data_file.write_text(json.dumps(results["data"], indent=2, ensure_ascii=False), encoding="utf-8")
+        raw_response_dict = results.get("raw_response")
+        
+        # Extract raw text from raw_response using SDK-like extraction logic
+        raw_text = extract_raw_text_from_raw_response_dict(raw_response_dict) if raw_response_dict else ""
+        
+        if raw_text:
+            # Write plain text (not JSON-encoded)
+            data_file.write_text(raw_text, encoding="utf-8")
             print(f"OK: {base_name} -> output-data.json")
         else:
-            # If we have a PlantUML diagram via special_files, synthesize minimal data
+            # Fallback: If we have a PlantUML diagram via special_files, synthesize minimal data
             synthesized = None
             if special_files and isinstance(special_files, dict):
                 uml = special_files.get("plantuml_diagram")
@@ -241,7 +340,19 @@ def write_all_output_files(
                 data_file.write_text(json.dumps(synthesized, indent=2, ensure_ascii=False), encoding="utf-8")
                 print(f"OK: {base_name} -> output-data.json (synthesized)")
             else:
-                print(f"WARNING: No data to save for {base_name}")
+                # Last resort: try to extract from results["data"] if available (backward compatibility)
+                if results.get("data"):
+                    data_to_write = results["data"]
+                    # If data is a string, write it as-is (plain text)
+                    if isinstance(data_to_write, str):
+                        data_file.write_text(data_to_write, encoding="utf-8")
+                        print(f"OK: {base_name} -> output-data.json (fallback from data)")
+                    else:
+                        # If data is a dict/object, serialize to JSON (legacy behavior)
+                        data_file.write_text(json.dumps(data_to_write, indent=2, ensure_ascii=False), encoding="utf-8")
+                        print(f"OK: {base_name} -> output-data.json (fallback from data, JSON)")
+                else:
+                    print(f"WARNING: No raw text extracted from raw_response and no data to save for {base_name}")
 
         # 4) Write output-response-raw.json
         raw_path = output_dir / "output-response-raw.json"

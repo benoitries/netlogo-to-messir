@@ -282,7 +282,7 @@ class OrchestratorLogger:
                         if not line.startswith("-"):
                             continue
                         # Try to extract rule id token appearing first in the line
-                        # Examples: "- LEM1-ACT-TYPE-FORMAT: ...", "- SS1-MESSAGE-DIRECTIONALITY: ..."
+                        # Examples: "- LOM1-ACT-TYPE-FORMAT: ...", "- SS1-MESSAGE-DIRECTIONALITY: ..."
                         token = line.lstrip("- ").split()[0]
                         # Trim trailing punctuation like ':' if present
                         token = token.rstrip(":")

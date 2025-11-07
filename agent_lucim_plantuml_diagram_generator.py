@@ -277,126 +277,15 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
             
             # Parse JSON response
             try:
-                # Debug: Log the raw response for troubleshooting
-                # Note: These debug prints are kept as they provide useful debugging information
-                print(f"[DEBUG] Raw response length: {len(content)}")
-                print(f"[DEBUG] Raw response preview: {content[:500]}...")
-                
-                # Clean up the content
-                content_clean = content.strip()
-                if content_clean.startswith("```json"):
-                    content_clean = content_clean.replace("```json", "").replace("```", "").strip()
-                elif content_clean.startswith("```"):
-                    content_clean = content_clean.replace("```", "").strip()
-
-                def _parse_best_effort_json(s: str) -> Any:
-                    """Best-effort JSON extraction when prose wraps a JSON object.
-                    Tries direct loads; if it fails, extracts the first top-level JSON object substring.
-                    """
-                    try:
-                        return json.loads(s)
-                    except Exception:
-                        pass
-                    start = s.find("{")
-                    end = s.rfind("}")
-                    if start != -1 and end != -1 and end > start:
-                        candidate = s[start:end+1].strip()
-                        try:
-                            return json.loads(candidate)
-                        except Exception:
-                            anchor = s.find('{"data"')
-                            if anchor != -1:
-                                end2 = s.find("\n\n", anchor)
-                                end2 = end if end2 == -1 else end2
-                                candidate2 = s[anchor:end2].strip()
-                                try:
-                                    return json.loads(candidate2)
-                                except Exception:
-                                    pass
-                    raise json.JSONDecodeError("Unable to parse JSON from response", s, 0)
-
-                # Parse the response as JSON (best-effort)
-                response_data = _parse_best_effort_json(content_clean)
+                # Parse JSON directly without any cleaning
+                response_data = json.loads(content)
+                # If the LLM returned a JSON-escaped string, parse it again
+                if isinstance(response_data, str):
+                    response_data = json.loads(response_data)
                 print(f"[DEBUG] Successfully parsed response as JSON")
                 
-                # Extract and normalize fields from JSON response.
-                # Normalize to list of {"diagram": {...}} under 'data'.
-                plantuml_diagrams_obj = {}
-                data_list: list = []
-                if isinstance(response_data, dict):
-                    if "data" in response_data and isinstance(response_data["data"], (dict, list)):
-                        plantuml_diagrams_obj = response_data["data"] if isinstance(response_data["data"], dict) else {}
-                        # If already a list, trust it but normalize items to have 'diagram' wrapper
-                        if isinstance(response_data["data"], list):
-                            for item in response_data["data"]:
-                                if isinstance(item, dict) and "diagram" in item:
-                                    data_list.append(item)
-                                elif isinstance(item, dict):
-                                    data_list.append({"diagram": item})
-                                elif isinstance(item, str):
-                                    data_list.append({"diagram": {"plantuml": item}})
-                    else:
-                        plantuml_diagrams_obj = response_data
+                # Use the entire response_data for output-data.json
                 errors = response_data.get("errors", []) if isinstance(response_data, dict) else []
-
-                # If JSON data is empty or missing PlantUML, attempt to extract raw @startuml...@enduml from content
-                have_valid_uml = False
-                if data_list:
-                    # check if any item contains a valid UML text
-                    for it in data_list:
-                        uml = self._extract_plantuml_text(it.get("diagram") if isinstance(it, dict) else it)
-                        if uml:
-                            have_valid_uml = True
-                            break
-                else:
-                    have_valid_uml = bool(self._extract_plantuml_text(plantuml_diagrams_obj))
-
-                if (not data_list and not plantuml_diagrams_obj) or (not have_valid_uml):
-                    import re
-                    m = re.search(r"@startuml[\s\S]*?@enduml", content)
-                    if m:
-                        uml_text = m.group(0)
-                        data_list = [{
-                            "diagram": {
-                                "name": "typical",
-                                "plantuml": uml_text
-                            }
-                        }]
-                # If we still don't have a list but have an object, convert it
-                if not data_list and isinstance(plantuml_diagrams_obj, dict):
-                    # turn each entry into a diagram item if it looks like a diagram
-                    if any(k in plantuml_diagrams_obj for k in ("plantuml", "name")):
-                        data_list = [{"diagram": plantuml_diagrams_obj}]
-                    else:
-                        for key, val in plantuml_diagrams_obj.items():
-                            if isinstance(val, dict):
-                                item = val if ("plantuml" in val or "name" in val) else {"name": key, **val}
-                                data_list.append({"diagram": item})
-                            elif isinstance(val, str):
-                                data_list.append({"diagram": {"name": key, "plantuml": val}})
-
-                # Extract token usage from response (centralized helper)
-                usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
-                tokens_used = usage.get("total_tokens", 0)
-                input_tokens = usage.get("input_tokens", 0)
-                api_output_tokens = usage.get("output_tokens", 0)
-                reasoning_tokens = usage.get("reasoning_tokens", 0)
-                total_output_tokens = api_output_tokens if api_output_tokens is not None else max((tokens_used or 0) - (input_tokens or 0), 0)
-                visible_output_tokens = max((total_output_tokens or 0) - (reasoning_tokens or 0), 0)
-                usage_dict = usage
-
-                return {
-                    "reasoning_summary": reasoning_summary,
-                    "data": data_list,
-                    "errors": [],
-                    "tokens_used": tokens_used,
-                    "input_tokens": input_tokens,
-                    "visible_output_tokens": visible_output_tokens,
-                    "raw_usage": usage_dict,
-                    "reasoning_tokens": reasoning_tokens,
-                    "total_output_tokens": total_output_tokens,
-                    "raw_response": raw_response_serialized
-                }
             except json.JSONDecodeError as e:
                 return {
                     "reasoning_summary": reasoning_summary,
@@ -407,6 +296,29 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
                     "output_tokens": 0,
                     "raw_response": raw_response_serialized
                 }
+
+            # Extract token usage from response (centralized helper)
+            usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
+            tokens_used = usage.get("total_tokens", 0)
+            input_tokens = usage.get("input_tokens", 0)
+            api_output_tokens = usage.get("output_tokens", 0)
+            reasoning_tokens = usage.get("reasoning_tokens", 0)
+            total_output_tokens = api_output_tokens if api_output_tokens is not None else max((tokens_used or 0) - (input_tokens or 0), 0)
+            visible_output_tokens = max((total_output_tokens or 0) - (reasoning_tokens or 0), 0)
+            usage_dict = usage
+
+            return {
+                "reasoning_summary": reasoning_summary,
+                "data": response_data,  # Store entire parsed JSON object
+                "errors": errors or [],
+                "tokens_used": tokens_used,
+                "input_tokens": input_tokens,
+                "visible_output_tokens": visible_output_tokens,
+                "raw_usage": usage_dict,
+                "reasoning_tokens": reasoning_tokens,
+                "total_output_tokens": total_output_tokens,
+                "raw_response": raw_response_serialized
+            }
                 
         except Exception as e:
             from utils_openai_client import build_error_raw_payload
@@ -458,10 +370,16 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
                     uml_text = uml_text.replace("\\n", "\n").replace("\\t", "\t").replace("\\\"", '"')
                 if uml_text and "@startuml" in uml_text and "@enduml" in uml_text:
                     diagram_text = uml_text
-                    # Also backfill a minimal data structure so downstream files are emitted
-                    results["data"] = [{"diagram": {"name": "typical", "plantuml": uml_text}}]
-                    # Ensure errors is a list
-                    results.setdefault("errors", [])
+                    # Also backfill a minimal data structure in new format so downstream files are emitted
+                    results["data"] = {
+                        "data": {
+                            "diagram": {
+                                "name": "typical",
+                                "plantuml": uml_text
+                            }
+                        },
+                        "errors": []
+                    }
             except Exception:
                 pass
         
@@ -491,10 +409,43 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
         """
         Attempt to extract the PlantUML diagram text from the agent data structure.
         The method is defensive against variations in the response shape.
+        
+        New format (prioritized):
+        {
+          "data": {
+            "diagram": {
+              "name": "scenario name",
+              "plantuml": "@startuml\n...\n@enduml"
+            }
+          },
+          "errors": []
+        }
         """
         # Accept dict or list structures and find the first PlantUML block
         if data is None:
             return ""
+        
+        # NEW FORMAT: Check for data.diagram.plantuml structure first (prioritized)
+        if isinstance(data, dict):
+            # Check for new format: data.diagram.plantuml
+            if "data" in data and isinstance(data["data"], dict):
+                data_node = data["data"]
+                if "diagram" in data_node and isinstance(data_node["diagram"], dict):
+                    diagram_node = data_node["diagram"]
+                    if "plantuml" in diagram_node and isinstance(diagram_node["plantuml"], str):
+                        plantuml_text = diagram_node["plantuml"]
+                        if "@startuml" in plantuml_text and "@enduml" in plantuml_text:
+                            return plantuml_text.strip()
+            
+            # Legacy format: direct "diagram" key
+            if "diagram" in data and isinstance(data["diagram"], dict):
+                diagram_node = data["diagram"]
+                if "plantuml" in diagram_node and isinstance(diagram_node["plantuml"], str):
+                    plantuml_text = diagram_node["plantuml"]
+                    if "@startuml" in plantuml_text and "@enduml" in plantuml_text:
+                        return plantuml_text.strip()
+        
+        # Fallback: legacy structure handling
         candidate_nodes = []
         if isinstance(data, dict):
             if "typical" in data:

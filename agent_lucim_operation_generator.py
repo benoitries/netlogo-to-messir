@@ -222,37 +222,13 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
                     "raw_response": raw_response_serialized
                 }
             try:
-                content_clean = content.strip()
-                if content_clean.startswith("```json"):
-                    content_clean = content_clean.replace("```json", "").replace("```", "").strip()
-                elif content_clean.startswith("```"):
-                    content_clean = content_clean.replace("```", "").strip()
-                response_data = json.loads(content_clean)
-                operation_model = {}
-                if isinstance(response_data, dict):
-                    if "data" in response_data and isinstance(response_data["data"], dict):
-                        operation_model = response_data["data"]
-                    else:
-                        operation_model = response_data
-                usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
-                tokens_used = usage.get("total_tokens", 0)
-                input_tokens = usage.get("input_tokens", 0)
-                output_tokens = usage.get("output_tokens", 0)
-                reasoning_tokens = usage.get("reasoning_tokens", 0)
-                visible_output_tokens = max((output_tokens or 0) - (reasoning_tokens or 0), 0)
-                total_output_tokens = visible_output_tokens + (reasoning_tokens or 0)
-                return {
-                    "reasoning_summary": reasoning_summary,
-                    "data": operation_model,
-                    "errors": [],
-                    "tokens_used": tokens_used,
-                    "input_tokens": input_tokens,
-                    "visible_output_tokens": visible_output_tokens,
-                    "raw_usage": usage,
-                    "reasoning_tokens": reasoning_tokens,
-                    "total_output_tokens": total_output_tokens,
-                    "raw_response": raw_response_serialized
-                }
+                # Parse JSON directly without any cleaning
+                response_data = json.loads(content)
+                # If the LLM returned a JSON-escaped string, parse it again
+                if isinstance(response_data, str):
+                    response_data = json.loads(response_data)
+                # Use the entire response_data for output-data.json
+                operation_model = response_data
             except json.JSONDecodeError as e:
                 return {
                     "reasoning_summary": reasoning_summary,
@@ -263,6 +239,25 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
                     "output_tokens": 0,
                     "raw_response": raw_response_serialized
                 }
+            usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
+            tokens_used = usage.get("total_tokens", 0)
+            input_tokens = usage.get("input_tokens", 0)
+            output_tokens = usage.get("output_tokens", 0)
+            reasoning_tokens = usage.get("reasoning_tokens", 0)
+            visible_output_tokens = max((output_tokens or 0) - (reasoning_tokens or 0), 0)
+            total_output_tokens = visible_output_tokens + (reasoning_tokens or 0)
+            return {
+                "reasoning_summary": reasoning_summary,
+                "data": operation_model,  # Store entire parsed JSON object
+                "errors": [],
+                "tokens_used": tokens_used,
+                "input_tokens": input_tokens,
+                "visible_output_tokens": visible_output_tokens,
+                "raw_usage": usage,
+                "reasoning_tokens": reasoning_tokens,
+                "total_output_tokens": total_output_tokens,
+                "raw_response": raw_response_serialized
+            }
         except Exception as e:
             from utils_openai_client import build_error_raw_payload
             return {

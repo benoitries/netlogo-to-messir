@@ -66,17 +66,17 @@ async def main():
     selected_verbosity_levels = ui.select_text_verbosity()
     # Ask for MAX_AUDIT when running orchestrator directly
     try:
-        ma_input = input("Max audit iterations (MAX_AUDIT) [Enter for 3]: ").strip()
+        ma_input = input("Max audit iterations (MAX_AUDIT) [Enter for 2]: ").strip()
         if ma_input:
             ma_val = int(ma_input)
             if ma_val < 0:
                 raise ValueError("MAX_AUDIT must be >= 0")
             os.environ["MAX_AUDIT"] = str(ma_val)
         else:
-            os.environ.setdefault("MAX_AUDIT", "3")
+            os.environ.setdefault("MAX_AUDIT", "2")
     except Exception as e:
-        print(f"[WARN] Invalid MAX_AUDIT input, using default 3 ({e})")
-        os.environ["MAX_AUDIT"] = "3"
+        print(f"[WARN] Invalid MAX_AUDIT input, using default 2 ({e})")
+        os.environ["MAX_AUDIT"] = "2"
     all_results = {}
     total_combinations = (
         len(selected_models) * len(selected_base_names) *

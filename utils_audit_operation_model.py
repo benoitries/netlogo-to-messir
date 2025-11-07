@@ -19,12 +19,15 @@ Minimal schema (tolerant):
 }
 
 Rules implemented (from RULES_LUCIM_Operation_model.md):
-- LEM1-ACT-TYPE-FORMAT: actor type names FirstCapitalLetterFormat, prefixed by "Act"
-- LEM2-ACT-INSTANCE-FORMAT: actor instance names in camelCase
-- LEM2-IE-EVENT-NAME-FORMAT: input event names in camelCase
-- LEM3-OE-EVENT-NAME-FORMAT: output event names in camelCase
-- LEM4-IE-EVENT-DIRECTION: IE must be System → Actor
-- LEM5-OE-EVENT-DIRECTION: OE must be Actor → System
+- LOM0-JSON-BLOCK-ONLY: Operation Model must be solely a JSON block (no Markdown fences, no text outside JSON)
+- LOM1-ACT-TYPE-FORMAT: actor type names FirstCapitalLetterFormat, prefixed by "Act"
+- LOM2-IE-EVENT-NAME-FORMAT: input event names in camelCase
+- LOM3-OE-EVENT-NAME-FORMAT: output event names in camelCase
+- LOM4-IE-EVENT-DIRECTION: IE must be System → Actor
+- LOM5-OE-EVENT-DIRECTION: OE must be Actor → System
+- LOM7-CONDITIONS-VALIDATION: postF required and non-empty, preF/preP optional arrays
+Note: LOM6-CONDITIONS-DEFINITION is a definition rule, not a validation rule.
+Note: Actor instance names (if provided) should be camelCase, but this is not a strict LOM rule.
 """
 from __future__ import annotations
 
@@ -88,8 +91,132 @@ def _location(item: Any, fallback: str) -> str:
     return name or fallback
 
 
-def audit_operation_model(env: Dict[str, Any]) -> Dict[str, Any]:
+def _check_lom0_json_block_only(raw_content: str) -> List[Dict[str, str]]:
+    """
+    Check LOM0-JSON-BLOCK-ONLY: Operation Model must be solely a JSON block.
+    
+    Validates:
+    - No Markdown code fences (```json or ```)
+    - No text outside the JSON object
+    - Content is valid JSON
+    
+    Args:
+        raw_content: Raw content string to validate
+        
+    Returns:
+        List of violations (empty if compliant)
+    """
     violations: List[Dict[str, str]] = []
+    
+    if not raw_content or not isinstance(raw_content, str):
+        return violations
+    
+    content_stripped = raw_content.strip()
+    if not content_stripped:
+        return violations
+    
+    # Check for Markdown code fences
+    if "```" in content_stripped:
+        violations.append({
+            "id": "LOM0-JSON-BLOCK-ONLY",
+            "message": "Operation Model must not include Markdown code fences. Remove the code fences (```json or ```).",
+            "location": "raw_content",
+            "extracted_values": {
+                "has_code_fences": True,
+                "content_preview": content_stripped[:200] if len(content_stripped) > 200 else content_stripped
+            }
+        })
+        return violations  # Early return if code fences found
+    
+    # Try to parse as JSON to check if it's valid JSON
+    try:
+        # Attempt to find JSON object boundaries
+        # Look for first { and last }
+        first_brace = content_stripped.find("{")
+        last_brace = content_stripped.rfind("}")
+        
+        if first_brace == -1 or last_brace == -1 or first_brace >= last_brace:
+            violations.append({
+                "id": "LOM0-JSON-BLOCK-ONLY",
+                "message": "Operation Model must be a valid JSON object. No JSON object found.",
+                "location": "raw_content",
+                "extracted_values": {
+                    "content_preview": content_stripped[:200] if len(content_stripped) > 200 else content_stripped
+                }
+            })
+            return violations
+        
+        # Check for text before the JSON object
+        text_before = content_stripped[:first_brace].strip()
+        if text_before:
+            violations.append({
+                "id": "LOM0-JSON-BLOCK-ONLY",
+                "message": "Operation Model must not include text outside the JSON object. Remove any text before the JSON object.",
+                "location": "raw_content",
+                "extracted_values": {
+                    "text_before": text_before,
+                    "content_preview": content_stripped[:200] if len(content_stripped) > 200 else content_stripped
+                }
+            })
+        
+        # Check for text after the JSON object
+        text_after = content_stripped[last_brace + 1:].strip()
+        if text_after:
+            violations.append({
+                "id": "LOM0-JSON-BLOCK-ONLY",
+                "message": "Operation Model must not include text outside the JSON object. Remove any text after the JSON object.",
+                "location": "raw_content",
+                "extracted_values": {
+                    "text_after": text_after,
+                    "content_preview": content_stripped[-200:] if len(content_stripped) > 200 else content_stripped
+                }
+            })
+        
+        # Try to parse the JSON to ensure it's valid
+        json_content = content_stripped[first_brace:last_brace + 1]
+        try:
+            json.loads(json_content)
+        except json.JSONDecodeError as e:
+            violations.append({
+                "id": "LOM0-JSON-BLOCK-ONLY",
+                "message": f"Operation Model must be valid JSON. JSON parsing error: {str(e)}",
+                "location": "raw_content",
+                "extracted_values": {
+                    "json_error": str(e),
+                    "content_preview": json_content[:200] if len(json_content) > 200 else json_content
+                }
+            })
+    
+    except Exception as e:
+        violations.append({
+            "id": "LOM0-JSON-BLOCK-ONLY",
+            "message": f"Error validating JSON block format: {str(e)}",
+            "location": "raw_content",
+            "extracted_values": {
+                "error": str(e)
+            }
+        })
+    
+    return violations
+
+
+def audit_operation_model(env: Dict[str, Any], raw_content: str | None = None) -> Dict[str, Any]:
+    """
+    Audit Operation Model for LOM rule compliance.
+    
+    Args:
+        env: Operation Model as a dictionary (parsed JSON)
+        raw_content: Optional raw content string for LOM0 validation (JSON block format check)
+        
+    Returns:
+        Dictionary with "verdict" (bool) and "violations" (list of violation dicts)
+    """
+    violations: List[Dict[str, str]] = []
+    
+    # LOM0-JSON-BLOCK-ONLY: Check raw content format if provided
+    if raw_content is not None:
+        lom0_violations = _check_lom0_json_block_only(raw_content)
+        violations.extend(lom0_violations)
 
     # Note: The current ruleset (RULES_LUCIM_Operation_model.md) does not define
     # a normative check for unique System naming; we therefore do not emit
@@ -116,26 +243,18 @@ def audit_operation_model(env: Dict[str, Any]) -> Dict[str, Any]:
         actors_list = []
     actor_index = _index_actors(actors_node)
 
-    # LEM2 / LEM1 — actor instance/type formatting
+    # LOM1 — actor type formatting
     for actor in actors_list:
         inst_name = (actor.get("name") or "").strip()
         # Try to get type from object first, then from dict key map
         type_name = (actor.get("type") or "").strip()
         if not type_name and id(actor) in actor_type_map:
             type_name = actor_type_map[id(actor)].strip()
-        if not _is_camel_case(inst_name):
-            violations.append({
-                "id": "LEM2-ACT-INSTANCE-FORMAT",
-                "message": "Actor instance names must be human-readable, in camelCase.",
-                "location": _location(actor, "actor"),
-                "extracted_values": {
-                    "instance_name": inst_name,
-                    "actor_content": json.dumps(actor, indent=2, ensure_ascii=False)
-                }
-            })
+        
+        # LOM1-ACT-TYPE-FORMAT: Always check type format (required)
         if not _is_act_type(type_name):
             violations.append({
-                "id": "LEM1-ACT-TYPE-FORMAT",
+                "id": "LOM1-ACT-TYPE-FORMAT",
                 "message": 'Actor type name must be FirstCapitalLetterFormat and prefixed by "Act".',
                 "location": _location(actor, "actor"),
                 "extracted_values": {
@@ -143,6 +262,9 @@ def audit_operation_model(env: Dict[str, Any]) -> Dict[str, Any]:
                     "actor_content": json.dumps(actor, indent=2, ensure_ascii=False)
                 }
             })
+        
+        # Note: Actor instance names are not strictly required by LOM rules.
+        # If provided, they should be camelCase, but this is not enforced as a LOM rule.
 
     # Normalize events: accept list/dict; if missing, derive from actor input/output events if present
     events_node = env.get("events")
@@ -264,12 +386,12 @@ def audit_operation_model(env: Dict[str, Any]) -> Dict[str, Any]:
                         act_type_key
                     ]))
                     if block_name == "input_events":
-                        # Expect System → Actor
+                        # LOM4-IE-EVENT-DIRECTION: Expect System → Actor
                         tgt_ok = (not tgt) or (tgt in acceptable_actor_tokens)
                         if (src and src != "system") or (not tgt_ok):
                             violations.append({
-                                "id": "LEM4-IE-EVENT-DIRECTION",
-                                "message": "Input Event (ie) must be System → Actor.",
+                                "id": "LOM4-IE-EVENT-DIRECTION",
+                                "message": "All input events must have their source from the System and their target to an Actor.",
                                 "location": _location(ev_val, f"{block_name}.{ev_key}"),
                                 "extracted_values": {
                                     "source": ev_val.get("source"),
@@ -277,12 +399,12 @@ def audit_operation_model(env: Dict[str, Any]) -> Dict[str, Any]:
                                 }
                             })
                     if block_name == "output_events":
-                        # Expect Actor → System
+                        # LOM5-OE-EVENT-DIRECTION: Expect Actor → System
                         src_ok = (not src) or (src in acceptable_actor_tokens)
                         if (not src_ok) or (tgt and tgt != "system"):
                             violations.append({
-                                "id": "LEM5-OE-EVENT-DIRECTION",
-                                "message": "Output Event (oe) must be Actor → System.",
+                                "id": "LOM5-OE-EVENT-DIRECTION",
+                                "message": "All output events must have their source from an Actor and their target to the System.",
                                 "location": _location(ev_val, f"{block_name}.{ev_key}"),
                                 "extracted_values": {
                                     "source": ev_val.get("source"),
@@ -340,11 +462,11 @@ def audit_operation_model(env: Dict[str, Any]) -> Dict[str, Any]:
             sender_is_actor = sender_l in actor_index
             receiver_is_actor = receiver_l in actor_index
 
-            # LEM2 / LEM3 — event name format checks when provided
+            # LOM2 / LOM3 — event name format checks when provided
             if evt_name:
                 if kind == "ie" and not _is_camel_case(evt_name):
                     violations.append({
-                        "id": "LEM2-IE-EVENT-NAME-FORMAT",
+                        "id": "LOM2-IE-EVENT-NAME-FORMAT",
                         "message": "All input event names must be human-readable, in camelCase.",
                         "location": _location(evt, "event.name"),
                         "extracted_values": {
@@ -354,7 +476,7 @@ def audit_operation_model(env: Dict[str, Any]) -> Dict[str, Any]:
                     })
                 if kind == "oe" and not _is_camel_case(evt_name):
                     violations.append({
-                        "id": "LEM3-OE-EVENT-NAME-FORMAT",
+                        "id": "LOM3-OE-EVENT-NAME-FORMAT",
                         "message": "All output event names must be human-readable, in camelCase.",
                         "location": _location(evt, "event.name"),
                         "extracted_values": {
@@ -363,12 +485,12 @@ def audit_operation_model(env: Dict[str, Any]) -> Dict[str, Any]:
                         }
                     })
 
-            # LEM4 — IE direction System→Actor
+            # LOM4-IE-EVENT-DIRECTION: IE direction System→Actor
             if kind == "ie":
                 if not (sender_is_system and receiver_is_actor):
                     violations.append({
-                        "id": "LEM4-IE-EVENT-DIRECTION",
-                        "message": "Input Event (ie) must be System → Actor.",
+                        "id": "LOM4-IE-EVENT-DIRECTION",
+                        "message": "All input events must have their source from the System and their target to an Actor.",
                         "location": _location(evt, "event"),
                         "extracted_values": {
                             "sender": sender,
@@ -378,12 +500,12 @@ def audit_operation_model(env: Dict[str, Any]) -> Dict[str, Any]:
                         }
                     })
 
-            # LEM5 — OE direction Actor→System
+            # LOM5-OE-EVENT-DIRECTION: OE direction Actor→System
             if kind == "oe":
                 if not (sender_is_actor and receiver_is_system):
                     violations.append({
-                        "id": "LEM5-OE-EVENT-DIRECTION",
-                        "message": "Output Event (oe) must be Actor → System.",
+                        "id": "LOM5-OE-EVENT-DIRECTION",
+                        "message": "All output events must have their source from an Actor and their target to the System.",
                         "location": _location(evt, "event"),
                         "extracted_values": {
                             "sender": sender,

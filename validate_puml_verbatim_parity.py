@@ -29,16 +29,48 @@ def load_json(path: Path) -> Any:
 
 
 def find_plantuml_text(obj: Any) -> Optional[str]:
-    """Recursively search for a PlantUML string within a JSON-like structure."""
+    """Recursively search for a PlantUML string within a JSON-like structure.
+    
+    New format (prioritized):
+    {
+      "data": {
+        "diagram": {
+          "name": "scenario name",
+          "plantuml": "@startuml\n...\n@enduml"
+        }
+      },
+      "errors": []
+    }
+    """
     if isinstance(obj, str):
         if "@startuml" in obj and "@enduml" in obj:
             return obj
         return None
     if isinstance(obj, dict):
-        for key in ("plantuml", "diagram", "uml", "content", "text"):
+        # NEW FORMAT: Check for data.diagram.plantuml structure first (prioritized)
+        if "data" in obj and isinstance(obj["data"], dict):
+            data_node = obj["data"]
+            if "diagram" in data_node and isinstance(data_node["diagram"], dict):
+                diagram_node = data_node["diagram"]
+                if "plantuml" in diagram_node and isinstance(diagram_node["plantuml"], str):
+                    plantuml_text = diagram_node["plantuml"]
+                    if "@startuml" in plantuml_text and "@enduml" in plantuml_text:
+                        return plantuml_text
+        
+        # Legacy format: direct "diagram" key
+        if "diagram" in obj and isinstance(obj["diagram"], dict):
+            diagram_node = obj["diagram"]
+            if "plantuml" in diagram_node and isinstance(diagram_node["plantuml"], str):
+                plantuml_text = diagram_node["plantuml"]
+                if "@startuml" in plantuml_text and "@enduml" in plantuml_text:
+                    return plantuml_text
+        
+        # Fallback: search in common keys
+        for key in ("plantuml", "uml", "content", "text"):
             val = obj.get(key)
             if isinstance(val, str) and "@startuml" in val and "@enduml" in val:
                 return val
+        # Recurse into all values
         for val in obj.values():
             found = find_plantuml_text(val)
             if found:

@@ -45,6 +45,31 @@ def update_agent_configs(orchestrator_instance,
         if text_verbosity is not None:
             orchestrator_instance.agent_configs[agent_name]["text_verbosity"] = text_verbosity
     
+    # 1.5) Set orchestrator-level attributes for direct access
+    if reasoning_effort is not None:
+        orchestrator_instance.reasoning_effort = reasoning_effort
+    elif not hasattr(orchestrator_instance, "reasoning_effort"):
+        # Initialize with default from agent_configs if not set
+        orchestrator_instance.reasoning_effort = orchestrator_instance.agent_configs.get(
+            "lucim_operation_model_generator", {}
+        ).get("reasoning_effort", "medium")
+    
+    if reasoning_summary is not None:
+        orchestrator_instance.reasoning_summary = reasoning_summary
+    elif not hasattr(orchestrator_instance, "reasoning_summary"):
+        # Initialize with default from agent_configs if not set
+        orchestrator_instance.reasoning_summary = orchestrator_instance.agent_configs.get(
+            "lucim_operation_model_generator", {}
+        ).get("reasoning_summary", "auto")
+    
+    if text_verbosity is not None:
+        orchestrator_instance.text_verbosity = text_verbosity
+    elif not hasattr(orchestrator_instance, "text_verbosity"):
+        # Initialize with default from agent_configs if not set
+        orchestrator_instance.text_verbosity = orchestrator_instance.agent_configs.get(
+            "lucim_operation_model_generator", {}
+        ).get("text_verbosity", "medium")
+    
     agent_list = [
         ("lucim_operation_model_generator_agent", True),
         ("lucim_scenario_generator_agent", True),

@@ -1,0 +1,7 @@
+@startuml
+participant System as system
+participant "bill:ActAdministrator" as bill
+system -> bill : oeLogin()
+bill --> system : ieWelcome()
+@enduml
+

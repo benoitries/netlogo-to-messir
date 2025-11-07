@@ -39,10 +39,11 @@ def test_environment_invalid_directions_and_formats():
     }
     res = audit_operation_model(env)
     assert res["verdict"] is False
-    assert any(v["id"] == "LEM2-ACT-INSTANCE-FORMAT" for v in res["violations"]) 
-    assert any(v["id"] == "LEM1-ACT-TYPE-FORMAT" for v in res["violations"]) 
-    assert any(v["id"] == "LEM4-IE-EVENT-DIRECTION" for v in res["violations"]) 
-    assert any(v["id"] == "LEM5-OE-EVENT-DIRECTION" for v in res["violations"]) 
+    # Note: LEM2-ACT-INSTANCE-FORMAT is no longer a LOM rule, but we check instance format if provided
+    # The test case has "Bill" which is not camelCase, but this is not enforced as a LOM rule anymore
+    assert any(v["id"] == "LOM1-ACT-TYPE-FORMAT" for v in res["violations"]) 
+    assert any(v["id"] == "LOM4-IE-EVENT-DIRECTION" for v in res["violations"]) 
+    assert any(v["id"] == "LOM5-OE-EVENT-DIRECTION" for v in res["violations"]) 
 
 
 def test_new_format_dict_actors_params_invalid():
@@ -83,9 +84,9 @@ def test_new_format_explicit_direction_mismatch():
     }
     res = audit_operation_model(env)
     assert res["verdict"] is False
-    # LEM4 for input_events wrong direction, LEM5 for output_events wrong direction
-    assert any(v["id"] == "LEM4-IE-EVENT-DIRECTION" for v in res["violations"]) 
-    assert any(v["id"] == "LEM5-OE-EVENT-DIRECTION" for v in res["violations"]) 
+    # LOM4 for input_events wrong direction, LOM5 for output_events wrong direction
+    assert any(v["id"] == "LOM4-IE-EVENT-DIRECTION" for v in res["violations"]) 
+    assert any(v["id"] == "LOM5-OE-EVENT-DIRECTION" for v in res["violations"]) 
 
 
 def test_new_format_valid_compliant():

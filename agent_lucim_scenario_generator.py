@@ -155,7 +155,54 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
         Returns:
             Dictionary containing reasoning, scenarios, and any errors
         """
-        # Validate mandatory inputs
+        # Resolve base output directory (per-agent if provided)
+        base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
+        
+        # Validate mandatory inputs and build system_prompt for debugging (even on error)
+        # Prefer provided rules text; fallback to internally loaded rules content
+        effective_rules = scenario_rules_text if (isinstance(scenario_rules_text, str) and scenario_rules_text.strip()) else self.lucim_rules_text
+        
+        # Build canonical instructions: persona + explicit scenario rules
+        # Note: No <LUCIM-DSL-DESCRIPTION> is required or injected anywhere.
+        instructions = f"{self.persona_text}\n\n{effective_rules}".strip() if (self.persona_text and self.persona_text.strip()) else ""
+
+        # Build input blocks with required tagged sections (without repeating instructions)
+        input_text = ""
+        if lucim_operation_model:
+            input_text = f"""
+<LUCIM-OPERATION-MODEL>
+```json
+{json.dumps(lucim_operation_model, indent=2)}
+```
+</LUCIM-OPERATION-MODEL>
+
+"""
+        else:
+            input_text = """
+<LUCIM-OPERATION-MODEL>
+</LUCIM-OPERATION-MODEL>
+
+"""
+        
+        # Attach auditor feedback and previous scenario if provided (allowed to be empty on first run)
+        try:
+            if isinstance(scenario_auditor_feedback, dict):
+                input_text += ("\n<SCENARIO-AUDITOR-FEEDBACK>\n" "```json\n" + json.dumps(scenario_auditor_feedback, indent=2) + "\n```\n" "</SCENARIO-AUDITOR-FEEDBACK>\n")
+        except Exception:
+            pass
+        try:
+            if previous_scenario is not None:
+                input_text += ("\n<PREVIOUS-LUCIM-SCENARIO>\n" "```json\n" + json.dumps(previous_scenario, indent=2) + "\n```\n" "</PREVIOUS-LUCIM-SCENARIO>\n")
+        except Exception:
+            pass
+
+        # Build system_prompt with required tagged blocks and inputs
+        system_prompt = f"{instructions}\n\n{input_text}" if instructions else input_text
+        
+        # Write input-instructions.md BEFORE API call for debugging (even if validation fails)
+        write_input_instructions_before_api(base_output_dir, system_prompt)
+        
+        # Now validate mandatory inputs and return early if missing
         if not lucim_operation_model:
             return {
                 "reasoning_summary": "Missing mandatory input: LUCIM operation model",
@@ -174,42 +221,6 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
                 "input_tokens": 0,
                 "output_tokens": 0
             }
-        
-        # Prefer provided rules text; fallback to internally loaded rules content
-        effective_rules = scenario_rules_text if (isinstance(scenario_rules_text, str) and scenario_rules_text.strip()) else self.lucim_rules_text
-        # Build canonical instructions: persona + explicit scenario rules
-        # Note: No <LUCIM-DSL-DESCRIPTION> is required or injected anywhere.
-        instructions = f"{self.persona_text}\n\n{effective_rules}".strip()
-
-        # Build input blocks with required tagged sections (without repeating instructions)
-        input_text = f"""
-<LUCIM-OPERATION-MODEL>
-```json
-{json.dumps(lucim_operation_model, indent=2)}
-```
-</LUCIM-OPERATION-MODEL>
-
-"""
-        # Attach auditor feedback and previous scenario if provided (allowed to be empty on first run)
-        try:
-            if isinstance(scenario_auditor_feedback, dict):
-                input_text += ("\n<SCENARIO-AUDITOR-FEEDBACK>\n" "```json\n" + json.dumps(scenario_auditor_feedback, indent=2) + "\n```\n" "</SCENARIO-AUDITOR-FEEDBACK>\n")
-        except Exception:
-            pass
-        try:
-            if previous_scenario is not None:
-                input_text += ("\n<PREVIOUS-LUCIM-SCENARIO>\n" "```json\n" + json.dumps(previous_scenario, indent=2) + "\n```\n" "</PREVIOUS-LUCIM-SCENARIO>\n")
-        except Exception:
-            pass
-
-        # Build system_prompt with required tagged blocks and inputs
-        system_prompt = f"{instructions}\n\n{input_text}"
-        
-        # Resolve base output directory (per-agent if provided)
-        base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
-        
-        # Write input-instructions.md BEFORE API call for debugging
-        write_input_instructions_before_api(base_output_dir, system_prompt)
         
         # Count input tokens exactly
         exact_input_tokens = self.count_input_tokens(instructions, input_text)
@@ -251,99 +262,55 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
             
             # Parse JSON response
             try:
-                # Debug: Log the raw response for troubleshooting
-                # Note: These debug prints are kept as they provide useful debugging information
-                print(f"[DEBUG] Raw response length: {len(content)}")
-                print(f"[DEBUG] Raw response preview: {content[:500]}...")
-                
-                # Clean up the content
-                content_clean = content.strip()
-                if content_clean.startswith("```json"):
-                    content_clean = content_clean.replace("```json", "").replace("```", "").strip()
-                elif content_clean.startswith("```"):
-                    content_clean = content_clean.replace("```", "").strip()
-                
-                # Parse the response as JSON
-                response_data = json.loads(content_clean)
+                # Parse JSON directly without any cleaning
+                response_data = json.loads(content)
+                # If the LLM returned a JSON-escaped string, parse it again
+                if isinstance(response_data, str):
+                    response_data = json.loads(response_data)
                 print(f"[DEBUG] Successfully parsed response as JSON")
                 
-                # Extract and normalize fields from JSON response.
-                # Always save under 'data' as a LIST of scenario objects:
-                # {
-                #   "data": [ { "scenario": { name, description, messages[] } }, ... ],
-                #   "errors": []
-                # }
-                normalized_data_list: list = []
+                # Validate and extract new JSON format: { "data": { "scenario": {...} }, "errors": [] }
+                normalized_data_list = response_data
                 errors = []
                 if isinstance(response_data, dict):
                     # Capture errors if present
                     if isinstance(response_data.get("errors"), list):
                         errors = response_data.get("errors", [])
-
-                    # Preferred: response_data["data"] is a list of items containing {"scenario": {...}}
-                    data_node = response_data.get("data")
-                    if isinstance(data_node, list):
-                        for item in data_node:
-                            if isinstance(item, dict):
-                                if isinstance(item.get("scenario"), dict):
-                                    normalized_data_list.append({"scenario": item["scenario"]})
-                                elif all(k in item for k in ("name", "description", "messages")):
-                                    normalized_data_list.append({"scenario": {
-                                        "name": item.get("name"),
-                                        "description": item.get("description"),
-                                        "messages": item.get("messages", [])
-                                    }})
+                    
+                    # Validate new format structure: must have "data" key with "scenario" nested inside
+                    if "data" in response_data:
+                        data_node = response_data.get("data")
+                        if isinstance(data_node, dict) and "scenario" in data_node:
+                            # Valid new format structure
+                            scenario_node = data_node.get("scenario")
+                            if not isinstance(scenario_node, dict):
+                                errors.append("Invalid format: 'data.scenario' must be a dictionary")
+                            elif "messages" not in scenario_node:
+                                errors.append("Invalid format: 'data.scenario' must contain 'messages' array")
+                            else:
+                                # Validate messages structure
+                                messages = scenario_node.get("messages", [])
+                                if not isinstance(messages, list):
+                                    errors.append("Invalid format: 'data.scenario.messages' must be an array")
                                 else:
-                                    # Keep as-is for legacy, wrapped under scenario if possible later
-                                    normalized_data_list.append(item)
-                    elif isinstance(data_node, dict):
-                        # If dict: check for nested scenario or direct fields; then wrap into list
-                        if isinstance(data_node.get("scenario"), dict):
-                            normalized_data_list = [{"scenario": data_node["scenario"]}]
-                        elif all(k in data_node for k in ("name", "description", "messages")):
-                            normalized_data_list = [{"scenario": data_node}]
+                                    # Validate each message has required fields
+                                    for idx, msg in enumerate(messages):
+                                        if not isinstance(msg, dict):
+                                            errors.append(f"Invalid format: message at index {idx} must be a dictionary")
+                                        else:
+                                            required_fields = ["source", "target", "event_type", "event_name", "parameters"]
+                                            for field in required_fields:
+                                                if field not in msg:
+                                                    errors.append(f"Invalid format: message at index {idx} missing required field '{field}'")
+                        elif data_node is None:
+                            # Error case: data is null
+                            pass  # errors already captured above
                         else:
-                            normalized_data_list = [data_node]
+                            errors.append("Invalid format: 'data' must contain 'scenario' key with scenario object")
                     else:
-                        # No top-level data: check for direct scenario or direct fields
-                        if isinstance(response_data.get("scenario"), dict):
-                            normalized_data_list = [{"scenario": response_data["scenario"]}]
-                        elif all(k in response_data for k in ("name", "description", "messages")):
-                            normalized_data_list = [{"scenario": {
-                                "name": response_data.get("name"),
-                                "description": response_data.get("description"),
-                                "messages": response_data.get("messages", [])
-                            }}]
-                        else:
-                            # Fallback: keep entire dict (legacy producers)
-                            normalized_data_list = [response_data]
-                else:
-                    # If the response was not a dict, surface a parsing error
-                    errors = ["Unexpected response shape: expected JSON object"]
-                    normalized_data_list = None
-
-                # Extract token usage from response (centralized helper)
-                usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
-                tokens_used = usage.get("total_tokens", 0)
-                input_tokens = usage.get("input_tokens", 0)
-                api_output_tokens = usage.get("output_tokens", 0)
-                reasoning_tokens = usage.get("reasoning_tokens", 0)
-                total_output_tokens = api_output_tokens if api_output_tokens is not None else max((tokens_used or 0) - (input_tokens or 0), 0)
-                visible_output_tokens = max((total_output_tokens or 0) - (reasoning_tokens or 0), 0)
-                usage_dict = usage
-
-                return {
-                    "reasoning_summary": reasoning_summary,
-                    "data": normalized_data_list,
-                    "errors": errors or [],
-                    "tokens_used": tokens_used,
-                    "input_tokens": input_tokens,
-                    "visible_output_tokens": visible_output_tokens,
-                    "raw_usage": usage_dict,
-                    "reasoning_tokens": reasoning_tokens,
-                    "total_output_tokens": total_output_tokens,
-                    "raw_response": raw_response_serialized
-                }
+                        # Old format or invalid structure - try to detect and warn
+                        if "scenario" in response_data or (isinstance(response_data, list) and len(response_data) > 0):
+                            errors.append("Warning: Response does not match expected format. Expected: { 'data': { 'scenario': {...} }, 'errors': [] }")
             except json.JSONDecodeError as e:
                 return {
                     "reasoning_summary": reasoning_summary,
@@ -354,6 +321,29 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
                     "output_tokens": 0,
                     "raw_response": raw_response_serialized
                 }
+
+            # Extract token usage from response (centralized helper)
+            usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
+            tokens_used = usage.get("total_tokens", 0)
+            input_tokens = usage.get("input_tokens", 0)
+            api_output_tokens = usage.get("output_tokens", 0)
+            reasoning_tokens = usage.get("reasoning_tokens", 0)
+            total_output_tokens = api_output_tokens if api_output_tokens is not None else max((tokens_used or 0) - (input_tokens or 0), 0)
+            visible_output_tokens = max((total_output_tokens or 0) - (reasoning_tokens or 0), 0)
+            usage_dict = usage
+
+            return {
+                "reasoning_summary": reasoning_summary,
+                "data": normalized_data_list,  # Store entire parsed JSON object
+                "errors": errors or [],
+                "tokens_used": tokens_used,
+                "input_tokens": input_tokens,
+                "visible_output_tokens": visible_output_tokens,
+                "raw_usage": usage_dict,
+                "reasoning_tokens": reasoning_tokens,
+                "total_output_tokens": total_output_tokens,
+                "raw_response": raw_response_serialized
+            }
                 
         except Exception as e:
             from utils_openai_client import build_error_raw_payload

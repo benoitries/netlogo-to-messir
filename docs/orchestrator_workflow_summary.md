@@ -9,7 +9,7 @@ This document summarizes the current orchestration flow and highlights ambiguiti
 - Generators auto-correct when their paired Auditor flags non-compliance (no separate Corrector agent).
 - Output root: `code-netlogo-to-lucim-agentic-workflow/output/runs/<YYYY-MM-DD>/<HHMM>-<PSvX>[-<version>]/<case>-<model>-<RXX>-<VXX>/<NN-stage>/`.
   Where `<PSvX>` is persona set short code (e.g., PSv3), `<RXX>` is reasoning effort short code (RMI/RLO/RME/RHI) and `<VXX>` is verbosity short code (VLO/VME/VHI).
-- Each stage writes standardized artifacts: `output-response.json`, `output-reasoning.md`, `output-data.json`, `output-raw_response.json` (+ optional `.puml` for diagram stages), and `input-instructions.md` (contains the exact system prompt given to the AI model).
+- Each stage writes standardized artifacts: `output-response.json`, `output-reasoning.md`, `output-data.json` (raw LLM text content, plain text), `output-raw_response.json` (+ optional `.puml` for diagram stages), and `input-instructions.md` (contains the exact system prompt given to the AI model).
 
 ---
 
@@ -17,35 +17,35 @@ This document summarizes the current orchestration flow and highlights ambiguiti
 
 ### LUCIM Operation Model Generator (`agent_lucim_operation_generator.py`)
 - Inputs: NetLogo source code and `RULES_MAPPING_NETLOGO_TO_OPERATION_MODEL`.
-- Outputs: `output-data.json` (operation model).
+- Outputs: `output-data.json` (raw LLM text content containing operation model, plain text).
 - Notes: Performs exhaustive and complete corrections when the paired Auditor reports non-compliance.
 - Common artifacts: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md` (exact system prompt given to the AI model).
 
 ### LUCIM Operation Model Auditor (`agent_lucim_operation_auditor.py`)
-- Inputs: Operation model JSON and `RULES_LUCIM_Operation_model.md` (LUCIM Operation Model Rules).
-- Outputs: `output-data.json` (raw LLM audit `data`, verbatim; orchestrator derives verdict + non-compliant rules via `utils_audit_core.extract_audit_core`).
+- Inputs: Operation model raw text (from `output-data.json`) and `RULES_LUCIM_Operation_model.md` (LUCIM Operation Model Rules).
+- Outputs: `output-data.json` (raw LLM audit text content, plain text; orchestrator derives verdict + non-compliant rules via `utils_audit_core.extract_audit_core`).
 - Common artifacts: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md` (exact system prompt given to the AI model).
 
 ### LUCIM Scenario Generator (`agent_lucim_scenario_generator.py`)
-- Inputs: Operation model only.
-- Outputs: `output-data.json` (scenarios).
+- Inputs: Operation model raw text (from `output-data.json`) only.
+- Outputs: `output-data.json` (raw LLM text content containing scenarios, plain text).
 - Notes: Performs minimal auto-corrections if the paired Auditor reports non-compliance.
 - Common artifacts: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md` (exact system prompt given to the AI model).
 
 ### LUCIM Scenario Auditor (`agent_lucim_scenario_auditor.py`)
-- Inputs: Scenario JSON and `RULES_LUCIM_Scenario.md` (LUCIM Scenario Rules).
-- Outputs: `output-data.json` (raw LLM audit `data`, verbatim; orchestrator derives verdict + non-compliant rules via `utils_audit_core.extract_audit_core`).
+- Inputs: Scenario raw text (from `output-data.json`) and `RULES_LUCIM_Scenario.md` (LUCIM Scenario Rules).
+- Outputs: `output-data.json` (raw LLM audit text content, plain text; orchestrator derives verdict + non-compliant rules via `utils_audit_core.extract_audit_core`).
 - Common artifacts: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md` (exact system prompt given to the AI model).
 
 ### LUCIM PlantUML Diagram Generator (`agent_lucim_plantuml_diagram_generator.py`)
-- Inputs: Scenarios and `RULES_LUCIM_PlantUML_Diagram.md` (LUCIM Diagram Rules).
-- Outputs: `diagram.puml` (standalone); `output-data.json` (diagram payload incl. PlantUML text).
+- Inputs: Scenarios raw text (from `output-data.json`) and `RULES_LUCIM_PlantUML_Diagram.md` (LUCIM Diagram Rules).
+- Outputs: `diagram.puml` (standalone); `output-data.json` (raw LLM text content containing diagram payload incl. PlantUML text, plain text).
 - Notes: Performs minimal auto-corrections if the paired Auditor reports non-compliance.
 - Common artifacts: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md` (exact system prompt given to the AI model).
 
 ### LUCIM PlantUML Diagram Auditor (`agent_lucim_plantuml_diagram_auditor.py`)
 - Inputs (mandatory): standalone `.puml` and the LUCIM DSL full definition.
-- Outputs: `output-data.json` (raw LLM audit `data`, verbatim; orchestrator derives verdict + non-compliant rules via `utils_audit_core.extract_audit_core`).
+- Outputs: `output-data.json` (raw LLM audit text content, plain text; orchestrator derives verdict + non-compliant rules via `utils_audit_core.extract_audit_core`).
 - Common artifacts: `output-response.json`, `output-reasoning.md`, `output-raw_response.json`, `input-instructions.md` (exact system prompt given to the AI model).
 
 ---

@@ -1,0 +1,5 @@
+@startuml
+participant "bill:ActAdministrator" as bill
+bill -> system : oeLogin()
+@enduml
+

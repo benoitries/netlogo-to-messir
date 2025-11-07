@@ -389,7 +389,32 @@ class GeminiClientWrapper:
                 
                 return wrapped_response
             except Exception as e:
-                raise Exception(f"Gemini API error: {e}")
+                # Convert Gemini errors to retryable OpenAI exceptions
+                # Import exceptions once for efficiency
+                from utils_openai_error import APIError, RateLimitError, APIConnectionError
+                
+                error_str = str(e).lower()
+                error_repr = repr(e)
+                
+                # Check for 503 Service Unavailable (overloaded model)
+                if "503" in error_str or "unavailable" in error_str or "overloaded" in error_str:
+                    raise APIError(f"Gemini API error: 503 UNAVAILABLE. {error_repr}")
+                
+                # Check for rate limit errors (429)
+                if "429" in error_str or "rate limit" in error_str or "quota" in error_str:
+                    raise RateLimitError(f"Gemini API error: 429 RATE_LIMIT. {error_repr}")
+                
+                # Check for connection errors
+                if "connection" in error_str or "timeout" in error_str or "network" in error_str:
+                    raise APIConnectionError(f"Gemini API error: CONNECTION. {error_repr}")
+                
+                # For other errors, raise as APIError (retryable) if they look like server errors
+                # Non-retryable errors (400, 401, 403) will be raised as generic Exception
+                if any(code in error_str for code in ["400", "401", "403", "404"]):
+                    raise Exception(f"Gemini API error: {error_repr}")
+                else:
+                    # Server errors (500, 502, 504, etc.) should be retryable
+                    raise APIError(f"Gemini API error: {error_repr}")
         
         def retrieve(self, response_id: str) -> Any:
             """Retrieve a response (for Gemini, returns immediately as it's synchronous).
@@ -436,17 +461,35 @@ class GeminiResponseWrapper:
         self.prompt = prompt
         
         # Extract text from Gemini response
+        # Gemini response structure: candidates[0].content.parts[0].text
         self._text = ""
-        if hasattr(gemini_response, 'text'):
-            self._text = gemini_response.text
-        elif hasattr(gemini_response, 'content'):
-            # Handle different response formats
-            if isinstance(gemini_response.content, str):
-                self._text = gemini_response.content
-            elif isinstance(gemini_response.content, list):
-                for item in gemini_response.content:
-                    if hasattr(item, 'text'):
-                        self._text += item.text
+        try:
+            # Try direct text attribute first (for compatibility)
+            if hasattr(gemini_response, 'text'):
+                self._text = gemini_response.text
+            # Try candidates structure (standard Gemini format)
+            elif hasattr(gemini_response, 'candidates') and isinstance(gemini_response.candidates, list) and len(gemini_response.candidates) > 0:
+                candidate = gemini_response.candidates[0]
+                if hasattr(candidate, 'content'):
+                    content = candidate.content
+                    if hasattr(content, 'parts') and isinstance(content.parts, list):
+                        for part in content.parts:
+                            if hasattr(part, 'text') and isinstance(part.text, str):
+                                self._text += part.text
+                    elif hasattr(content, 'text'):
+                        self._text = content.text
+            # Fallback: try content attribute directly
+            elif hasattr(gemini_response, 'content'):
+                # Handle different response formats
+                if isinstance(gemini_response.content, str):
+                    self._text = gemini_response.content
+                elif isinstance(gemini_response.content, list):
+                    for item in gemini_response.content:
+                        if hasattr(item, 'text'):
+                            self._text += item.text
+        except Exception as e:
+            logger.warning(f"Failed to extract text from Gemini response: {e}")
+            self._text = ""
         
         # Create OpenAI-like output structure
         self.output = [{

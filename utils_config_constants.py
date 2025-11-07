@@ -194,8 +194,8 @@ AGENT_RESPONSE_SCHEMA = {
         "step_number": (int, str, type(None)),
         "reasoning_summary": str,
         "errors": list,
-        # Allow data to be absent/None when upstream returns empty content
-        "data": (dict, type(None))
+        # Allow data to be dict, list, string (raw LLM response), or None when upstream returns empty content
+        "data": (dict, list, str, type(None))
     }
 }
 
@@ -205,6 +205,8 @@ def validate_agent_response(agent_type: str, response: dict) -> list:
     Agent-specific data structure requirements are defined in input-persona files and are
     not duplicated here to avoid drift. Downstream agents should validate content based on
     those authoritative references when needed.
+    
+    Note: The 'data' field can now be a string (raw LLM response), dict, list, or None.
     """
     errors = []
 
@@ -215,10 +217,11 @@ def validate_agent_response(agent_type: str, response: dict) -> list:
         elif field == "data" and agent_type == "netlogo_interface_image_analyzer":
             if not isinstance(response[field], (list, dict, type(None))):
                 errors.append(f"Field {field} must be of type (list, dict, NoneType) for {agent_type}")
-        # Special case: stage 4 and 5 also emit collections in data
-        elif field == "data" and agent_type in ("lucim_scenario_generator", "lucim_plantuml_diagram_generator"):
-            if not isinstance(response[field], (list, dict, type(None))):
-                errors.append(f"Field {field} must be of type (list, dict, NoneType) for {agent_type}")
+        # All generator agents now store raw LLM response text (string) in data field
+        # Accept string, dict, list, or None for data field
+        elif field == "data":
+            if not isinstance(response[field], (str, dict, list, type(None))):
+                errors.append(f"Field {field} must be of type (str, list, dict, NoneType) for {agent_type}")
         # If schema permits multiple types, isinstance handles tuple typing
         elif not isinstance(response[field], field_type):
             errors.append(f"Field {field} must be of type {field_type}")

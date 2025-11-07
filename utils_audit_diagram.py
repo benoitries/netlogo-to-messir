@@ -5,15 +5,20 @@ Input: PlantUML textual diagram (.puml content string)
 Output: { "verdict": bool, "violations": [ { "id": str, "message": str, "line": int } ] }
 
 Subset of rules implemented (pragmatic coverage):
-- AS2-SYS-DECLARED-FIRST: System declared before all actors
-- AS5-ACT-DECLARED-AFTER-SYS: actors declared after System
-- SS3-SYS-UNIQUE-IDENTITY: exactly one System participant named "System"
-- SS1-MESSAGE-DIRECTIONALITY: messages connect exactly one Actor and System
-- AS4-SYS-NO-SELF-LOOP: no System→System
-- AS6-ACT-NO-ACT-ACT-EVENTS: no Actor→Actor
-- TCS10-AB-NO-ACTIVATION-BAR-ON-SYSTEM: never activate system
-- TCS9-AB-SEQUENCE (lightweight): basic check that activate/deactivate for a given lifeline do not appear before any message referencing that lifeline (heuristic)
-- GCS5/GCS6 color hints: not enforced strictly; out-of-scope for text-only validation (colors optional in PlantUML)
+- LDR1-SYS-UNIQUE: exactly one System lifeline per diagram
+- LDR2-ACTOR-DECLARED-AFTER-SYSTEM: actors must be declared after System
+- LDR3-SYSTEM-DECLARED-FIRST: System must be declared first before all actors
+- LDR4-EVENT-DIRECTIONALITY: every message must connect exactly one Actor and System
+- LDR5-SYSTEM-NO-SELF-LOOP: no System→System events
+- LDR6-ACTOR-NO-ACTOR-LOOP: no Actor→Actor events
+- LDR7-ACTIVATION-BAR-SEQUENCE: activation must occur on Actor lifeline immediately after event
+- LDR8-ACTIVATION-BAR-NESTING-FORBIDDEN: activation bars must never be nested
+- LDR9-ACTIVATION-BAR-OVERLAPPING-FORBIDDEN: activation bars must never overlap
+- LDR10-ACTIVATION-BAR-ON-SYSTEM-FORBIDDEN: no activation bar on System lifeline
+- LDR20-ACTIVATION-BAR-SEQUENCE: strict sequence: event → activate → deactivate
+- LDR25-INPUT-EVENT-SYNTAX: ie* events must use dashed arrows (-->)
+- LDR26-OUTPUT-EVENT-SYNTAX: oe* events must use continuous arrows (->)
+- LDR11-LDR16 (graphical rules): not enforced strictly; out-of-scope for text-only validation
 """
 from __future__ import annotations
 
@@ -50,8 +55,8 @@ def audit_diagram(text: str) -> Dict[str, Any]:
         if _SYSTEM_SIMPLE_RE.match(line):
             if has_system_decl:
                 violations.append({
-                    "id": "SS3-SYS-UNIQUE-IDENTITY",
-                    "message": "System participant must be unique.",
+                    "id": "LDR1-SYS-UNIQUE",
+                    "message": "There must be exactly one System lifeline per diagram.",
                     "line": idx,
                     "extracted_values": {"line_content": raw.rstrip()}
                 })
@@ -68,7 +73,7 @@ def audit_diagram(text: str) -> Dict[str, Any]:
             participants_order.append(alias)
             if alias != "system" and not has_system_decl:
                 violations.append({
-                    "id": "AS2-SYS-DECLARED-FIRST",
+                    "id": "LDR3-SYSTEM-DECLARED-FIRST",
                     "message": "The System must be declared first before all actors.",
                     "line": idx,
                     "extracted_values": {"line_content": raw.rstrip(), "participant_label": label, "participant_alias": alias}
@@ -96,8 +101,8 @@ def audit_diagram(text: str) -> Dict[str, Any]:
                             actor_line_content = raw_line.rstrip()
                             break
                     violations.append({
-                        "id": "AS5-ACT-DECLARED-AFTER-SYS",
-                        "message": "Actors must be declared after the System.",
+                        "id": "LDR2-ACTOR-DECLARED-AFTER-SYSTEM",
+                        "message": "The actors must be declared after the System.",
                         "line": actor_line,
                         "extracted_values": {"line_content": actor_line_content, "actor_alias": alias, "system_decl_line": system_decl_line}
                     })
@@ -113,14 +118,17 @@ def audit_diagram(text: str) -> Dict[str, Any]:
                 first_line_content = raw_line.rstrip()
                 break
         violations.append({
-            "id": "SS3-SYS-UNIQUE-IDENTITY",
+            "id": "LDR1-SYS-UNIQUE",
             "message": "System participant not declared (expected: participant System as system).",
             "line": 1,
             "extracted_values": {"line_content": first_line_content if first_line_content else "(empty file)"}
         })
 
     # Pass 2: scan messages and activations
-    seen_message_for: Dict[str, bool] = {}
+    # Track structure for LDR8, LDR9, LDR10
+    activation_stack: Dict[str, List[int]] = {}  # Track active activations per lifeline for nesting/overlap
+    last_activation_line: Dict[str, int] = {}  # Track last activation per lifeline
+    
     for idx, raw in enumerate(lines, start=1):
         line = raw.strip()
         if not line or line.startswith("//"):
@@ -132,31 +140,55 @@ def audit_diagram(text: str) -> Dict[str, Any]:
             who = ma.group("who")
             if _is_system_token(who):
                 violations.append({
-                    "id": "TCS10-AB-NO-ACTIVATION-BAR-ON-SYSTEM",
-                    "message": "There must be NO activation bar on the System lifeline.",
+                    "id": "LDR10-ACTIVATION-BAR-ON-SYSTEM-FORBIDDEN",
+                    "message": "There must be NO activation bar in the System lifeline. Never activate System.",
                     "line": idx,
                     "extracted_values": {"line_content": raw.rstrip(), "lifeline": who}
                 })
-            # record activation presence (lightweight sequence heuristic)
-            if who not in seen_message_for:
+                continue
+            
+            # LDR8: Check for nesting (activation while already active)
+            if who in activation_stack and len(activation_stack[who]) > 0:
                 violations.append({
-                    "id": "TCS9-AB-SEQUENCE",
-                    "message": "Activation should follow a message for the same lifeline.",
+                    "id": "LDR8-ACTIVATION-BAR-NESTING-FORBIDDEN",
+                    "message": "Activation bars must never be nested.",
                     "line": idx,
                     "extracted_values": {"line_content": raw.rstrip(), "lifeline": who}
                 })
+            
+            # LDR9: Check for overlapping (new activation before previous deactivation)
+            # Overlap occurs if there's an active activation and no deactivation between last activation and this one
+            if who in activation_stack and len(activation_stack[who]) > 0:
+                # There's already an active activation - check if it was deactivated
+                last_activation = activation_stack[who][-1]
+                deactivated_after = False
+                for check_idx in range(last_activation + 1, idx):
+                    check_line = lines[check_idx - 1].strip()
+                    deactivate_match = _DEACTIVATE_RE.match(check_line)
+                    if deactivate_match and deactivate_match.group("who") == who:
+                        deactivated_after = True
+                        break
+                if not deactivated_after:
+                    violations.append({
+                        "id": "LDR9-ACTIVATION-BAR-OVERLAPPING-FORBIDDEN",
+                        "message": "Activation bars must never overlap. Following sequence is forbidden: an event, start of activation bar of this event, another event before the end of the activation bar.",
+                        "line": idx,
+                        "extracted_values": {"line_content": raw.rstrip(), "lifeline": who}
+                    })
+            
+            # Track activation
+            if who not in activation_stack:
+                activation_stack[who] = []
+            activation_stack[who].append(idx)
+            last_activation_line[who] = idx
             continue
 
         md = _DEACTIVATE_RE.match(line)
         if md:
             who = md.group("who")
-            if who not in seen_message_for:
-                violations.append({
-                    "id": "TCS9-AB-SEQUENCE",
-                    "message": "Deactivation should follow an activation/message for the same lifeline.",
-                    "line": idx,
-                    "extracted_values": {"line_content": raw.rstrip(), "lifeline": who}
-                })
+            # Remove from activation stack
+            if who in activation_stack and len(activation_stack[who]) > 0:
+                activation_stack[who].pop()
             continue
 
         mm = _MSG_RE.match(line)
@@ -165,57 +197,182 @@ def audit_diagram(text: str) -> Dict[str, Any]:
         lhs = mm.group("lhs")
         rhs = mm.group("rhs")
         name = mm.group("name")
+        arrow = mm.group("arrow")
         lhs_is_system = _is_system_token(lhs)
         rhs_is_system = _is_system_token(rhs)
         lhs_is_actor = not lhs_is_system
         rhs_is_actor = not rhs_is_system
 
-        # Record message presence per lifeline for AB heuristic
-        seen_message_for[lhs] = True
-        seen_message_for[rhs] = True
+        # Track messages for later activation verification (Pass 3)
 
-        # AS4 — no System→System
+        # LDR5 — no System→System
         if lhs_is_system and rhs_is_system:
             violations.append({
-                "id": "AS4-SYS-NO-SELF-LOOP",
-                "message": "System→System message is forbidden.",
+                "id": "LDR5-SYSTEM-NO-SELF-LOOP",
+                "message": "Events must never be from System to System. System → System",
                 "line": idx,
                 "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name}
             })
 
-        # AS6 — no Actor→Actor
+        # LDR6 — no Actor→Actor
         if lhs_is_actor and rhs_is_actor:
             violations.append({
-                "id": "AS6-ACT-NO-ACT-ACT-EVENTS",
-                "message": "Actor→Actor message is forbidden.",
+                "id": "LDR6-ACTOR-NO-ACTOR-LOOP",
+                "message": "Events must never be from Actor to Actor. Actor → Actor",
                 "line": idx,
                 "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name}
             })
 
-        # SS1 — must connect exactly one Actor and the System
+        # LDR4 — must connect exactly one Actor and the System
         if not ((lhs_is_system and rhs_is_actor) or (lhs_is_actor and rhs_is_system)):
             violations.append({
-                "id": "SS1-MESSAGE-DIRECTIONALITY",
-                "message": "Messages must connect exactly one Actor and the System.",
+                "id": "LDR4-EVENT-DIRECTIONALITY",
+                "message": "Every message in a LUCIM interaction must connect exactly one Actor lifeline and the System lifeline.",
                 "line": idx,
                 "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name}
             })
 
-        # Direction-name sanity (optional)
-        if name.startswith("ie") and not (lhs_is_system and rhs_is_actor):
-            violations.append({
-                "id": "AS8-IE-EVENT-DIRECTION",
-                "message": "ie* should be System → Actor.",
-                "line": idx,
-                "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name}
-            })
-        if name.startswith("oe") and not (lhs_is_actor and rhs_is_system):
-            violations.append({
-                "id": "AS9-OE-EVENT-DIRECTION",
-                "message": "oe* should be Actor → System.",
-                "line": idx,
-                "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name}
-            })
+        # LDR25 — ie* events must use dashed arrows (-->)
+        if name.startswith("ie"):
+            if not (lhs_is_system and rhs_is_actor):
+                violations.append({
+                    "id": "LDR25-INPUT-EVENT-SYNTAX",
+                    "message": "ie events must be modeled using dashed arrows and following this declaration syntax: system --> theParticipant : ieMessageName(EP)",
+                    "line": idx,
+                    "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name, "arrow": arrow}
+                })
+            elif not arrow.startswith("--"):
+                violations.append({
+                    "id": "LDR25-INPUT-EVENT-SYNTAX",
+                    "message": "ie events must be modeled using dashed arrows (-->).",
+                    "line": idx,
+                    "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name, "arrow": arrow}
+                })
+        
+        # LDR26 — oe* events must use continuous arrows (->)
+        if name.startswith("oe"):
+            if not (lhs_is_actor and rhs_is_system):
+                violations.append({
+                    "id": "LDR26-OUTPUT-EVENT-SYNTAX",
+                    "message": "oe events must be modeled using continuous arrows and following this declaration syntax: theParticipant -> system : oeMessage(EP)",
+                    "line": idx,
+                    "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name, "arrow": arrow}
+                })
+            elif arrow != "->":
+                violations.append({
+                    "id": "LDR26-OUTPUT-EVENT-SYNTAX",
+                    "message": "oe events must be modeled using continuous arrows (->).",
+                    "line": idx,
+                    "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name, "arrow": arrow}
+                })
+
+    # Pass 3: Verify that each event has a corresponding activation (LDR7) and deactivation (LDR20)
+    # Track events that need activations
+    events_needing_activation: Dict[str, List[int]] = {}  # participant -> list of event line numbers
+    activations_by_participant: Dict[str, List[int]] = {}  # participant -> list of activation line numbers
+    deactivations_by_participant: Dict[str, List[int]] = {}  # participant -> list of deactivation line numbers
+    
+    for idx, raw in enumerate(lines, start=1):
+        line = raw.strip()
+        if not line or line.startswith("//"):
+            continue
+        
+        mm = _MSG_RE.match(line)
+        if mm:
+            lhs = mm.group("lhs")
+            rhs = mm.group("rhs")
+            lhs_is_system = _is_system_token(lhs)
+            rhs_is_system = _is_system_token(rhs)
+            
+            # Only actors need activations (LDR7, LDR10)
+            if not lhs_is_system:
+                if lhs not in events_needing_activation:
+                    events_needing_activation[lhs] = []
+                events_needing_activation[lhs].append(idx)
+            if not rhs_is_system:
+                if rhs not in events_needing_activation:
+                    events_needing_activation[rhs] = []
+                events_needing_activation[rhs].append(idx)
+        
+        ma = _ACTIVATE_RE.match(line)
+        if ma:
+            who = ma.group("who")
+            if not _is_system_token(who):
+                if who not in activations_by_participant:
+                    activations_by_participant[who] = []
+                activations_by_participant[who].append(idx)
+        
+        md = _DEACTIVATE_RE.match(line)
+        if md:
+            who = md.group("who")
+            if not _is_system_token(who):
+                if who not in deactivations_by_participant:
+                    deactivations_by_participant[who] = []
+                deactivations_by_participant[who].append(idx)
+    
+    # Check if each event has a corresponding activation and deactivation (LDR7, LDR20)
+    for participant, event_lines in events_needing_activation.items():
+        activation_lines = sorted(activations_by_participant.get(participant, []))
+        deactivation_lines = sorted(deactivations_by_participant.get(participant, []))
+        
+        if not activation_lines:
+            # No activations at all for this participant
+            for event_line in event_lines:
+                violations.append({
+                    "id": "LDR7-ACTIVATION-BAR-SEQUENCE",
+                    "message": "For each event, an activation must be used, it must occur on the Actor lifeline immediately after the event occurrence.",
+                    "line": event_line,
+                    "extracted_values": {"line_content": lines[event_line - 1].rstrip() if event_line <= len(lines) else "", "lifeline": participant}
+                })
+        else:
+            # Check if each event has an activation that follows it
+            for event_line in event_lines:
+                # Find the first activation after this event
+                found_activation = False
+                for act_line in activation_lines:
+                    if act_line > event_line:
+                        # Check if activation immediately follows (LDR20)
+                        if act_line != event_line + 1:
+                            violations.append({
+                                "id": "LDR20-ACTIVATION-BAR-SEQUENCE",
+                                "message": "Strictly follow this sequence: (1) event declaration, (2) activate the participant, (3) deactivate the participant.",
+                                "line": event_line,
+                                "extracted_values": {"line_content": lines[event_line - 1].rstrip() if event_line <= len(lines) else "", "lifeline": participant, "activation_line": act_line}
+                            })
+                        
+                        # Check if there's a deactivation after this activation (LDR20)
+                        found_deactivation = False
+                        for deact_line in deactivation_lines:
+                            if deact_line > act_line:
+                                # Check if deactivation immediately follows activation
+                                if deact_line != act_line + 1:
+                                    violations.append({
+                                        "id": "LDR20-ACTIVATION-BAR-SEQUENCE",
+                                        "message": "Strictly follow this sequence: (1) event declaration, (2) activate the participant, (3) deactivate the participant.",
+                                        "line": act_line,
+                                        "extracted_values": {"line_content": lines[act_line - 1].rstrip() if act_line <= len(lines) else "", "lifeline": participant, "deactivation_line": deact_line}
+                                    })
+                                found_deactivation = True
+                                break
+                        
+                        if not found_deactivation:
+                            violations.append({
+                                "id": "LDR20-ACTIVATION-BAR-SEQUENCE",
+                                "message": "Strictly follow this sequence: (1) event declaration, (2) activate the participant, (3) deactivate the participant.",
+                                "line": act_line,
+                                "extracted_values": {"line_content": lines[act_line - 1].rstrip() if act_line <= len(lines) else "", "lifeline": participant}
+                            })
+                        
+                        found_activation = True
+                        break
+                
+                if not found_activation:
+                    violations.append({
+                        "id": "LDR7-ACTIVATION-BAR-SEQUENCE",
+                        "message": "For each event, an activation must be used, it must occur on the Actor lifeline immediately after the event occurrence.",
+                        "line": event_line,
+                        "extracted_values": {"line_content": lines[event_line - 1].rstrip() if event_line <= len(lines) else "", "lifeline": participant}
+                    })
 
     verdict = len(violations) == 0
     return {"verdict": verdict, "violations": violations}

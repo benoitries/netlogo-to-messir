@@ -32,6 +32,17 @@ def initialize_v3_orchestrator_components(orchestrator_instance, model_name: str
     orchestrator_instance.agent_configs = AGENT_CONFIGS.copy()
     orchestrator_instance.processed_results = {}
     
+    # Initialize reasoning and verbosity attributes with defaults from agent_configs
+    orchestrator_instance.reasoning_effort = orchestrator_instance.agent_configs.get(
+        "lucim_operation_model_generator", {}
+    ).get("reasoning_effort", "medium")
+    orchestrator_instance.reasoning_summary = orchestrator_instance.agent_configs.get(
+        "lucim_operation_model_generator", {}
+    ).get("reasoning_summary", "auto")
+    orchestrator_instance.text_verbosity = orchestrator_instance.agent_configs.get(
+        "lucim_operation_model_generator", {}
+    ).get("text_verbosity", "medium")
+    
     # Initialize agents
     orchestrator_instance.lucim_operation_model_generator_agent = LucimOperationModelGeneratorAgent(model_name, orchestrator_instance.timestamp)
     orchestrator_instance.lucim_scenario_generator_agent = LUCIMScenarioGeneratorAgent(model_name, orchestrator_instance.timestamp)

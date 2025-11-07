@@ -49,6 +49,16 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
     base_name = file_info["base_name"]
     orchestrator_instance.processed_results = {}
     
+    # Ensure reasoning_effort and text_verbosity are initialized (defensive check)
+    if not hasattr(orchestrator_instance, "reasoning_effort"):
+        orchestrator_instance.reasoning_effort = orchestrator_instance.agent_configs.get(
+            "lucim_operation_model_generator", {}
+        ).get("reasoning_effort", "medium")
+    if not hasattr(orchestrator_instance, "text_verbosity"):
+        orchestrator_instance.text_verbosity = orchestrator_instance.agent_configs.get(
+            "lucim_operation_model_generator", {}
+        ).get("text_verbosity", "medium")
+    
     tv = orchestrator_instance.agent_configs["lucim_operation_model_generator"].get("text_verbosity", "medium")
     reff = orchestrator_instance.agent_configs["lucim_operation_model_generator"].get("reasoning_effort", "medium")
     run_dir = orchestrator_instance.fileio.create_run_directory(
@@ -144,9 +154,17 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         operation_model_data = operation_model_result.get("data") or {}
         # 1.2 Auditor — outputs under lucim_operation_model/iter-<k>/2-auditor
         operation_model_auditor_dir = _ensure_dir(operation_model_iter_dir / "2-auditor")
-        # Delegate input-instructions.md writing to the auditor (includes persona + rules + OM JSON)
+        # Read raw content from generator's output-data.json (don't assume it's valid JSON)
+        operation_model_raw_content = ""
+        try:
+            output_data_file = operation_model_generator_dir / "output-data.json"
+            if output_data_file.exists():
+                operation_model_raw_content = output_data_file.read_text(encoding="utf-8")
+        except Exception:
+            operation_model_raw_content = ""
+        # Delegate input-instructions.md writing to the auditor (includes persona + rules + OM raw content)
         operation_model_audit = audit_operation_model(
-            operation_model_data if isinstance(operation_model_data, dict) else {},
+            operation_model_raw_content,
             output_dir=str(operation_model_auditor_dir),
             model_name=orchestrator_instance.model
         )
@@ -158,31 +176,49 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
             "coverage": operation_model_core["coverage"],
             "errors": operation_model_core["errors"],
         }
-        # Persist auditor outputs in iter folder using raw data payload
-        _dump_json(operation_model_auditor_dir, "output-data.json", operation_model_core["data"])
+        # Persist auditor outputs using write_all_output_files (same as generator)
+        from utils_response_dump import write_all_output_files
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        
+        # Prepare results dict with all required fields for write_all_output_files
+        auditor_results = {
+            "reasoning_summary": operation_model_audit.get("reasoning_summary", ""),
+            "data": operation_model_audit.get("data", {}),
+            "errors": operation_model_audit.get("errors", []),
+            "tokens_used": operation_model_audit.get("tokens_used", 0),
+            "input_tokens": operation_model_audit.get("input_tokens", 0),
+            "total_output_tokens": operation_model_audit.get("total_output_tokens", 0),
+            "reasoning_tokens": operation_model_audit.get("reasoning_tokens", 0),
+            "visible_output_tokens": operation_model_audit.get("visible_output_tokens", 0),
+            "raw_usage": operation_model_audit.get("raw_usage", {}),
+            "raw_response": operation_model_audit.get("raw_response", {})
+        }
+        
+        write_all_output_files(
+            output_dir=operation_model_auditor_dir,
+            results=auditor_results,
+            agent_type="lucim_operation_model_auditor",
+            base_name=base_name,
+            model=orchestrator_instance.model,
+            timestamp=timestamp,
+            reasoning_effort=reff,
+            step_number=1
+        )
+        
+        # Keep the old _write_reasoning call for backward compatibility
         _write_reasoning(
             operation_model_auditor_dir,
             "Operation Model audit iteration report",
             operation_model_core["verdict"],
             operation_model_audit.get("violations") or operation_model_core["non_compliant_rules"],
         )
-        _dump_json(operation_model_auditor_dir, "output-response-full.json", {"data": operation_model_audit, "errors": []})
-        # Use raw_response from audit function if available, otherwise fallback to simplified format
-        raw_response_data = operation_model_audit.get("raw_response")
-        if raw_response_data is not None:
-            _dump_json(operation_model_auditor_dir, "output-response-raw.json", raw_response_data)
-        else:
-            _dump_json(
-                operation_model_auditor_dir,
-                "output-response-raw.json",
-                {
-                    "agent": "python-operation-model-auditor",
-                    "input_kind": "operation-model-data",
-                    "output": operation_model_core["data"],
-                },
-            )
         # Python deterministic audit (no-LLM)
-        py_operation_model_audit = py_audit_environment(operation_model_data if isinstance(operation_model_data, dict) else {})
+        # Pass raw_content for LOM0-JSON-BLOCK-ONLY validation
+        py_operation_model_audit = py_audit_environment(
+            operation_model_data if isinstance(operation_model_data, dict) else {},
+            raw_content=operation_model_raw_content
+        )
         orchestrator_instance.processed_results.setdefault("python_audits", {})["operation_model"] = py_operation_model_audit
         # Compare
         cmp_operation_model = compare_verdicts(operation_model_audit, py_operation_model_audit)
@@ -260,6 +296,13 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         continue
     # end Operation Model loop
 
+    # Validate Operation Model Generator output before proceeding to Scenario stage
+    operation_model_data_for_scenario = orchestrator_instance.processed_results.get("lucim_operation_model_generator", {}).get("data")
+    if not operation_model_data_for_scenario:
+        orchestrator_instance.logger.error("[ADK] Operation Model Generator produced no valid data; cannot proceed to Scenario stage.")
+        orchestrator_instance.adk_monitor.stop_monitoring()
+        return {"status": "FAIL", "stage": "operation_model", "results": orchestrator_instance.processed_results}
+
     # Step 2: Scenario (Generator → Auditor) with iterations
     scen_attempt = 0
     prev_scenario = None
@@ -271,7 +314,7 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         scenario_generator_dir = _ensure_dir(scenario_iterator_dir / "1-generator")
         # 2.1 Generator (dual role)
         scen_result = orchestrator_instance.lucim_scenario_generator_agent.generate_scenarios(
-            orchestrator_instance.processed_results["lucim_operation_model_generator"]["data"],
+            operation_model_data_for_scenario,
             scenario_rules_content,
             scenario_auditor_feedback=prev_scenario_audit,
             previous_scenario=prev_scenario,
@@ -297,37 +340,80 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
             persona_scen_text = persona_scen_path.read_text(encoding="utf-8") if persona_scen_path.exists() else ""
         except Exception:
             persona_scen_text = ""
+        
+        # Read raw content from generator's output-data.json (don't assume it's valid JSON)
+        scen_raw_content = ""
         try:
-            # Build a readable message list: source -> target : event_name(params)
-            lines: list[str] = []
-            for item in (scen_data or []):
-                if not isinstance(item, dict):
-                    continue
-                msgs = (item.get("scenario", {}) or {}).get("messages", [])
-                if not isinstance(msgs, list):
-                    continue
-                for m in msgs:
-                    if not isinstance(m, dict):
-                        continue
-                    src = m.get("source", "")
-                    tgt = m.get("target", "")
-                    name = m.get("event_name", m.get("name", ""))
-                    params = m.get("parameters", "")
-                    # Normalize params to a simple paren suffix
-                    params_str = str(params).strip()
-                    if params_str and not params_str.startswith("("):
-                        params_str = f"({params_str})"
-                    elif not params_str:
-                        params_str = "()"
-                    lines.append(f"{src} -> {tgt} : {name}{params_str}")
-            scen_text = "\n".join(lines)
+            output_data_file = scenario_generator_dir / "output-data.json"
+            if output_data_file.exists():
+                scen_raw_content = output_data_file.read_text(encoding="utf-8")
         except Exception:
+            scen_raw_content = ""
+        
+        # Also build PlantUML text for Python fallback auditor (if needed)
+        scen_text = ""
+        try:
+            lines: list[str] = []
+            # Handle new JSON format: { "data": { "scenario": {...} }, "errors": [] }
+            scenario_to_process = None
+            if isinstance(scen_data, dict):
+                # New format: extract scenario from data.scenario
+                if "data" in scen_data and isinstance(scen_data.get("data"), dict):
+                    data_node = scen_data.get("data")
+                    if "scenario" in data_node:
+                        scenario_to_process = data_node.get("scenario")
+                # Old format fallback: check if scen_data itself is a scenario dict or contains scenario key
+                elif "scenario" in scen_data:
+                    scenario_to_process = scen_data.get("scenario")
+                # Also handle list format (old format)
+                elif isinstance(scen_data, list) and len(scen_data) > 0:
+                    # Old format: list of scenario objects
+                    for item in scen_data:
+                        if isinstance(item, dict) and "scenario" in item:
+                            scenario_to_process = item.get("scenario")
+                            break
+            elif isinstance(scen_data, list):
+                # Old format: list of scenario objects
+                for item in scen_data:
+                    if isinstance(item, dict) and "scenario" in item:
+                        scenario_to_process = item.get("scenario")
+                        break
+            
+            # Extract messages from scenario
+            if scenario_to_process and isinstance(scenario_to_process, dict):
+                msgs = scenario_to_process.get("messages", [])
+                if isinstance(msgs, list):
+                    for m in msgs:
+                        if not isinstance(m, dict):
+                            continue
+                        src = m.get("source", "")
+                        tgt = m.get("target", "")
+                        name = m.get("event_name", m.get("name", ""))
+                        params = m.get("parameters", "")
+                        event_type = m.get("event_type", "")
+                        # Determine arrow type based on event_type
+                        # input_event: system --> actor (dashed)
+                        # output_event: actor -> system (solid)
+                        arrow = "-->" if event_type == "input_event" else "->"
+                        # Normalize params to a simple paren suffix
+                        params_str = str(params).strip()
+                        if params_str and not params_str.startswith("("):
+                            params_str = f"({params_str})"
+                        elif not params_str:
+                            params_str = "()"
+                        lines.append(f"{src} {arrow} {tgt} : {name}{params_str}")
+            scen_text = "\n".join(lines)
+        except Exception as e:
+            orchestrator_instance.logger.warning(f"[ADK] Failed to build PlantUML text from scenario: {e}")
             scen_text = ""
 
-        scen_audit = audit_scenario_text(scen_text, model_name=orchestrator_instance.model)
+        # Pass raw content from output-data.json to LLM auditor (per LSC0 rule: scenario must be JSON only)
+        # Note: We pass the raw file content as-is, without assuming it's valid JSON
+        scen_audit = audit_scenario_text(scen_raw_content, output_dir=scenario_auditor_dir, model_name=orchestrator_instance.model)
         try:
-            # Persona + scenario text + rules (insert rules once)
-            system_prompt_scenario = f"{persona_scen_text}\n\n{scenario_rules_content}\n\n<SCENARIO-TEXT>\n{scen_text}\n</SCENARIO-TEXT>"
+            # Persona + scenario raw content + rules (insert rules once)
+            # Note: scen_raw_content is the raw text from output-data.json, may or may not be valid JSON
+            system_prompt_scenario = f"{persona_scen_text}\n\n{scenario_rules_content}\n\n<SCENARIO-TEXT>\n{scen_raw_content}\n</SCENARIO-TEXT>"
             _dump_text(scenario_auditor_dir, "input-instructions.md", system_prompt_scenario)
         except Exception:
             pass
@@ -339,30 +425,51 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
             "coverage": scen_core["coverage"],
             "errors": scen_core["errors"],
         }
-        _dump_json(scenario_auditor_dir, "output-data.json", scen_core["data"])
+        # Persist auditor outputs using write_all_output_files (same as generator)
+        from utils_response_dump import write_all_output_files
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        
+        # Prepare results dict with all required fields for write_all_output_files
+        auditor_results = {
+            "reasoning_summary": scen_audit.get("reasoning_summary", ""),
+            "data": scen_audit.get("data", {}),
+            "errors": scen_audit.get("errors", []),
+            "tokens_used": scen_audit.get("tokens_used", 0),
+            "input_tokens": scen_audit.get("input_tokens", 0),
+            "total_output_tokens": scen_audit.get("total_output_tokens", 0),
+            "reasoning_tokens": scen_audit.get("reasoning_tokens", 0),
+            "visible_output_tokens": scen_audit.get("visible_output_tokens", 0),
+            "raw_usage": scen_audit.get("raw_usage", {}),
+            "raw_response": scen_audit.get("raw_response", {})
+        }
+        
+        write_all_output_files(
+            output_dir=scenario_auditor_dir,
+            results=auditor_results,
+            agent_type="lucim_scenario_auditor",
+            base_name=base_name,
+            model=orchestrator_instance.model,
+            timestamp=timestamp,
+            reasoning_effort=reff,
+            step_number=2
+        )
+        
+        # Keep the old _write_reasoning call for backward compatibility
         _write_reasoning(
             scenario_auditor_dir,
             "Scenario audit iteration report",
             scen_core["verdict"],
             scen_audit.get("violations") or scen_core["non_compliant_rules"],
         )
-        _dump_json(scenario_auditor_dir, "output-response-full.json", {"data": scen_audit, "errors": []})
-        # Use raw_response from audit function if available, otherwise fallback to simplified format
-        raw_response_data = scen_audit.get("raw_response")
-        if raw_response_data is not None:
-            _dump_json(scenario_auditor_dir, "output-response-raw.json", raw_response_data)
-        else:
-            _dump_json(
-                scenario_auditor_dir,
-                "output-response-raw.json",
-                {
-                    "agent": "python-scenario-auditor",
-                    "input_kind": "scenario-text",
-                    "output": scen_core["data"],
-                },
-            )
         # Python deterministic audit (no-LLM)
-        py_scen_audit = py_audit_scenario(scen_text)
+        # Pass JSON raw content first (preferred), fallback to PlantUML text
+        # The audit_scenario function will automatically detect JSON vs PlantUML text
+        # Pass operation model for rules requiring it (LSC5, LSC6, LSC12-LSC17)
+        py_scen_audit = py_audit_scenario(
+            scen_raw_content if scen_raw_content else scen_text,
+            operation_model=operation_model_data_for_scenario
+        )
         orchestrator_instance.processed_results.setdefault("python_audits", {})["scenario"] = py_scen_audit
         # Compare
         cmp_scen = compare_verdicts(scen_audit, py_scen_audit)

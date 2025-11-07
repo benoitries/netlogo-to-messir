@@ -34,9 +34,9 @@ bill -> user : oeChat()
     res = audit_diagram(text)
     assert res["verdict"] is False
     ids = {v["id"] for v in res["violations"]}
-    assert "AS2-SYS-DECLARED-FIRST" in ids or "AS5-ACT-DECLARED-AFTER-SYS" in ids
-    assert "AS4-SYS-NO-SELF-LOOP" in ids
-    assert "AS6-ACT-NO-ACT-ACT-EVENTS" in ids
-    assert "TCS10-AB-NO-ACTIVATION-BAR-ON-SYSTEM" in ids
+    assert "LDR3-SYSTEM-DECLARED-FIRST" in ids or "LDR2-ACTOR-DECLARED-AFTER-SYSTEM" in ids
+    assert "LDR5-SYSTEM-NO-SELF-LOOP" in ids
+    assert "LDR6-ACTOR-NO-ACTOR-LOOP" in ids
+    assert "LDR10-ACTIVATION-BAR-ON-SYSTEM-FORBIDDEN" in ids
 
 

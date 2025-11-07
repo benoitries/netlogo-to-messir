@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Tuple
 
 
@@ -62,6 +63,9 @@ def _extract_data_node(payload: Any) -> Tuple[Any, Dict[str, Any]]:
 
 def extract_audit_core(payload: Any) -> Dict[str, Any]:
     """Extract canonical audit fields from an arbitrary payload.
+    
+    Handles both parsed JSON (dict/list) and raw text responses from LLM.
+    If payload is a string, attempts to parse JSON from it (handles markdown code fences).
 
     Returns a dict containing:
         - data: The raw audit data (dict/list or empty dict if unavailable)
@@ -70,6 +74,32 @@ def extract_audit_core(payload: Any) -> Dict[str, Any]:
         - coverage: dict with required keys
         - errors: list
     """
+    # If payload is a string (raw LLM response), try to parse JSON from it
+    if isinstance(payload, str):
+        try:
+            # Try to extract JSON from markdown code fences if present
+            text = payload.strip()
+            # Remove markdown code fences (```json ... ``` or ``` ... ```)
+            if text.startswith("```"):
+                lines = text.split("\n")
+                # Remove first line (```json or ```)
+                if len(lines) > 1:
+                    lines = lines[1:]
+                # Remove last line (```)
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                text = "\n".join(lines)
+            # Try to parse as JSON
+            payload = json.loads(text)
+        except (json.JSONDecodeError, ValueError, AttributeError):
+            # If parsing fails, treat as plain text and return default structure
+            return {
+                "data": {},
+                "verdict": "non-compliant",
+                "non_compliant_rules": [],
+                "coverage": dict(_DEFAULT_COVERAGE),
+                "errors": ["Failed to parse audit response as JSON"],
+            }
 
     data_node, parent = _extract_data_node(payload)
 
