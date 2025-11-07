@@ -9,35 +9,34 @@ from typing import Callable, Optional, Dict, Any
 import time
 import logging
 
-try:
-    # OpenAI 2.x exceptions
-    from openai import (
-        APIError,
-        APIConnectionError,
-        RateLimitError,
-        BadRequestError,
-        AuthenticationError,
-        PermissionDeniedError,
-    )
-except Exception:  # pragma: no cover - allow import before openai is installed
-    # Define fallbacks to avoid import errors in environments without openai
-    class APIError(Exception):
-        pass
+# Always use our own exception classes to avoid OpenAI 2.x APIError requiring 'request' argument
+# This ensures consistent behavior regardless of whether OpenAI is installed
+class APIError(Exception):
+    """Custom APIError that doesn't require 'request' argument like OpenAI 2.x exceptions."""
+    def __init__(self, message: str = "", request=None):
+        super().__init__(message)
+        self.message = message
+        self.request = request
 
-    class APIConnectionError(APIError):
-        pass
+class APIConnectionError(APIError):
+    """Connection-related API error."""
+    pass
 
-    class RateLimitError(APIError):
-        pass
+class RateLimitError(APIError):
+    """Rate limit API error."""
+    pass
 
-    class BadRequestError(APIError):
-        pass
+class BadRequestError(APIError):
+    """Bad request API error."""
+    pass
 
-    class AuthenticationError(APIError):
-        pass
+class AuthenticationError(APIError):
+    """Authentication API error."""
+    pass
 
-    class PermissionDeniedError(APIError):
-        pass
+class PermissionDeniedError(APIError):
+    """Permission denied API error."""
+    pass
 
 
 RETRYABLE_EXCEPTIONS = (APIConnectionError, RateLimitError, APIError)

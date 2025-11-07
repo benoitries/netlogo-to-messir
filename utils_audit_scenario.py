@@ -139,8 +139,21 @@ def _extract_operation_model_data(operation_model: Optional[Dict[str, Any]]) -> 
         return result
     
     # Extract actors from operation model
-    # Support both formats: {"actors": {...}} and direct actors dict
-    actors_node = operation_model.get("actors")
+    # Support multiple formats:
+    # 1. {"data": {"actors": {...}}} - wrapped format (most common from output-data.json)
+    # 2. {"actors": {...}} - direct format
+    actors_node = None
+    
+    # First, try to get from data.actors (wrapped format)
+    if "data" in operation_model:
+        data_node = operation_model.get("data")
+        if isinstance(data_node, dict):
+            actors_node = data_node.get("actors")
+    
+    # If not found, try direct actors key
+    if not actors_node:
+        actors_node = operation_model.get("actors")
+    
     if not actors_node:
         return result
     
@@ -562,11 +575,22 @@ def _audit_scenario_json(
             # LSC6 — Parameters value validation
             if name in op_model_data["event_to_parameters"]:
                 expected_params = op_model_data["event_to_parameters"][name]
-                # Parameters in scenario can be string or list
-                if isinstance(params, str):
+                # Parameters in scenario can be string, list, or dict
+                parsed_params = []
+                if isinstance(params, dict):
+                    # Dict format: extract parameter names (keys)
+                    # Expected format: {"AparamName": value, ...}
+                    parsed_params = list(params.keys())
+                elif isinstance(params, str):
                     # Try to parse as JSON or treat as single value
                     try:
-                        parsed_params = json.loads(params) if params.strip().startswith("[") else [params]
+                        parsed = json.loads(params) if params.strip().startswith("[") else [params]
+                        if isinstance(parsed, dict):
+                            parsed_params = list(parsed.keys())
+                        elif isinstance(parsed, list):
+                            parsed_params = parsed
+                        else:
+                            parsed_params = [parsed] if parsed else []
                     except:
                         parsed_params = [params] if params else []
                 elif isinstance(params, list):
@@ -574,12 +598,32 @@ def _audit_scenario_json(
                 else:
                     parsed_params = []
                 
+                # Normalize expected params: remove type annotations (e.g., "Aparam:dtString" -> "Aparam")
+                expected_param_names = []
+                for ep in expected_params:
+                    if isinstance(ep, str):
+                        # Remove type annotation if present (format: "ParamName:dtType")
+                        param_name = ep.split(":")[0].strip()
+                        expected_param_names.append(param_name)
+                    else:
+                        expected_param_names.append(str(ep))
+                
+                # Normalize actual params: extract names if they contain type annotations
+                actual_param_names = []
+                for ap in parsed_params:
+                    if isinstance(ap, str):
+                        # Remove type annotation if present
+                        param_name = ap.split(":")[0].strip()
+                        actual_param_names.append(param_name)
+                    else:
+                        actual_param_names.append(str(ap))
+                
                 # Check parameter count (basic validation)
                 # Note: Type checking would require more sophisticated validation
-                if len(parsed_params) != len(expected_params):
+                if len(actual_param_names) != len(expected_param_names):
                     violations.append({
                         "id": "LSC6-PARAMETERS-VALUE",
-                        "message": f"Event '{name}' has {len(parsed_params)} parameters but Operation Model defines {len(expected_params)} parameters: {expected_params}",
+                        "message": f"Event '{name}' has {len(actual_param_names)} parameters but Operation Model defines {len(expected_param_names)} parameters: {expected_params}",
                         "line": msg_idx + 1,
                         "extracted_values": {"message_index": msg_idx, "event_name": name, "expected_params": expected_params, "actual_params": parsed_params}
                     })

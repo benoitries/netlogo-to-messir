@@ -275,27 +275,9 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
                     "raw_response": raw_response_serialized
                 }
             
-            # Parse JSON response
-            try:
-                # Parse JSON directly without any cleaning
-                response_data = json.loads(content)
-                # If the LLM returned a JSON-escaped string, parse it again
-                if isinstance(response_data, str):
-                    response_data = json.loads(response_data)
-                print(f"[DEBUG] Successfully parsed response as JSON")
-                
-                # Use the entire response_data for output-data.json
-                errors = response_data.get("errors", []) if isinstance(response_data, dict) else []
-            except json.JSONDecodeError as e:
-                return {
-                    "reasoning_summary": reasoning_summary,
-                    "data": None,
-                    "errors": [f"Failed to parse PlantUML diagrams JSON: {e}", f"Raw response: {content[:200]}..."],
-                    "tokens_used": 0,
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "raw_response": raw_response_serialized
-                }
+            # Store raw text content directly (no JSON parsing)
+            # The raw text will be written to output-data.json and passed to the auditor
+            plantuml_diagram_raw_text = content
 
             # Extract token usage from response (centralized helper)
             usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
@@ -309,8 +291,8 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
 
             return {
                 "reasoning_summary": reasoning_summary,
-                "data": response_data,  # Store entire parsed JSON object
-                "errors": errors or [],
+                "data": plantuml_diagram_raw_text,  # Store raw text content (no JSON parsing)
+                "errors": [],
                 "tokens_used": tokens_used,
                 "input_tokens": input_tokens,
                 "visible_output_tokens": visible_output_tokens,

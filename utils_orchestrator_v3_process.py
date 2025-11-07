@@ -220,8 +220,13 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
             raw_content=operation_model_raw_content
         )
         orchestrator_instance.processed_results.setdefault("python_audits", {})["operation_model"] = py_operation_model_audit
+        # Build dict for compare_verdicts (maps non-compliant-rules to violations)
+        operation_model_audit_for_compare = {
+            "verdict": operation_model_audit.get("verdict"),
+            "violations": operation_model_audit.get("non-compliant-rules") or []  # Map non-compliant-rules to violations for compare_verdicts
+        }
         # Compare
-        cmp_operation_model = compare_verdicts(operation_model_audit, py_operation_model_audit)
+        cmp_operation_model = compare_verdicts(operation_model_audit_for_compare, py_operation_model_audit)
         orchestrator_instance.processed_results.setdefault("auditor_vs_python", {})["operation_model"] = cmp_operation_model
         log_comparison(orchestrator_instance.logger, "Operation Model", cmp_operation_model)
         # Write markdown report listing non-compliant rules (dynamic extraction, no hardcoding)
@@ -471,8 +476,13 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
             operation_model=operation_model_data_for_scenario
         )
         orchestrator_instance.processed_results.setdefault("python_audits", {})["scenario"] = py_scen_audit
+        # Build dict for compare_verdicts (maps non-compliant-rules to violations)
+        scen_audit_for_compare = {
+            "verdict": scen_audit.get("verdict"),
+            "violations": scen_audit.get("non-compliant-rules") or []  # Map non-compliant-rules to violations for compare_verdicts
+        }
         # Compare
-        cmp_scen = compare_verdicts(scen_audit, py_scen_audit)
+        cmp_scen = compare_verdicts(scen_audit_for_compare, py_scen_audit)
         orchestrator_instance.processed_results.setdefault("auditor_vs_python", {})["scenario"] = cmp_scen
         log_comparison(orchestrator_instance.logger, "Scenario", cmp_scen)
         # Write markdown report (dynamic extraction, no hardcoding)
@@ -586,21 +596,35 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         except Exception:
             pass
 
-        # Safely extract verdict, handling None audit_res or None data
-        audit_data = (audit_res or {}).get("data") if audit_res else None
-        if audit_data is None or not isinstance(audit_data, dict):
-            audit_data = {}
-        verdict = audit_data.get("verdict")
+        # Extract audit core (handles raw text in data field)
+        puml_core = extract_audit_core(audit_res)
+        orchestrator_instance.processed_results["lucim_plantuml_diagram_auditor"] = {
+            "data": puml_core["data"],
+            "verdict": puml_core["verdict"],
+            "non-compliant-rules": puml_core["non_compliant_rules"],
+            "coverage": puml_core["coverage"],
+            "errors": puml_core["errors"],
+        }
+        # Build dict for compare_verdicts (maps non-compliant-rules to violations)
+        puml_audit_for_compare = {
+            "verdict": puml_core["verdict"],
+            "violations": puml_core["non_compliant_rules"]  # Map non-compliant-rules to violations for compare_verdicts
+        }
+        verdict = puml_core["verdict"]
         # Python deterministic audit (no-LLM) on .puml text
+        # Read raw content for LDR0-PLANTUML-BLOCK-ONLY validation
         try:
             import pathlib
             puml_text = pathlib.Path(str(plantuml_file_path)).read_text(encoding="utf-8")
+            puml_raw_content = puml_text  # Use same content as raw for LDR0 validation
         except Exception:
             puml_text = ""
-        py_puml_audit = py_audit_diagram(puml_text)
+            puml_raw_content = ""
+        # Pass raw_content for LDR0-PLANTUML-BLOCK-ONLY validation
+        py_puml_audit = py_audit_diagram(puml_text, raw_content=puml_raw_content)
         orchestrator_instance.processed_results.setdefault("python_audits", {})["diagram"] = py_puml_audit
-        # Compare agent 6 verdict vs python verdict
-        cmp_puml = compare_verdicts((audit_res or {}).get("data"), py_puml_audit)
+        # Compare agent 6 verdict vs python verdict (use puml_audit_for_compare with proper structure)
+        cmp_puml = compare_verdicts(puml_audit_for_compare, py_puml_audit)
         orchestrator_instance.processed_results.setdefault("auditor_vs_python", {})["diagram"] = cmp_puml
         log_comparison(orchestrator_instance.logger, "Diagram", cmp_puml)
         # Write markdown report (dynamic extraction, no hardcoding)

@@ -5,6 +5,7 @@ Input: PlantUML textual diagram (.puml content string)
 Output: { "verdict": bool, "violations": [ { "id": str, "message": str, "line": int } ] }
 
 Subset of rules implemented (pragmatic coverage):
+- LDR0-PLANTUML-BLOCK-ONLY: PlantUML Diagram must be solely a PlantUML block (no Markdown fences, no text outside PlantUML)
 - LDR1-SYS-UNIQUE: exactly one System lifeline per diagram
 - LDR2-ACTOR-DECLARED-AFTER-SYSTEM: actors must be declared after System
 - LDR3-SYSTEM-DECLARED-FIRST: System must be declared first before all actors
@@ -38,8 +39,115 @@ def _is_system_token(tok: str) -> bool:
     return t == "system" or t == "System"
 
 
-def audit_diagram(text: str) -> Dict[str, Any]:
+def _check_ldr0_plantuml_block_only(raw_content: str) -> List[Dict[str, Any]]:
+    """
+    Check LDR0-PLANTUML-BLOCK-ONLY: PlantUML Diagram must be solely a PlantUML block.
+    
+    Validates:
+    - No Markdown code fences (```plantuml or ```)
+    - No text outside the PlantUML block
+    - Content is valid PlantUML (starts with @startuml, ends with @enduml)
+    
+    Args:
+        raw_content: Raw content string to validate
+        
+    Returns:
+        List of violations (empty if compliant)
+    """
     violations: List[Dict[str, Any]] = []
+    
+    if not raw_content or not isinstance(raw_content, str):
+        return violations
+    
+    content_stripped = raw_content.strip()
+    if not content_stripped:
+        return violations
+    
+    # Check for Markdown code fences
+    if "```" in content_stripped:
+        violations.append({
+            "id": "LDR0-PLANTUML-BLOCK-ONLY",
+            "message": "PlantUML Diagram must not include Markdown code fences. Remove the code fences (```plantuml or ```).",
+            "line": 1,
+            "extracted_values": {
+                "has_code_fences": True,
+                "content_preview": content_stripped[:200] if len(content_stripped) > 200 else content_stripped
+            }
+        })
+        return violations  # Early return if code fences found
+    
+    # Check for PlantUML block boundaries (@startuml and @enduml)
+    startuml_pos = content_stripped.find("@startuml")
+    enduml_pos = content_stripped.rfind("@enduml")
+    
+    if startuml_pos == -1:
+        violations.append({
+            "id": "LDR0-PLANTUML-BLOCK-ONLY",
+            "message": "PlantUML Diagram must be a valid PlantUML block. No @startuml found.",
+            "line": 1,
+            "extracted_values": {
+                "content_preview": content_stripped[:200] if len(content_stripped) > 200 else content_stripped
+            }
+        })
+        return violations
+    
+    if enduml_pos == -1 or enduml_pos < startuml_pos:
+        violations.append({
+            "id": "LDR0-PLANTUML-BLOCK-ONLY",
+            "message": "PlantUML Diagram must be a valid PlantUML block. No @enduml found or @enduml appears before @startuml.",
+            "line": 1,
+            "extracted_values": {
+                "content_preview": content_stripped[:200] if len(content_stripped) > 200 else content_stripped
+            }
+        })
+        return violations
+    
+    # Check for text before the PlantUML block
+    text_before = content_stripped[:startuml_pos].strip()
+    if text_before:
+        violations.append({
+            "id": "LDR0-PLANTUML-BLOCK-ONLY",
+            "message": "PlantUML Diagram must not include text outside the PlantUML block. Remove any text before @startuml.",
+            "line": 1,
+            "extracted_values": {
+                "text_before": text_before,
+                "content_preview": content_stripped[:200] if len(content_stripped) > 200 else content_stripped
+            }
+        })
+    
+    # Check for text after the PlantUML block
+    text_after = content_stripped[enduml_pos + len("@enduml"):].strip()
+    if text_after:
+        violations.append({
+            "id": "LDR0-PLANTUML-BLOCK-ONLY",
+            "message": "PlantUML Diagram must not include text outside the PlantUML block. Remove any text after @enduml.",
+            "line": 1,
+            "extracted_values": {
+                "text_after": text_after,
+                "content_preview": content_stripped[-200:] if len(content_stripped) > 200 else content_stripped
+            }
+        })
+    
+    return violations
+
+
+def audit_diagram(text: str, raw_content: str | None = None) -> Dict[str, Any]:
+    """
+    Audit PlantUML Diagram for LDR rule compliance.
+    
+    Args:
+        text: PlantUML diagram content (parsed/cleaned)
+        raw_content: Optional raw content string for LDR0 validation (PlantUML block format check)
+        
+    Returns:
+        Dictionary with "verdict" (bool) and "violations" (list of violation dicts)
+    """
+    violations: List[Dict[str, Any]] = []
+    
+    # LDR0-PLANTUML-BLOCK-ONLY: Check raw content format if provided
+    if raw_content is not None:
+        ldr0_violations = _check_ldr0_plantuml_block_only(raw_content)
+        violations.extend(ldr0_violations)
 
     lines = (text or "").splitlines()
     participants_order: List[str] = []  # aliases encountered order

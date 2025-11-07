@@ -197,11 +197,10 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
             }
         
         # Build input text with required tagged sections
+        # Do not insert Markdown code fences - follow same practice as Operation Model Auditor
         input_text = f"""
 <PLANTUML-DIAGRAM>
-```plantuml
 {puml_content}
-```
 </PLANTUML-DIAGRAM>
 """
         

@@ -221,24 +221,9 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
                     "output_tokens": 0,
                     "raw_response": raw_response_serialized
                 }
-            try:
-                # Parse JSON directly without any cleaning
-                response_data = json.loads(content)
-                # If the LLM returned a JSON-escaped string, parse it again
-                if isinstance(response_data, str):
-                    response_data = json.loads(response_data)
-                # Use the entire response_data for output-data.json
-                operation_model = response_data
-            except json.JSONDecodeError as e:
-                return {
-                    "reasoning_summary": reasoning_summary,
-                    "data": None,
-                    "errors": [f"Failed to parse LUCIM operation model JSON: {e}", f"Raw response: {content[:200]}..."],
-                    "tokens_used": 0,
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "raw_response": raw_response_serialized
-                }
+            # Store raw text content directly (no JSON parsing)
+            # The raw text will be written to output-data.json and passed to the auditor
+            operation_model_raw_text = content
             usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
             tokens_used = usage.get("total_tokens", 0)
             input_tokens = usage.get("input_tokens", 0)
@@ -248,7 +233,7 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
             total_output_tokens = visible_output_tokens + (reasoning_tokens or 0)
             return {
                 "reasoning_summary": reasoning_summary,
-                "data": operation_model,  # Store entire parsed JSON object
+                "data": operation_model_raw_text,  # Store raw text content (no JSON parsing)
                 "errors": [],
                 "tokens_used": tokens_used,
                 "input_tokens": input_tokens,

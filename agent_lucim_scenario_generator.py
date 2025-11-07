@@ -260,67 +260,9 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
                     "raw_response": raw_response_serialized
                 }
             
-            # Parse JSON response
-            try:
-                # Parse JSON directly without any cleaning
-                response_data = json.loads(content)
-                # If the LLM returned a JSON-escaped string, parse it again
-                if isinstance(response_data, str):
-                    response_data = json.loads(response_data)
-                print(f"[DEBUG] Successfully parsed response as JSON")
-                
-                # Validate and extract new JSON format: { "data": { "scenario": {...} }, "errors": [] }
-                normalized_data_list = response_data
-                errors = []
-                if isinstance(response_data, dict):
-                    # Capture errors if present
-                    if isinstance(response_data.get("errors"), list):
-                        errors = response_data.get("errors", [])
-                    
-                    # Validate new format structure: must have "data" key with "scenario" nested inside
-                    if "data" in response_data:
-                        data_node = response_data.get("data")
-                        if isinstance(data_node, dict) and "scenario" in data_node:
-                            # Valid new format structure
-                            scenario_node = data_node.get("scenario")
-                            if not isinstance(scenario_node, dict):
-                                errors.append("Invalid format: 'data.scenario' must be a dictionary")
-                            elif "messages" not in scenario_node:
-                                errors.append("Invalid format: 'data.scenario' must contain 'messages' array")
-                            else:
-                                # Validate messages structure
-                                messages = scenario_node.get("messages", [])
-                                if not isinstance(messages, list):
-                                    errors.append("Invalid format: 'data.scenario.messages' must be an array")
-                                else:
-                                    # Validate each message has required fields
-                                    for idx, msg in enumerate(messages):
-                                        if not isinstance(msg, dict):
-                                            errors.append(f"Invalid format: message at index {idx} must be a dictionary")
-                                        else:
-                                            required_fields = ["source", "target", "event_type", "event_name", "parameters"]
-                                            for field in required_fields:
-                                                if field not in msg:
-                                                    errors.append(f"Invalid format: message at index {idx} missing required field '{field}'")
-                        elif data_node is None:
-                            # Error case: data is null
-                            pass  # errors already captured above
-                        else:
-                            errors.append("Invalid format: 'data' must contain 'scenario' key with scenario object")
-                    else:
-                        # Old format or invalid structure - try to detect and warn
-                        if "scenario" in response_data or (isinstance(response_data, list) and len(response_data) > 0):
-                            errors.append("Warning: Response does not match expected format. Expected: { 'data': { 'scenario': {...} }, 'errors': [] }")
-            except json.JSONDecodeError as e:
-                return {
-                    "reasoning_summary": reasoning_summary,
-                    "data": None,
-                    "errors": [f"Failed to parse scenarios JSON: {e}", f"Raw response: {content[:200]}..."],
-                    "tokens_used": 0,
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "raw_response": raw_response_serialized
-                }
+            # Store raw text content directly (no JSON parsing)
+            # The raw text will be written to output-data.json and passed to the auditor
+            scenario_raw_text = content
 
             # Extract token usage from response (centralized helper)
             usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
@@ -334,8 +276,8 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
 
             return {
                 "reasoning_summary": reasoning_summary,
-                "data": normalized_data_list,  # Store entire parsed JSON object
-                "errors": errors or [],
+                "data": scenario_raw_text,  # Store raw text content (no JSON parsing)
+                "errors": [],
                 "tokens_used": tokens_used,
                 "input_tokens": input_tokens,
                 "visible_output_tokens": visible_output_tokens,

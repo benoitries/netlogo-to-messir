@@ -27,9 +27,9 @@ system --> bill : oeWrong()
     res = audit_scenario(text)
     assert res["verdict"] is False
     ids = {v["id"] for v in res["violations"]}
-    assert "AS4-SYS-NO-SELF-LOOP" in ids
-    assert "AS6-ACT-NO-ACT-ACT-EVENTS" in ids
-    assert "TCS4-IE-SYNTAX" in ids or "AS8-IE-EVENT-DIRECTION" in ids
-    assert "TCS5-OE-SYNTAX" in ids or "AS9-OE-EVENT-DIRECTION" in ids
+    assert "LSC7-SYSTEM-NO-SELF-LOOP" in ids
+    assert "LSC8-ACTOR-NO-SELF-LOOP" in ids
+    assert "LSC9-INPUT-EVENT-ALLOWED-EVENTS" in ids
+    assert "LSC10-OUTPUT-EVENT-DIRECTION" in ids
 
 

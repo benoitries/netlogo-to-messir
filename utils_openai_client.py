@@ -390,7 +390,8 @@ class GeminiClientWrapper:
                 return wrapped_response
             except Exception as e:
                 # Convert Gemini errors to retryable OpenAI exceptions
-                # Import exceptions once for efficiency
+                # Import exceptions from utils_openai_error to use fallback versions
+                # that don't require 'request' argument (unlike OpenAI 2.x real exceptions)
                 from utils_openai_error import APIError, RateLimitError, APIConnectionError
                 
                 error_str = str(e).lower()
@@ -398,6 +399,8 @@ class GeminiClientWrapper:
                 
                 # Check for 503 Service Unavailable (overloaded model)
                 if "503" in error_str or "unavailable" in error_str or "overloaded" in error_str:
+                    # Use Exception with message to create APIError-like exception
+                    # The fallback APIError from utils_openai_error doesn't require 'request'
                     raise APIError(f"Gemini API error: 503 UNAVAILABLE. {error_repr}")
                 
                 # Check for rate limit errors (429)
