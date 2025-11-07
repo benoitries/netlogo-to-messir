@@ -597,20 +597,37 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
             pass
 
         # Extract audit core (handles raw text in data field)
+        # Ensure audit_res is passed correctly to extract_audit_core
+        # extract_audit_core expects the full audit_res dict (with "data" field containing raw text or parsed JSON)
+        # Handle None or invalid audit_res
+        if audit_res is None:
+            orchestrator_instance.logger.warning("[ADK] audit_res is None for PlantUML Diagram auditor")
+            audit_res = {}
+        # Pass to extract_audit_core for parsing (handles string or dict)
         puml_core = extract_audit_core(audit_res)
+        # Defensive check: ensure puml_core is a dict
+        if not isinstance(puml_core, dict):
+            orchestrator_instance.logger.error(f"[ADK] extract_audit_core returned non-dict: {type(puml_core)}")
+            puml_core = {
+                "data": {},
+                "verdict": "non-compliant",
+                "non_compliant_rules": [],
+                "coverage": {"total_rules_in_dsl": "0", "evaluated": [], "not_applicable": [], "missing_evaluation": []},
+                "errors": ["extract_audit_core returned non-dict"],
+            }
         orchestrator_instance.processed_results["lucim_plantuml_diagram_auditor"] = {
-            "data": puml_core["data"],
-            "verdict": puml_core["verdict"],
-            "non-compliant-rules": puml_core["non_compliant_rules"],
-            "coverage": puml_core["coverage"],
-            "errors": puml_core["errors"],
+            "data": puml_core.get("data", {}),
+            "verdict": puml_core.get("verdict", "non-compliant"),
+            "non-compliant-rules": puml_core.get("non_compliant_rules", []),
+            "coverage": puml_core.get("coverage", {}),
+            "errors": puml_core.get("errors", []),
         }
         # Build dict for compare_verdicts (maps non-compliant-rules to violations)
         puml_audit_for_compare = {
-            "verdict": puml_core["verdict"],
-            "violations": puml_core["non_compliant_rules"]  # Map non-compliant-rules to violations for compare_verdicts
+            "verdict": puml_core.get("verdict", "non-compliant"),
+            "violations": puml_core.get("non_compliant_rules", [])  # Map non-compliant-rules to violations for compare_verdicts
         }
-        verdict = puml_core["verdict"]
+        verdict = puml_core.get("verdict", "non-compliant")
         # Python deterministic audit (no-LLM) on .puml text
         # Read raw content for LDR0-PLANTUML-BLOCK-ONLY validation
         try:
