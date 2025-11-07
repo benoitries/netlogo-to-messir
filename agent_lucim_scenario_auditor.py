@@ -3,10 +3,10 @@ from typing import Dict, Any
 import json
 from openai import OpenAI
 from utils_openai_client import create_and_wait, get_output_text, format_prompt_for_responses_api, get_openai_client_for_model, build_error_raw_payload
-from utils_auditor_schema import normalize_auditor_like_response
 from utils_config_constants import DEFAULT_MODEL, PERSONA_LUCIM_SCENARIO_AUDITOR, OUTPUT_DIR, RULES_LUCIM_SCENARIO
 from utils_response_dump import write_input_instructions_before_api, serialize_response_to_dict
 from utils_audit_scenario import audit_scenario as _py_audit_scenario
+from utils_audit_core import extract_audit_core
 
 
 def audit_scenario_text(scenario_text: str, output_dir: str | None = None, model_name: str | None = None) -> Dict[str, Any]:
@@ -63,19 +63,26 @@ def audit_scenario_text(scenario_text: str, output_dir: str | None = None, model
         elif content_clean.startswith("```"):
             content_clean = content_clean.replace("```", "").strip()
         data = json.loads(content_clean)
-        normalized = normalize_auditor_like_response(data).get("data") or {}
-        # Return normalized audit result with raw_response included
+        core = extract_audit_core(data)
         return {
-            **normalized,
+            "data": core["data"],
+            "verdict": core["verdict"],
+            "non-compliant-rules": core["non_compliant_rules"],
+            "coverage": core["coverage"],
+            "errors": core["errors"],
             "raw_response": raw_response_serialized
         }
     except Exception as e:
         # Fallback to deterministic Python auditor
         try:
             py_result = _py_audit_scenario(scen_text)
-            # Include error raw payload for debugging
+            core = extract_audit_core(py_result)
             return {
-                **py_result,
+                "data": core["data"],
+                "verdict": core["verdict"],
+                "non-compliant-rules": core["non_compliant_rules"],
+                "coverage": core["coverage"],
+                "errors": core["errors"],
                 "raw_response": build_error_raw_payload(e)
             }
         except Exception as py_e:
@@ -83,6 +90,8 @@ def audit_scenario_text(scenario_text: str, output_dir: str | None = None, model
                 "verdict": "non-compliant",
                 "non-compliant-rules": [{"id": "SCEN-AUDIT-ERROR", "message": "Scenario audit failed"}],
                 "coverage": {"total_rules_in_dsl": "0", "evaluated": [], "not_applicable": [], "missing_evaluation": []},
+                "data": {},
+                "errors": [f"Scenario audit error: {py_e}"],
                 "raw_response": build_error_raw_payload(py_e)
             }
 

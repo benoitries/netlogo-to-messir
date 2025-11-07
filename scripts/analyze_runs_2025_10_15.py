@@ -282,15 +282,31 @@ def _parse_tokens_from_orchestrator(orchestrator_log: Path) -> Tuple[Dict[str, D
 
 
 def parse_combination(date_dir: Path, time_dir: Path, combo_dir: Path) -> Optional[CombinationMetrics]:
-    # Extract parts: <case>-<model>-reason-<r>-verb-<v>
+    # Extract parts: supports both old format (<case>-<model>-reason-<r>-verb-<v>)
+    # and new short format (<case>-<model>-<RXX>-<VXX>)
     combo = combo_dir.name
-    parts = combo.split("-reason-")
-    case_model = parts[0]
-    rest = parts[1] if len(parts) > 1 else ""
-    reasoning, verbosity = "", ""
-    if "-verb-" in rest:
-        r, v = rest.split("-verb-", 1)
-        reasoning, verbosity = r, v
+    
+    # Try new short format first (RMI/RLO/RME/RHI-VLO/VME/VHI)
+    short_format_pattern = r"-(RMI|RLO|RME|RHI)-(VLO|VME|VHI)$"
+    match = re.search(short_format_pattern, combo)
+    if match:
+        reasoning_short, verbosity_short = match.groups()
+        # Convert short codes to long format for compatibility
+        reasoning_map = {"RMI": "minimal", "RLO": "low", "RME": "medium", "RHI": "high"}
+        verbosity_map = {"VLO": "low", "VME": "medium", "VHI": "high"}
+        reasoning = reasoning_map.get(reasoning_short, reasoning_short)
+        verbosity = verbosity_map.get(verbosity_short, verbosity_short)
+        # Extract case and model (everything before the short codes)
+        case_model = combo[:match.start()]
+    else:
+        # Fall back to old format: <case>-<model>-reason-<r>-verb-<v>
+        parts = combo.split("-reason-")
+        case_model = parts[0]
+        rest = parts[1] if len(parts) > 1 else ""
+        reasoning, verbosity = "", ""
+        if "-verb-" in rest:
+            r, v = rest.split("-verb-", 1)
+            reasoning, verbosity = r, v
     # Model may contain dashes; case is everything up to last dash of case_model's first token split logic.
     # Heuristic: case is the NetLogo case name present in input-netlogo filenames; assume it's the leading token up to first "-" that matches an input file; fallback to first token.
     tokens = case_model.split("-")

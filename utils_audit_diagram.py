@@ -53,6 +53,7 @@ def audit_diagram(text: str) -> Dict[str, Any]:
                     "id": "SS3-SYS-UNIQUE-IDENTITY",
                     "message": "System participant must be unique.",
                     "line": idx,
+                    "extracted_values": {"line_content": raw.rstrip()}
                 })
             has_system_decl = True
             system_decl_line = idx
@@ -63,12 +64,14 @@ def audit_diagram(text: str) -> Dict[str, Any]:
         mp = _PARTICIPANT_RE.match(line)
         if mp:
             alias = mp.group("alias")
+            label = mp.group("label")
             participants_order.append(alias)
             if alias != "system" and not has_system_decl:
                 violations.append({
                     "id": "AS2-SYS-DECLARED-FIRST",
                     "message": "The System must be declared first before all actors.",
                     "line": idx,
+                    "extracted_values": {"line_content": raw.rstrip(), "participant_label": label, "participant_alias": alias}
                 })
             if alias == "system" and not has_system_decl:
                 # This matches system declared with quotes label; mark presence
@@ -82,19 +85,38 @@ def audit_diagram(text: str) -> Dict[str, Any]:
             sys_index = participants_order.index("system")
             for pos, alias in enumerate(participants_order):
                 if alias != "system" and pos < sys_index:
+                    # Find the line where this actor was declared
+                    actor_line = 1
+                    actor_line_content = ""
+                    for line_idx, raw_line in enumerate(lines, start=1):
+                        stripped = raw_line.strip()
+                        mp_match = _PARTICIPANT_RE.match(stripped)
+                        if mp_match and mp_match.group("alias") == alias:
+                            actor_line = line_idx
+                            actor_line_content = raw_line.rstrip()
+                            break
                     violations.append({
                         "id": "AS5-ACT-DECLARED-AFTER-SYS",
                         "message": "Actors must be declared after the System.",
-                        "line": system_decl_line if system_decl_line > 0 else 1,
+                        "line": actor_line,
+                        "extracted_values": {"line_content": actor_line_content, "actor_alias": alias, "system_decl_line": system_decl_line}
                     })
                     break
         except ValueError:
             pass
     else:
+        # Find first non-empty line for context
+        first_line_content = ""
+        for raw_line in lines:
+            stripped = raw_line.strip()
+            if stripped and not stripped.startswith("//"):
+                first_line_content = raw_line.rstrip()
+                break
         violations.append({
             "id": "SS3-SYS-UNIQUE-IDENTITY",
             "message": "System participant not declared (expected: participant System as system).",
             "line": 1,
+            "extracted_values": {"line_content": first_line_content if first_line_content else "(empty file)"}
         })
 
     # Pass 2: scan messages and activations
@@ -113,6 +135,7 @@ def audit_diagram(text: str) -> Dict[str, Any]:
                     "id": "TCS10-AB-NO-ACTIVATION-BAR-ON-SYSTEM",
                     "message": "There must be NO activation bar on the System lifeline.",
                     "line": idx,
+                    "extracted_values": {"line_content": raw.rstrip(), "lifeline": who}
                 })
             # record activation presence (lightweight sequence heuristic)
             if who not in seen_message_for:
@@ -120,6 +143,7 @@ def audit_diagram(text: str) -> Dict[str, Any]:
                     "id": "TCS9-AB-SEQUENCE",
                     "message": "Activation should follow a message for the same lifeline.",
                     "line": idx,
+                    "extracted_values": {"line_content": raw.rstrip(), "lifeline": who}
                 })
             continue
 
@@ -131,6 +155,7 @@ def audit_diagram(text: str) -> Dict[str, Any]:
                     "id": "TCS9-AB-SEQUENCE",
                     "message": "Deactivation should follow an activation/message for the same lifeline.",
                     "line": idx,
+                    "extracted_values": {"line_content": raw.rstrip(), "lifeline": who}
                 })
             continue
 
@@ -155,6 +180,7 @@ def audit_diagram(text: str) -> Dict[str, Any]:
                 "id": "AS4-SYS-NO-SELF-LOOP",
                 "message": "System→System message is forbidden.",
                 "line": idx,
+                "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name}
             })
 
         # AS6 — no Actor→Actor
@@ -163,6 +189,7 @@ def audit_diagram(text: str) -> Dict[str, Any]:
                 "id": "AS6-ACT-NO-ACT-ACT-EVENTS",
                 "message": "Actor→Actor message is forbidden.",
                 "line": idx,
+                "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name}
             })
 
         # SS1 — must connect exactly one Actor and the System
@@ -171,6 +198,7 @@ def audit_diagram(text: str) -> Dict[str, Any]:
                 "id": "SS1-MESSAGE-DIRECTIONALITY",
                 "message": "Messages must connect exactly one Actor and the System.",
                 "line": idx,
+                "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name}
             })
 
         # Direction-name sanity (optional)
@@ -179,12 +207,14 @@ def audit_diagram(text: str) -> Dict[str, Any]:
                 "id": "AS8-IE-EVENT-DIRECTION",
                 "message": "ie* should be System → Actor.",
                 "line": idx,
+                "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name}
             })
         if name.startswith("oe") and not (lhs_is_actor and rhs_is_system):
             violations.append({
                 "id": "AS9-OE-EVENT-DIRECTION",
                 "message": "oe* should be Actor → System.",
                 "line": idx,
+                "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name}
             })
 
     verdict = len(violations) == 0

@@ -28,10 +28,11 @@ from utils_config_constants import (
     RULES_LUCIM_SCENARIO,
 )
 from utils_orchestrator_v3_persona_config import INPUT_PERSONA_DIR
-from utils_audit_operation_model import audit_environment as py_audit_environment
+from utils_audit_operation_model import audit_operation_model as py_audit_environment
 from utils_audit_scenario import audit_scenario as py_audit_scenario
 from utils_audit_diagram import audit_diagram as py_audit_diagram
 from utils_audit_compare import compare_verdicts, log_comparison
+from utils_audit_core import extract_audit_core
 
 
 async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str, Any]) -> Dict[str, Any]:
@@ -91,49 +92,6 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         except Exception:
             pass
 
-    def _normalize_audit_for_output(audit: Any) -> Dict[str, Any]:
-        """Normalize any auditor dict to the reference schema used by PlantUML auditor.
-
-        Output shape:
-        {
-          "verdict": "compliant"|"non-compliant",
-          "non-compliant-rules": [ {"id": str, ...}, ... ] | [],
-          "coverage": { "total_rules_in_dsl": "0", "evaluated": [], "not_applicable": [], "missing_evaluation": [] }
-        }
-        """
-        try:
-            verdict_raw = (audit or {}).get("verdict")
-            if isinstance(verdict_raw, bool):
-                verdict = "compliant" if verdict_raw else "non-compliant"
-            else:
-                verdict = str(verdict_raw) if verdict_raw in ("compliant", "non-compliant") else ("compliant" if verdict_raw else "non-compliant")
-            # Map common field names
-            rules = (audit or {}).get("non-compliant-rules")
-            if rules is None:
-                rules = (audit or {}).get("violations") or []
-            coverage = (audit or {}).get("coverage") or {
-                "total_rules_in_dsl": "0",
-                "evaluated": [],
-                "not_applicable": [],
-                "missing_evaluation": []
-            }
-            return {
-                "verdict": verdict,
-                "non-compliant-rules": rules,
-                "coverage": coverage
-            }
-        except Exception:
-            return {
-                "verdict": "non-compliant",
-                "non-compliant-rules": [],
-                "coverage": {
-                    "total_rules_in_dsl": "0",
-                    "evaluated": [],
-                    "not_applicable": [],
-                    "missing_evaluation": []
-                }
-            }
-
     def _write_reasoning(folder: Path, title: str, verdict_value: Any, violations_list: Any) -> None:
         try:
             verdict_str = "compliant" if (verdict_value is True or verdict_value == "compliant") else "non-compliant"
@@ -192,17 +150,37 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
             output_dir=str(operation_model_auditor_dir),
             model_name=orchestrator_instance.model
         )
-        orchestrator_instance.processed_results["lucim_operation_model_auditor"] = {"data": operation_model_audit}
-        # Persist auditor outputs in iter folder using reference schema
-        _dump_json(operation_model_auditor_dir, "output-data.json", _normalize_audit_for_output(operation_model_audit))
-        _write_reasoning(operation_model_auditor_dir, "Operation Model audit iteration report", operation_model_audit.get("verdict"), operation_model_audit.get("violations"))
+        operation_model_core = extract_audit_core(operation_model_audit)
+        orchestrator_instance.processed_results["lucim_operation_model_auditor"] = {
+            "data": operation_model_core["data"],
+            "verdict": operation_model_core["verdict"],
+            "non-compliant-rules": operation_model_core["non_compliant_rules"],
+            "coverage": operation_model_core["coverage"],
+            "errors": operation_model_core["errors"],
+        }
+        # Persist auditor outputs in iter folder using raw data payload
+        _dump_json(operation_model_auditor_dir, "output-data.json", operation_model_core["data"])
+        _write_reasoning(
+            operation_model_auditor_dir,
+            "Operation Model audit iteration report",
+            operation_model_core["verdict"],
+            operation_model_audit.get("violations") or operation_model_core["non_compliant_rules"],
+        )
         _dump_json(operation_model_auditor_dir, "output-response-full.json", {"data": operation_model_audit, "errors": []})
         # Use raw_response from audit function if available, otherwise fallback to simplified format
         raw_response_data = operation_model_audit.get("raw_response")
         if raw_response_data is not None:
             _dump_json(operation_model_auditor_dir, "output-response-raw.json", raw_response_data)
         else:
-            _dump_json(operation_model_auditor_dir, "output-response-raw.json", {"agent": "python-operation-model-auditor", "input_kind": "operation-model-data", "output": _normalize_audit_for_output(operation_model_audit)})
+            _dump_json(
+                operation_model_auditor_dir,
+                "output-response-raw.json",
+                {
+                    "agent": "python-operation-model-auditor",
+                    "input_kind": "operation-model-data",
+                    "output": operation_model_core["data"],
+                },
+            )
         # Python deterministic audit (no-LLM)
         py_operation_model_audit = py_audit_environment(operation_model_data if isinstance(operation_model_data, dict) else {})
         orchestrator_instance.processed_results.setdefault("python_audits", {})["operation_model"] = py_operation_model_audit
@@ -210,42 +188,62 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         cmp_operation_model = compare_verdicts(operation_model_audit, py_operation_model_audit)
         orchestrator_instance.processed_results.setdefault("auditor_vs_python", {})["operation_model"] = cmp_operation_model
         log_comparison(orchestrator_instance.logger, "Operation Model", cmp_operation_model)
-        # Write markdown report listing non-compliant then compliant rules
+        # Write markdown report listing non-compliant rules (dynamic extraction, no hardcoding)
         try:
             operation_model_md_path = operation_model_auditor_dir / "output_python_operation_model.md"
-            known_env_rules = {
-                "AS1-SYS-UNIQUE","SS3-SYS-UNIQUE-IDENTITY","NAM1-ACT-INSTANCE-FORMAT","NAM2-ACT-TYPE-FORMAT",
-                "AS3-SYS-ACT-ALLOWED-EVENTS","AS4-SYS-NO-SELF-LOOP","AS6-ACT-NO-ACT-ACT-EVENTS",
-                "AS8-IE-EVENT-DIRECTION","AS9-OE-EVENT-DIRECTION"
-            }
-            violated = [v.get("id") for v in (py_operation_model_audit or {}).get("violations", []) if v.get("id")]
-            violated_set = set(violated)
-            compliant = sorted(list(known_env_rules - violated_set))
-            non_compliant = sorted(list(violated_set))
+            violations_list = (py_operation_model_audit or {}).get("violations", [])
+            violated = [v.get("id") for v in violations_list if v.get("id")]
+            non_compliant = sorted(list(set(violated)))
             lines = [
                 "# Python Audit — Operation Model",
                 "",
                 "## Non-compliant Rules",
             ]
             if non_compliant:
-                lines += [f"- {rid}" for rid in non_compliant]
+                # Group violations by rule ID and include extracted values
+                violations_by_rule = {}
+                for v in violations_list:
+                    rule_id = v.get("id")
+                    if rule_id:
+                        if rule_id not in violations_by_rule:
+                            violations_by_rule[rule_id] = []
+                        violations_by_rule[rule_id].append(v)
+                for rid in non_compliant:
+                    rule_violations = violations_by_rule.get(rid, [])
+                    lines.append(f"- {rid}")
+                    for v in rule_violations:
+                        extracted = v.get("extracted_values", {})
+                        msg = v.get("message", "")
+                        if extracted:
+                            # Display line content prominently if available
+                            line_content = extracted.get("line_content") or extracted.get("actor_content") or extracted.get("event_content")
+                            if line_content:
+                                # For JSON content (operation model), format as code block
+                                if "actor_content" in extracted or "event_content" in extracted:
+                                    lines.append(f"  - **Location**: {v.get('location', 'N/A')}")
+                                    lines.append(f"  - **Content**:")
+                                    lines.append(f"    ```json")
+                                    for content_line in line_content.split("\n"):
+                                        lines.append(f"    {content_line}")
+                                    lines.append(f"    ```")
+                                else:
+                                    # For text content (scenario/diagram), show line number and content
+                                    line_num = v.get("line", "?")
+                                    lines.append(f"  - **Line {line_num}**: `{line_content}`")
+                            # Show other extracted values if any
+                            other_values = {k: v for k, v in extracted.items() if k not in ("line_content", "actor_content", "event_content")}
+                            if other_values:
+                                values_str = ", ".join([f"{k}: `{v}`" for k, v in other_values.items()])
+                                lines.append(f"  - Additional info: {values_str}")
+                        if msg:
+                            lines.append(f"  - Message: {msg}")
             else:
                 lines.append("- None")
-            lines += [
-                "",
-                "## Compliant Rules",
-            ]
-            if compliant:
-                lines += [f"- {rid}" for rid in compliant]
-            else:
-                lines.append("- None (no rules recognized)")
             operation_model_md_path.write_text("\n".join(lines), encoding="utf-8")
         except Exception:
             pass
         # Decide to stop or continue
-        is_compliant = bool(operation_model_audit.get("verdict", False)) or (
-            (operation_model_audit or {}).get("verdict") == "compliant"
-        )
+        is_compliant = operation_model_core["verdict"] == "compliant"
         if is_compliant:
             orchestrator_instance.logger.info(f"[ADK] Operation Model compliant at iteration {iter_index}; proceeding to Scenario stage.")
             break
@@ -333,17 +331,36 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
             _dump_text(scenario_auditor_dir, "input-instructions.md", system_prompt_scenario)
         except Exception:
             pass
-        orchestrator_instance.processed_results["lucim_scenario_auditor"] = {"data": scen_audit}
-        # Persist scenario auditor outputs in iter folder using reference schema
-        _dump_json(scenario_auditor_dir, "output-data.json", _normalize_audit_for_output(scen_audit))
-        _write_reasoning(scenario_auditor_dir, "Scenario audit iteration report", scen_audit.get("verdict"), scen_audit.get("violations"))
+        scen_core = extract_audit_core(scen_audit)
+        orchestrator_instance.processed_results["lucim_scenario_auditor"] = {
+            "data": scen_core["data"],
+            "verdict": scen_core["verdict"],
+            "non-compliant-rules": scen_core["non_compliant_rules"],
+            "coverage": scen_core["coverage"],
+            "errors": scen_core["errors"],
+        }
+        _dump_json(scenario_auditor_dir, "output-data.json", scen_core["data"])
+        _write_reasoning(
+            scenario_auditor_dir,
+            "Scenario audit iteration report",
+            scen_core["verdict"],
+            scen_audit.get("violations") or scen_core["non_compliant_rules"],
+        )
         _dump_json(scenario_auditor_dir, "output-response-full.json", {"data": scen_audit, "errors": []})
         # Use raw_response from audit function if available, otherwise fallback to simplified format
         raw_response_data = scen_audit.get("raw_response")
         if raw_response_data is not None:
             _dump_json(scenario_auditor_dir, "output-response-raw.json", raw_response_data)
         else:
-            _dump_json(scenario_auditor_dir, "output-response-raw.json", {"agent": "python-scenario-auditor", "input_kind": "scenario-text", "output": _normalize_audit_for_output(scen_audit)})
+            _dump_json(
+                scenario_auditor_dir,
+                "output-response-raw.json",
+                {
+                    "agent": "python-scenario-auditor",
+                    "input_kind": "scenario-text",
+                    "output": scen_core["data"],
+                },
+            )
         # Python deterministic audit (no-LLM)
         py_scen_audit = py_audit_scenario(scen_text)
         orchestrator_instance.processed_results.setdefault("python_audits", {})["scenario"] = py_scen_audit
@@ -351,38 +368,51 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         cmp_scen = compare_verdicts(scen_audit, py_scen_audit)
         orchestrator_instance.processed_results.setdefault("auditor_vs_python", {})["scenario"] = cmp_scen
         log_comparison(orchestrator_instance.logger, "Scenario", cmp_scen)
-        # Write markdown report
+        # Write markdown report (dynamic extraction, no hardcoding)
         try:
             scenario_python_md_path = scenario_auditor_dir / "output_python_scenario.md"
-            known_scen_rules = {
-                "SS1-MESSAGE-DIRECTIONALITY","AS3-SYS-ACT-ALLOWED-EVENTS","AS4-SYS-NO-SELF-LOOP","AS6-ACT-NO-ACT-ACT-EVENTS",
-                "TCS4-IE-SYNTAX","TCS5-OE-SYNTAX","AS8-IE-EVENT-DIRECTION","AS9-OE-EVENT-DIRECTION"
-            }
-            violated = [v.get("id") for v in (py_scen_audit or {}).get("violations", []) if v.get("id")]
-            violated_set = set(violated)
-            compliant = sorted(list(known_scen_rules - violated_set))
-            non_compliant = sorted(list(violated_set))
+            violations_list = (py_scen_audit or {}).get("violations", [])
+            violated = [v.get("id") for v in violations_list if v.get("id")]
+            non_compliant = sorted(list(set(violated)))
             lines = [
                 "# Python Audit — Scenario",
                 "",
                 "## Non-compliant Rules",
             ]
             if non_compliant:
-                lines += [f"- {rid}" for rid in non_compliant]
+                # Group violations by rule ID and include extracted values
+                violations_by_rule = {}
+                for v in violations_list:
+                    rule_id = v.get("id")
+                    if rule_id:
+                        if rule_id not in violations_by_rule:
+                            violations_by_rule[rule_id] = []
+                        violations_by_rule[rule_id].append(v)
+                for rid in non_compliant:
+                    rule_violations = violations_by_rule.get(rid, [])
+                    lines.append(f"- {rid}")
+                    for v in rule_violations:
+                        extracted = v.get("extracted_values", {})
+                        msg = v.get("message", "")
+                        line_num = v.get("line", "?")
+                        if extracted:
+                            # Display line content prominently
+                            line_content = extracted.get("line_content")
+                            if line_content:
+                                lines.append(f"  - **Line {line_num}**: `{line_content}`")
+                            # Show other extracted values if any
+                            other_values = {k: v for k, v in extracted.items() if k != "line_content"}
+                            if other_values:
+                                values_str = ", ".join([f"{k}: `{v}`" for k, v in other_values.items()])
+                                lines.append(f"  - Additional info: {values_str}")
+                        if msg:
+                            lines.append(f"  - Message: {msg}")
             else:
                 lines.append("- None")
-            lines += [
-                "",
-                "## Compliant Rules",
-            ]
-            if compliant:
-                lines += [f"- {rid}" for rid in compliant]
-            else:
-                lines.append("- None (no rules recognized)")
             scenario_python_md_path.write_text("\n".join(lines), encoding="utf-8")
         except Exception:
             pass
-        is_compliant_scen = bool(scen_audit.get("verdict", False)) or ((scen_audit or {}).get("verdict") == "compliant")
+        is_compliant_scen = scen_core["verdict"] == "compliant"
         if is_compliant_scen:
             orchestrator_instance.logger.info(f"[ADK] Scenario compliant at iteration {iter_index}; proceeding to PlantUML stage.")
             break
@@ -466,35 +496,47 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         cmp_puml = compare_verdicts((audit_res or {}).get("data"), py_puml_audit)
         orchestrator_instance.processed_results.setdefault("auditor_vs_python", {})["diagram"] = cmp_puml
         log_comparison(orchestrator_instance.logger, "Diagram", cmp_puml)
-        # Write markdown report
+        # Write markdown report (dynamic extraction, no hardcoding)
         try:
             diag_md_path = auditor_iter_dir / "output_python_diagram.md"
-            known_diag_rules = {
-                "AS2-SYS-DECLARED-FIRST","AS5-ACT-DECLARED-AFTER-SYS","SS3-SYS-UNIQUE-IDENTITY","SS1-MESSAGE-DIRECTIONALITY",
-                "AS4-SYS-NO-SELF-LOOP","AS6-ACT-NO-ACT-ACT-EVENTS","TCS10-AB-NO-ACTIVATION-BAR-ON-SYSTEM","TCS9-AB-SEQUENCE",
-                "AS8-IE-EVENT-DIRECTION","AS9-OE-EVENT-DIRECTION"
-            }
-            violated = [v.get("id") for v in (py_puml_audit or {}).get("violations", []) if v.get("id")]
-            violated_set = set(violated)
-            compliant = sorted(list(known_diag_rules - violated_set))
-            non_compliant = sorted(list(violated_set))
+            violations_list = (py_puml_audit or {}).get("violations", [])
+            violated = [v.get("id") for v in violations_list if v.get("id")]
+            non_compliant = sorted(list(set(violated)))
             lines = [
                 "# Python Audit — Diagram",
                 "",
                 "## Non-compliant Rules",
             ]
             if non_compliant:
-                lines += [f"- {rid}" for rid in non_compliant]
+                # Group violations by rule ID and include extracted values
+                violations_by_rule = {}
+                for v in violations_list:
+                    rule_id = v.get("id")
+                    if rule_id:
+                        if rule_id not in violations_by_rule:
+                            violations_by_rule[rule_id] = []
+                        violations_by_rule[rule_id].append(v)
+                for rid in non_compliant:
+                    rule_violations = violations_by_rule.get(rid, [])
+                    lines.append(f"- {rid}")
+                    for v in rule_violations:
+                        extracted = v.get("extracted_values", {})
+                        msg = v.get("message", "")
+                        line_num = v.get("line", "?")
+                        if extracted:
+                            # Display line content prominently
+                            line_content = extracted.get("line_content")
+                            if line_content:
+                                lines.append(f"  - **Line {line_num}**: `{line_content}`")
+                            # Show other extracted values if any
+                            other_values = {k: v for k, v in extracted.items() if k != "line_content"}
+                            if other_values:
+                                values_str = ", ".join([f"{k}: `{v}`" for k, v in other_values.items()])
+                                lines.append(f"  - Additional info: {values_str}")
+                        if msg:
+                            lines.append(f"  - Message: {msg}")
             else:
                 lines.append("- None")
-            lines += [
-                "",
-                "## Compliant Rules",
-            ]
-            if compliant:
-                lines += [f"- {rid}" for rid in compliant]
-            else:
-                lines.append("- None (no rules recognized)")
             diag_md_path.write_text("\n".join(lines), encoding="utf-8")
         except Exception:
             pass

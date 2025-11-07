@@ -1,0 +1,5 @@
+@startuml
+participant System as system
+system -> system : ieInternal()
+@enduml
+

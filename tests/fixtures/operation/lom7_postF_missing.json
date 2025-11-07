@@ -1,0 +1,16 @@
+{
+  "system": {"name": "System"},
+  "actors": {
+    "ActOperator": {
+      "name": "mainOperator",
+      "input_events": {
+        "hello": {"source": "System", "target": "ActOperator", "parameters": []}
+      },
+      "output_events": {
+        "reportReady": {"source": "ActOperator", "target": "System"}
+      }
+    }
+  }
+}
+
+

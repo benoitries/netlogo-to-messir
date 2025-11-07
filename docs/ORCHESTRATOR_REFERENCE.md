@@ -28,7 +28,8 @@ python /Users/benoit.ries/Library/CloudStorage/OneDrive-UniversityofLuxembourg/c
 Notes:
 - Requires valid environment variables and `.env` for API keys (see project docs)
 - Uses persona set: `persona-v3-limited-agents`
-- Persists outputs under `code-netlogo-to-lucim-agentic-workflow/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA_SET>/...`
+- Persists outputs under `code-netlogo-to-lucim-agentic-workflow/output/runs/<YYYY-MM-DD>/<HHMM>-<PSvX>[-<version>]/...`
+  Where `<PSvX>` is persona set short code (e.g., PSv3 for persona-v3-limited-agents-v3-adk)
 
 ## Cross-References
 

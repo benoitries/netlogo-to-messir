@@ -1,0 +1,8 @@
+@startuml
+participant System as system
+participant "bill:ActOperator" as bill
+
+bill -> system : oeAck()
+system --> bill : ieHello()
+@enduml
+

@@ -1,0 +1,34 @@
+// Test file for Scenario Auditor - All violations
+// This file intentionally violates all rules to test the auditor
+
+// SS1-MESSAGE-DIRECTIONALITY violation: invalid message format
+invalidMessage
+
+// AS4-SYS-NO-SELF-LOOP violation: System→System
+system -> system : someEvent()
+
+// AS6-ACT-NO-ACT-ACT-EVENTS violation: Actor→Actor
+bill -> alice : someEvent()
+
+// TCS4-IE-SYNTAX violation: ie event with wrong arrow (should be -->)
+system -> bill : ieHello()
+
+// TCS4-IE-SYNTAX violation: ie event with wrong direction (actor -> system)
+bill --> system : ieWrongDirection()
+
+// TCS5-OE-SYNTAX violation: oe event with wrong arrow (should be ->)
+alice --> system : oeLogin()
+
+// TCS5-OE-SYNTAX violation: oe event with wrong direction (system -> actor)
+system -> alice : oeWrongDirection()
+
+// AS8-IE-EVENT-DIRECTION violation: ie* in wrong direction (Actor → System)
+bill -> system : ieInvalid()
+
+// AS9-OE-EVENT-DIRECTION violation: oe* in wrong direction (System → Actor)
+system --> bill : oeInvalid()
+
+// Valid line for comparison
+system --> bill : ieValid()
+bill -> system : oeValid()
+

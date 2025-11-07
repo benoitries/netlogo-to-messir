@@ -2,10 +2,10 @@
 from typing import Dict, Any
 import json
 from utils_openai_client import create_and_wait, get_output_text, format_prompt_for_responses_api, get_openai_client_for_model, build_error_raw_payload
-from utils_auditor_schema import normalize_auditor_like_response
 from utils_config_constants import DEFAULT_MODEL, PERSONA_LUCIM_OPERATION_MODEL_AUDITOR, RULES_LUCIM_OPERATION_MODEL, OUTPUT_DIR
 from utils_response_dump import write_input_instructions_before_api, serialize_response_to_dict
-from utils_audit_operation_model import audit_environment as _py_audit_environment
+from utils_audit_operation_model import audit_operation_model as _py_audit_environment
+from utils_audit_core import extract_audit_core
 
 
 def audit_operation_model(operation_model_data: Dict[str, Any], output_dir: str | None = None, model_name: str | None = None) -> Dict[str, Any]:
@@ -61,19 +61,27 @@ def audit_operation_model(operation_model_data: Dict[str, Any], output_dir: str 
         elif content_clean.startswith("```"):
             content_clean = content_clean.replace("```", "").strip()
         data = json.loads(content_clean)
-        normalized = normalize_auditor_like_response(data).get("data") or {}
-        # Return normalized audit result with raw_response included
+        core = extract_audit_core(data)
+        # Return raw audit data alongside derived fields and raw_response
         return {
-            **normalized,
+            "data": core["data"],
+            "verdict": core["verdict"],
+            "non-compliant-rules": core["non_compliant_rules"],
+            "coverage": core["coverage"],
+            "errors": core["errors"],
             "raw_response": raw_response_serialized
         }
     except Exception as e:
         try:
             # Fallback to Python deterministic audit
             py_result = _py_audit_environment(operation_model_data if isinstance(operation_model_data, dict) else {})
-            # Include error raw payload for debugging
+            core = extract_audit_core(py_result)
             return {
-                **py_result,
+                "data": core["data"],
+                "verdict": core["verdict"],
+                "non-compliant-rules": core["non_compliant_rules"],
+                "coverage": core["coverage"],
+                "errors": core["errors"],
                 "raw_response": build_error_raw_payload(e)
             }
         except Exception as py_e:
@@ -81,6 +89,8 @@ def audit_operation_model(operation_model_data: Dict[str, Any], output_dir: str 
                 "verdict": "non-compliant",
                 "non-compliant-rules": [{"id": "OP-AUDIT-ERROR", "message": "Operation model audit failed"}],
                 "coverage": {"total_rules_in_dsl": "0", "evaluated": [], "not_applicable": [], "missing_evaluation": []},
+                "data": {},
+                "errors": [f"Operation model audit error: {py_e}"],
                 "raw_response": build_error_raw_payload(py_e)
             }
 

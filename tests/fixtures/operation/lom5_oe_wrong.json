@@ -1,0 +1,11 @@
+{
+  "system": {"name": "System"},
+  "actors": [
+    {"name": "mainOperator", "type": "ActOperator"}
+  ],
+  "events": [
+    {"kind": "oe", "sender": "system", "receiver": "mainOperator"}
+  ]
+}
+
+

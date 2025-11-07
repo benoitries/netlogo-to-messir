@@ -62,6 +62,7 @@ def audit_scenario(text: str) -> Dict[str, Any]:
                 "id": "AS4-SYS-NO-SELF-LOOP",
                 "message": "System→System message is forbidden.",
                 "line": idx,
+                "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name}
             })
 
         # AS6 — forbid Actor→Actor
@@ -70,6 +71,7 @@ def audit_scenario(text: str) -> Dict[str, Any]:
                 "id": "AS6-ACT-NO-ACT-ACT-EVENTS",
                 "message": "Actor→Actor message is forbidden.",
                 "line": idx,
+                "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name}
             })
 
         # SS1 / AS3 — must be System↔Actor only
@@ -78,6 +80,7 @@ def audit_scenario(text: str) -> Dict[str, Any]:
                 "id": "SS1-MESSAGE-DIRECTIONALITY",
                 "message": "Messages must connect exactly one Actor and the System.",
                 "line": idx,
+                "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name}
             })
 
         # TCS4 — IE: dashed arrow, system --> actor, name starts with ie
@@ -87,6 +90,7 @@ def audit_scenario(text: str) -> Dict[str, Any]:
                     "id": "TCS4-IE-SYNTAX",
                     "message": "ie events must be: system --> actor : ieXxx(...)",
                     "line": idx,
+                    "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "arrow": arrow, "event_name": name}
                 })
 
         # TCS5 — OE: solid arrow, actor -> system, name starts with oe
@@ -96,6 +100,7 @@ def audit_scenario(text: str) -> Dict[str, Any]:
                     "id": "TCS5-OE-SYNTAX",
                     "message": "oe events must be: actor -> system : oeXxx(...)",
                     "line": idx,
+                    "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "arrow": arrow, "event_name": name}
                 })
 
         # Prefix/direction consistency checks (redundant but explicit)
@@ -104,12 +109,14 @@ def audit_scenario(text: str) -> Dict[str, Any]:
                 "id": "AS8-IE-EVENT-DIRECTION",
                 "message": "Input Event ie* must be System → Actor (not Actor → System).",
                 "line": idx,
+                "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name}
             })
         if name.startswith("oe") and lhs_is_system and rhs_is_actor:
             violations.append({
                 "id": "AS9-OE-EVENT-DIRECTION",
                 "message": "Output Event oe* must be Actor → System (not System → Actor).",
                 "line": idx,
+                "extracted_values": {"line_content": raw.rstrip(), "sender": lhs, "receiver": rhs, "event_name": name}
             })
 
     verdict = len(violations) == 0

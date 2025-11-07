@@ -138,7 +138,8 @@ export OPENAI_API_KEY="<YOUR-API-KEY>" && \
 python3 code-netlogo-to-lucim-agentic-workflow/scripts/run_default_nano.py | cat
 ```
 
-This will persist outputs under the canonical structure in `code-netlogo-to-lucim-agentic-workflow/output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<case>/`.
+This will persist outputs under the canonical structure in `code-netlogo-to-lucim-agentic-workflow/output/runs/<YYYY-MM-DD>/<HHMM>-<PSvX>[-<version>]/<case>/`.
+Where `<PSvX>` is persona set short code (e.g., PSv3 for persona-v3-limited-agents-v3-adk).
 
 ### Experimentation parameters
 
@@ -254,6 +255,18 @@ Compatibility notes:
 - Historical artifacts may contain `output_tokens`; tooling derives `visible_output_tokens` when needed.
 - Validators check consistency of `total_output_tokens == visible_output_tokens + reasoning_tokens`.
 
+### Verdict extraction for Auditor artifacts
+
+For Auditor agents, `output-data.json` stores the verbatim LLM `data` block (unaltered). The orchestrator extracts only the decision fields it needs for logging/branching using the helper:
+
+```python
+from utils_audit_core import extract_audit_core
+core = extract_audit_core(llm_payload)
+# core => { "data", "verdict", "non_compliant_rules", "coverage", "errors" }
+```
+
+This preserves rich auditor information (e.g., `fix_suggestions`) in artifacts while keeping orchestration decisions deterministic.
+
 ## 📂 Output Layout
 
 All artifacts are organized per run, case, and agent step to improve traceability and avoid collisions:
@@ -263,8 +276,9 @@ code-netlogo-to-lucim-agentic-workflow/
   output/
     runs/
       YYYY-MM-DD/
-        HHMM-<PERSONA-SET>/
-          <case>-<model>-<DATE>-reason-<X>-verb-<Y>/
+        HHMM-<PSvX>[-<version>]/
+          <case>-<model>-<RXX>-<VXX>/
+          (PSvX: persona set short code, e.g., PSv3; RXX: RMI/RLO/RME/RHI for reasoning, VXX: VLO/VME/VHI for verbosity)
             <case>_<YYYYMMDD>_<HHMM>_<model>_orchestrator.log
             lucim_environment/
               0_synthesizer/          # Operation Model Generator
@@ -277,7 +291,7 @@ code-netlogo-to-lucim-agentic-workflow/
                 1-generator/
                 2-auditor/            # Operation Model Auditor
                   input-instructions.md
-                  output-data.json
+                  output-data.json     # raw LLM audit data (verbatim)
                   ...
                 iter-1-corrector/     # Corrector (optional)
                   output-data.json
@@ -306,7 +320,7 @@ code-netlogo-to-lucim-agentic-workflow/
                 2-auditor/            # PlantUML Diagram Auditor
                   output_python_diagram.md
                   ...
-          <another-case>-<model>-<DATE>-reason-<X>-verb-<Y>/
+          <another-case>-<model>-<RXX>-<VXX>/
             ...
 ```
 

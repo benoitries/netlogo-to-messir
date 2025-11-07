@@ -5,7 +5,13 @@ Path utilities for orchestrator and agents.
 Provides centralized construction of run directories following the
 new layout:
 
-  output/runs/<YYYY-MM-DD>/<HHMM>/<case>-<model-name>-reason-<reasoning-value>-verb-<verbosity-value>/<NN-stage>/
+  output/runs/<YYYY-MM-DD>/<HHMM>/<case>-<model-name>-<RXX>-<VXX>/<NN-stage>/
+
+Where:
+  - RXX is reasoning effort short code: RMI (minimal), RLO (low), RME (medium), RHI (high)
+  - VXX is verbosity short code: VLO (low), VME (medium), VHI (high)
+
+Example: "my-ecosys-gemini-2.5-flash-RME-VME"
 
 This builder is deterministic and should be the single source of truth
 for output folder computation across modules.
@@ -56,6 +62,68 @@ def sanitize_agent_name(value: str) -> str:
     return safe or "unnamed"
 
 
+def _get_reasoning_short(reasoning_effort: str) -> str:
+    """Convert reasoning effort to short code.
+    
+    Args:
+        reasoning_effort: minimal|low|medium|high
+        
+    Returns:
+        Short code: RMI|RLO|RME|RHI
+    """
+    mapping = {
+        "minimal": "RMI",
+        "low": "RLO",
+        "medium": "RME",
+        "high": "RHI"
+    }
+    return mapping.get(reasoning_effort.lower(), reasoning_effort.upper()[:3])
+
+
+def _get_verbosity_short(text_verbosity: str) -> str:
+    """Convert text verbosity to short code.
+    
+    Args:
+        text_verbosity: low|medium|high
+        
+    Returns:
+        Short code: VLO|VME|VHI
+    """
+    mapping = {
+        "low": "VLO",
+        "medium": "VME",
+        "high": "VHI"
+    }
+    return mapping.get(text_verbosity.lower(), text_verbosity.upper()[:3])
+
+
+def _get_persona_set_short(persona_set: str) -> str:
+    """Convert persona set name to short code.
+    
+    Extracts version number from persona set name and returns "PSvX" format.
+    Examples:
+        "persona-v1" -> "PSv1"
+        "persona-v2" -> "PSv2"
+        "persona-v3-limited-agents-v3-adk" -> "PSv3"
+    
+    Args:
+        persona_set: Persona set name (e.g., "persona-v1", "persona-v3-limited-agents-v3-adk")
+        
+    Returns:
+        Short code: PSvX where X is the version number, or original name if no version found
+    """
+    # Try to extract version pattern like "v1", "v2", "v3", etc.
+    version_match = re.search(r'-v(\d+)', persona_set.lower())
+    if version_match:
+        version_num = version_match.group(1)
+        return f"PSv{version_num}"
+    # Fallback: if no version found, return sanitized short version
+    # Extract first meaningful part (e.g., "persona" -> "PS")
+    if persona_set.lower().startswith("persona"):
+        return "PS"
+    return sanitize_path_component(persona_set)[:10]  # Limit length for safety
+
+
 def build_combination_folder_name(
     case_name: str,
     model_name: str,
@@ -64,11 +132,13 @@ def build_combination_folder_name(
 ) -> str:
     """Return the combination folder name for a given case/model/reasoning/verbosity.
 
-    Example: "boiling-<model>-reason-medium-verb-high"
+    Example: "boiling-<model>-RME-VME" (short format)
     """
     case_safe = sanitize_path_component(case_name)
     model_safe = sanitize_path_component(model_name)
-    return f"{case_safe}-{model_safe}-reason-{reasoning_effort}-verb-{text_verbosity}"
+    reasoning_short = _get_reasoning_short(reasoning_effort)
+    verbosity_short = _get_verbosity_short(text_verbosity)
+    return f"{case_safe}-{model_safe}-{reasoning_short}-{verbosity_short}"
 
 
 def get_run_base_dir(
@@ -94,11 +164,15 @@ def get_run_base_dir(
         output_dir: Override for OUTPUT_DIR mainly for testing
 
     Returns:
-        Path to: OUTPUT_DIR/runs/YYYY-MM-DD/HHMM-<PERSONA-SET-NAME>[-<VERSION>]/<combination-folder>
+        Path to: OUTPUT_DIR/runs/YYYY-MM-DD/HHMM-<PSvX>[-<VERSION>]/<combination-folder>
+        Where PSvX is short format (e.g., PSv3 for persona-v3-limited-agents-v3-adk)
     """
     odir = output_dir if output_dir is not None else OUTPUT_DIR
     day_folder = f"{timestamp[0:4]}-{timestamp[4:6]}-{timestamp[6:8]}"
-    time_folder = f"{timestamp.split('_')[1]}-{persona_set}"
+    # Extract HHMM from timestamp (format: YYYYMMDD_HHMM or YYYYMMDD-HHMM)
+    time_part = timestamp.split('_')[1] if '_' in timestamp else timestamp.split('-')[1] if '-' in timestamp else timestamp[-4:]
+    persona_short = _get_persona_set_short(persona_set)
+    time_folder = f"{time_part}-{persona_short}"
     if version:
         time_folder = f"{time_folder}-{version}"
     combo = build_combination_folder_name(case_name, model_name, reasoning_effort, text_verbosity)

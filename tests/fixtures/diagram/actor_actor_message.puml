@@ -1,0 +1,7 @@
+@startuml
+participant System as system
+participant "bill:ActOperator" as bill
+participant "alice:ActOperator" as alice
+bill -> alice : oePing()
+@enduml
+

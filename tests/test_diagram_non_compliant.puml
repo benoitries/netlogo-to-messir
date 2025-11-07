@@ -1,0 +1,50 @@
+@startuml
+// Test file for Diagram Auditor - All violations
+// This file intentionally violates all rules to test the auditor
+
+// AS2-SYS-DECLARED-FIRST violation: Actor declared before System
+participant "bill:ActAdministrator" as bill
+
+// SS3-SYS-UNIQUE-IDENTITY violation: System declared
+participant System as system
+
+// SS3-SYS-UNIQUE-IDENTITY violation: Duplicate System (same alias)
+participant System as system
+
+// AS5-ACT-DECLARED-AFTER-SYS violation: Another actor before System (already violated above)
+participant "alice:ActUser" as alice
+
+// Valid participant declarations
+participant "charlie:ActClock" as charlie
+
+// AS4-SYS-NO-SELF-LOOP violation: System→System
+system -> system : selfLoop()
+
+// TCS10-AB-NO-ACTIVATION-BAR-ON-SYSTEM violation: activate system
+activate system
+
+// TCS9-AB-SEQUENCE violation: activate before message (charlie not in seen_message_for yet)
+activate charlie
+charlie -> system : oeLogin()
+
+// TCS9-AB-SEQUENCE violation: deactivate before message (charlie not in seen_message_for for deactivate)
+deactivate charlie
+
+// AS6-ACT-NO-ACT-ACT-EVENTS violation: Actor→Actor
+bill -> alice : actorToActor()
+
+// SS1-MESSAGE-DIRECTIONALITY violation: invalid (both actors, but already caught by AS6)
+// This is redundant but kept for completeness
+
+// Valid messages
+bill -> system : oeValid()
+system --> bill : ieValid()
+
+// AS8-IE-EVENT-DIRECTION violation: ie* in wrong direction
+bill -> system : ieInvalid()
+
+// AS9-OE-EVENT-DIRECTION violation: oe* in wrong direction
+system --> alice : oeInvalid()
+
+@enduml
+

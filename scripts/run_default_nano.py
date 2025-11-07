@@ -78,8 +78,8 @@ async def run_default(args: argparse.Namespace) -> None:
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     runs_root = Path(__file__).resolve().parents[1] / "output" / "runs" / today
     if runs_root.exists():
-        # Match folders with pattern: HHMM-persona-v1 (or just HHMM for legacy)
-        time_persona_pattern = re.compile(r"^(\d{4})(-persona-[^/]+)?$")
+        # Match folders with pattern: HHMM-PSvX (new) or HHMM-persona-... (legacy) or just HHMM (legacy)
+        time_persona_pattern = re.compile(r"^(\d{4})(-PSv\d+(-.*)?|-persona-[^/]+)?$")
         candidates = sorted(
             [p for p in runs_root.iterdir() if p.is_dir() and time_persona_pattern.match(p.name)],
             key=lambda p: p.name,

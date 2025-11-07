@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Validate output layout under output/runs/<YYYY-MM-DD>/<HHMM>-<PERSONA-SET>/<combination>/.
-Where <combination> is <case>-<model-name>-reason-<reasoning-value>-verb-<verbosity-value>.
+Validate output layout under output/runs/<YYYY-MM-DD>/<HHMM>-<PSvX>[-<version>]/<combination>/.
+Where <PSvX> is persona set short format (e.g., PSv3 for persona-v3-limited-agents-v3-adk),
+and <combination> is <case>-<model-name>-<RXX>-<VXX> (short format)
+or <case>-<model-name>-reason-<reasoning-value>-verb-<verbosity-value> (legacy format).
+RXX: RMI/RLO/RME/RHI (reasoning), VXX: VLO/VME/VHI (verbosity).
 
 - Picks the latest run by date/time unless --run <path> is provided
 - Checks presence of at least one combination folder
@@ -30,10 +33,11 @@ def find_latest_run(base_runs_dir: Path) -> Optional[Path]:
         reverse=True,
     )
     for date_dir in date_dirs:
-        # Only consider HHMM folders
-        time_pattern = re.compile(r"^\d{4}$")
+        # Consider HHMM folders (legacy) or HHMM-PSvX format (new short format)
+        # Pattern: HHMM or HHMM-PSvX or HHMM-persona-... (legacy)
+        time_pattern = re.compile(r"^(\d{4})(-PSv\d+(-.*)?|-persona-.*)?$")
         time_dirs = sorted(
-            [d for d in date_dir.iterdir() if d.is_dir() and time_pattern.match(d.name)],
+            [d for d in date_dir.iterdir() if d.is_dir() and (time_pattern.match(d.name) or re.match(r"^\d{4}$", d.name))],
             reverse=True,
         )
         if time_dirs:

@@ -167,7 +167,8 @@ def setup_orchestration_logger(base_name: str, model_name: str, timestamp: str, 
     )
     
     # Create file handler under per-run/per-combination directory
-    # New format: output/runs/<YYYY-MM-DD>/<HHMM>-<persona-set>[-<version>]/<case>-<model>-reason-<effort>-verb-<verbosity>/<case>_<timestamp>_<model>_orchestrator.log
+    # Format: output/runs/<YYYY-MM-DD>/<HHMM>-<PSvX>[-<version>]/<case>-<model>-<RXX>-<VXX>/<case>_<timestamp>_<model>_orchestrator.log
+    # Where PSvX is persona set short code (e.g., PSv3), RXX is reasoning short code (RMI/RLO/RME/RHI) and VXX is verbosity short code (VLO/VME/VHI)
     run_dir = get_run_base_dir(timestamp, base_name, model_name, reasoning_effort, text_verbosity, persona_set, version)
     run_dir.mkdir(parents=True, exist_ok=True)
     # Sanitize model name for filesystem safety in filename

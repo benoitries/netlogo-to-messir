@@ -14,6 +14,7 @@ from google.adk.agents import LlmAgent
 from openai import OpenAI
 from utils_response_dump import serialize_response_to_dict, write_all_output_files, write_input_instructions_before_api
 from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, format_prompt_for_responses_api
+from utils_audit_core import extract_audit_core
 
 from utils_config_constants import (
     PERSONA_LUCIM_PLANTUML_DIAGRAM_AUDITOR, OUTPUT_DIR,
@@ -242,6 +243,9 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
                     "reasoning_summary": "Received empty response from API",
                     "data": None,
                     "errors": ["Empty response from API - this may indicate a model issue or timeout"],
+                    "verdict": "non-compliant",
+                    "non-compliant-rules": [],
+                    "coverage": {"total_rules_in_dsl": "0", "evaluated": [], "not_applicable": [], "missing_evaluation": []},
                     "tokens_used": 0,
                     "input_tokens": 0,
                     "output_tokens": 0,
@@ -266,9 +270,7 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
                 response_data = json.loads(content_clean)
                 print(f"[DEBUG] Successfully parsed response as JSON")
                 
-                # Normalize to persona-defined auditor schema (top-level {data:{...}, errors:[]})
-                from utils_auditor_schema import normalize_auditor_like_response
-                normalized = normalize_auditor_like_response(response_data)
+                core = extract_audit_core(response_data)
 
                 # Extract token usage from response (centralized helper)
                 from utils_openai_client import get_usage_tokens
@@ -283,8 +285,11 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
 
                 return {
                     "reasoning_summary": reasoning_summary,
-                    "data": normalized.get("data"),
-                    "errors": normalized.get("errors", []),
+                    "data": core["data"],
+                    "verdict": core["verdict"],
+                    "non-compliant-rules": core["non_compliant_rules"],
+                    "coverage": core["coverage"],
+                    "errors": core["errors"],
                     "tokens_used": tokens_used,
                     "input_tokens": input_tokens,
                     "visible_output_tokens": visible_output_tokens,
@@ -298,6 +303,9 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
                     "reasoning_summary": reasoning_summary,
                     "data": None,
                     "errors": [f"Failed to parse audit results JSON: {e}", f"Raw response: {content[:200]}..."],
+                    "verdict": "non-compliant",
+                    "non-compliant-rules": [],
+                    "coverage": {"total_rules_in_dsl": "0", "evaluated": [], "not_applicable": [], "missing_evaluation": []},
                     "tokens_used": 0,
                     "input_tokens": 0,
                     "output_tokens": 0,
@@ -309,6 +317,9 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
                 "reasoning_summary": f"Error during model inference: {e}",
                 "data": None,
                 "errors": [f"Model inference error: {e}", f"Model used: {self.model}"],
+                "verdict": "non-compliant",
+                "non-compliant-rules": [],
+                "coverage": {"total_rules_in_dsl": "0", "evaluated": [], "not_applicable": [], "missing_evaluation": []},
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0

@@ -1,0 +1,15 @@
+{
+  "system": {"name": "System"},
+  "actors": {
+    "ActOperator": {
+      "name": "mainOperator",
+      "description": "primary operator",
+      "input_events": {
+        "hello": {"source": "System", "target": "ActOperator", "parameters": [], "postF": [{"text": "received"}]}
+      },
+      "output_events": {
+        "reportReady": {"source": "ActOperator", "target": "System", "parameters": ["summary"], "preP": [], "postF": [{"text": "queued"}]}
+      }
+    }
+  }
+}
