@@ -632,23 +632,73 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         # Read raw content for LDR0-PLANTUML-BLOCK-ONLY validation
         try:
             import pathlib
-            puml_text = pathlib.Path(str(plantuml_file_path)).read_text(encoding="utf-8")
+            import json as _json
+            puml_file_content = pathlib.Path(str(plantuml_file_path)).read_text(encoding="utf-8")
+            # Try to extract PlantUML text from JSON if the file contains JSON
+            puml_text = puml_file_content
+            # Check if content is JSON (starts with { or [)
+            if puml_file_content.strip().startswith(("{", "[")):
+                try:
+                    puml_json = _json.loads(puml_file_content)
+                    # Try to find PlantUML text in the JSON structure
+                    def find_plantuml_in_json(obj, path=""):
+                        if isinstance(obj, dict):
+                            for key, value in obj.items():
+                                if isinstance(value, str) and "@startuml" in value and "@enduml" in value:
+                                    return value
+                                result = find_plantuml_in_json(value, f"{path}.{key}")
+                                if result:
+                                    return result
+                        elif isinstance(obj, list):
+                            for i, item in enumerate(obj):
+                                result = find_plantuml_in_json(item, f"{path}[{i}]")
+                                if result:
+                                    return result
+                        return None
+                    found_puml = find_plantuml_in_json(puml_json)
+                    if found_puml:
+                        puml_text = found_puml
+                        orchestrator_instance.logger.info("[ADK] Extracted PlantUML text from JSON in diagram.puml")
+                except Exception as e:
+                    orchestrator_instance.logger.warning(f"[ADK] Failed to parse JSON from diagram.puml: {e}")
             puml_raw_content = puml_text  # Use same content as raw for LDR0 validation
-        except Exception:
+        except Exception as e:
+            orchestrator_instance.logger.error(f"[ADK] Failed to read PlantUML file: {e}")
             puml_text = ""
             puml_raw_content = ""
         # Pass raw_content for LDR0-PLANTUML-BLOCK-ONLY validation
         py_puml_audit = py_audit_diagram(puml_text, raw_content=puml_raw_content)
         orchestrator_instance.processed_results.setdefault("python_audits", {})["diagram"] = py_puml_audit
         # Compare agent 6 verdict vs python verdict (use puml_audit_for_compare with proper structure)
-        cmp_puml = compare_verdicts(puml_audit_for_compare, py_puml_audit)
-        orchestrator_instance.processed_results.setdefault("auditor_vs_python", {})["diagram"] = cmp_puml
-        log_comparison(orchestrator_instance.logger, "Diagram", cmp_puml)
+        # Wrap in try/except to ensure Python audit report is always created even if comparison fails
+        try:
+            cmp_puml = compare_verdicts(puml_audit_for_compare, py_puml_audit)
+            orchestrator_instance.processed_results.setdefault("auditor_vs_python", {})["diagram"] = cmp_puml
+            log_comparison(orchestrator_instance.logger, "Diagram", cmp_puml)
+        except Exception as e:
+            orchestrator_instance.logger.error(f"[ADK] Failed to compare Diagram verdicts: {e}")
+            import traceback
+            orchestrator_instance.logger.error(f"[ADK] Traceback: {traceback.format_exc()}")
+            # Create a default comparison result
+            cmp_puml = {
+                "match": False,
+                "agent_verdict": None,
+                "python_verdict": None,
+                "agent_violations_count": 0,
+                "python_violations_count": len(py_puml_audit.get("violations", [])) if isinstance(py_puml_audit, dict) else 0,
+            }
+            orchestrator_instance.processed_results.setdefault("auditor_vs_python", {})["diagram"] = cmp_puml
         # Write markdown report (dynamic extraction, no hardcoding)
         try:
             diag_md_path = auditor_iter_dir / "output_python_diagram.md"
-            violations_list = (py_puml_audit or {}).get("violations", [])
-            violated = [v.get("id") for v in violations_list if v.get("id")]
+            # Ensure py_puml_audit is a dict
+            if not isinstance(py_puml_audit, dict):
+                orchestrator_instance.logger.warning(f"[ADK] py_puml_audit is not a dict: {type(py_puml_audit)}")
+                py_puml_audit = {}
+            violations_list = py_puml_audit.get("violations", [])
+            if not isinstance(violations_list, list):
+                violations_list = []
+            violated = [v.get("id") for v in violations_list if isinstance(v, dict) and v.get("id")]
             non_compliant = sorted(list(set(violated)))
             lines = [
                 "# Python Audit — Diagram",
@@ -659,6 +709,8 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
                 # Group violations by rule ID and include extracted values
                 violations_by_rule = {}
                 for v in violations_list:
+                    if not isinstance(v, dict):
+                        continue
                     rule_id = v.get("id")
                     if rule_id:
                         if rule_id not in violations_by_rule:
@@ -668,6 +720,8 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
                     rule_violations = violations_by_rule.get(rid, [])
                     lines.append(f"- {rid}")
                     for v in rule_violations:
+                        if not isinstance(v, dict):
+                            continue
                         extracted = v.get("extracted_values", {})
                         msg = v.get("message", "")
                         line_num = v.get("line", "?")
@@ -686,8 +740,11 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
             else:
                 lines.append("- None")
             diag_md_path.write_text("\n".join(lines), encoding="utf-8")
-        except Exception:
-            pass
+            orchestrator_instance.logger.info(f"[ADK] Created Python audit report: {diag_md_path}")
+        except Exception as e:
+            orchestrator_instance.logger.error(f"[ADK] Failed to write Python audit report for Diagram: {e}")
+            import traceback
+            orchestrator_instance.logger.error(f"[ADK] Traceback: {traceback.format_exc()}")
         is_compliant_puml = verdict in ("compliant", True)
         if is_compliant_puml:
             orchestrator_instance.logger.info(f"[ADK] PlantUML Diagram compliant at iteration {iter_index}; ending workflow.")
