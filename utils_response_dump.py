@@ -269,7 +269,8 @@ def write_all_output_files(
             "step_number": step_number,
             "reasoning_summary": results.get("reasoning_summary", "").replace("\\n", "\n"),
             "data": data_value,
-            "errors": results.get("errors", []),
+            # Preserve None values for errors (standardized structure: None on success, list on failure)
+            "errors": results.get("errors"),
             "tokens_used": results.get("tokens_used", 0),
             "input_tokens": results.get("input_tokens", 0),
             "total_output_tokens": results.get("total_output_tokens", 0),
@@ -318,41 +319,36 @@ def write_all_output_files(
         )
         print(f"OK: {base_name} -> output-reasoning.md")
         
-        # 3) Write output-data.json (raw LLM text content, not JSON-encoded)
+        # 3) Write output-data.json with standardized conditional structure
+        # EITHER data value (string) if data is not null, OR errors values (string) if data is null
         data_file = output_dir / "output-data.json"
-        raw_response_dict = results.get("raw_response")
+        data_value = results.get("data")
+        errors_value = results.get("errors")
         
-        # Extract raw text from raw_response using SDK-like extraction logic
-        raw_text = extract_raw_text_from_raw_response_dict(raw_response_dict) if raw_response_dict else ""
-        
-        if raw_text:
-            # Write plain text (not JSON-encoded)
-            data_file.write_text(raw_text, encoding="utf-8")
-            print(f"OK: {base_name} -> output-data.json")
-        else:
-            # Fallback: If we have a PlantUML diagram via special_files, synthesize minimal data
-            synthesized = None
-            if special_files and isinstance(special_files, dict):
-                uml = special_files.get("plantuml_diagram")
-                if isinstance(uml, str) and "@startuml" in uml and "@enduml" in uml:
-                    synthesized = [{"diagram": {"name": "typical", "plantuml": uml}}]
-            if synthesized:
-                data_file.write_text(json.dumps(synthesized, indent=2, ensure_ascii=False), encoding="utf-8")
-                print(f"OK: {base_name} -> output-data.json (synthesized)")
+        if data_value is not None:
+            # Success case: write data value as string
+            if isinstance(data_value, str):
+                data_file.write_text(data_value, encoding="utf-8")
             else:
-                # Last resort: try to extract from results["data"] if available (backward compatibility)
-                if results.get("data"):
-                    data_to_write = results["data"]
-                    # If data is a string, write it as-is (plain text)
-                    if isinstance(data_to_write, str):
-                        data_file.write_text(data_to_write, encoding="utf-8")
-                        print(f"OK: {base_name} -> output-data.json (fallback from data)")
-                    else:
-                        # If data is a dict/object, serialize to JSON (legacy behavior)
-                        data_file.write_text(json.dumps(data_to_write, indent=2, ensure_ascii=False), encoding="utf-8")
-                        print(f"OK: {base_name} -> output-data.json (fallback from data, JSON)")
-                else:
-                    print(f"WARNING: No raw text extracted from raw_response and no data to save for {base_name}")
+                # Convert non-string data to string
+                data_file.write_text(str(data_value), encoding="utf-8")
+            print(f"OK: {base_name} -> output-data.json (data)")
+        elif errors_value is not None:
+            # Failure case: write errors values as string
+            if isinstance(errors_value, str):
+                data_file.write_text(errors_value, encoding="utf-8")
+            elif isinstance(errors_value, list):
+                # Convert list of errors to string representation
+                errors_str = str(errors_value)
+                data_file.write_text(errors_str, encoding="utf-8")
+            else:
+                # Convert other error types to string
+                data_file.write_text(str(errors_value), encoding="utf-8")
+            print(f"OK: {base_name} -> output-data.json (errors)")
+        else:
+            # Edge case: neither data nor errors provided
+            print(f"WARNING: No data or errors to save for {base_name}, writing empty file")
+            data_file.write_text("", encoding="utf-8")
 
         # 4) Write output-response-raw.json
         raw_path = output_dir / "output-response-raw.json"

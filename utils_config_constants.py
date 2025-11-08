@@ -193,7 +193,8 @@ AGENT_RESPONSE_SCHEMA = {
         # Accept integer or string step numbers, and allow None during early wiring
         "step_number": (int, str, type(None)),
         "reasoning_summary": str,
-        "errors": list,
+        # Standardized structure: errors is None on success, list on failure
+        "errors": (list, type(None)),
         # Allow data to be dict, list, string (raw LLM response), or None when upstream returns empty content
         "data": (dict, list, str, type(None))
     }

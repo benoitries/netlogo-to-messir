@@ -8,13 +8,19 @@ from utils_response_dump import write_input_instructions_before_api, serialize_r
 from utils_audit_core import extract_audit_core
 
 
-def audit_scenario_text(scenario_text: str, output_dir: str | None = None, model_name: str | None = None) -> Dict[str, Any]:
+def audit_scenario_text(
+    scenario_text: str,
+    lucim_operation_model: Dict[str, Any] | str,
+    output_dir: str,
+    model_name: str
+) -> Dict[str, Any]:
     """Audit Step 2 (Scenario) with LLM persona.
 
     Args:
         scenario_text: Raw content from output-data.json (may be JSON or other text)
-        output_dir: Optional output directory (kept for interface parity; not used here)
-        model_name: Optional model name to use (defaults to DEFAULT_MODEL if not provided)
+        lucim_operation_model: LUCIM operation model (mandatory, matches generator context)
+        output_dir: Output directory (mandatory)
+        model_name: Model name to use (mandatory)
     
     Note: Python auditor is called separately by orchestrator, not as a fallback.
     """
@@ -32,26 +38,37 @@ def audit_scenario_text(scenario_text: str, output_dir: str | None = None, model
     # Pass raw content to LLM (may be JSON or other text)
     scen_text = scenario_text or ""
     instructions = f"{persona_text}\n\n{rules_text}".strip()
+    
+    # Build input_text matching generator structure: LUCIM-OPERATION-MODEL + SCENARIO-TEXT
+    # Both blocks are mandatory (matching generator structure)
+    # Use raw text copy without json.dumps or markdown fences (same as generator)
+    if isinstance(lucim_operation_model, str):
+        operation_model_text = lucim_operation_model
+    else:
+        operation_model_text = str(lucim_operation_model)
+    
     input_text = f"""
+<LUCIM-OPERATION-MODEL>
+{operation_model_text}
+</LUCIM-OPERATION-MODEL>
+
 <SCENARIO-TEXT>
 {scen_text}
 </SCENARIO-TEXT>
 """
     system_prompt = f"{instructions}\n\n{input_text}"
     try:
-        # Persist exact prompt before API call (prefer caller-provided folder)
-        target_dir = output_dir if isinstance(output_dir, str) and output_dir else OUTPUT_DIR
-        write_input_instructions_before_api(target_dir, system_prompt)
+        # Persist exact prompt before API call
+        write_input_instructions_before_api(output_dir, system_prompt)
     except Exception:
         pass
 
     # Call LLM
     try:
-        # Use provided model or fallback to DEFAULT_MODEL
-        effective_model = model_name if model_name else DEFAULT_MODEL
-        client = get_openai_client_for_model(effective_model)
+        # Use provided model (mandatory parameter)
+        client = get_openai_client_for_model(model_name)
         api_config = {
-            "model": effective_model,
+            "model": model_name,
             "instructions": format_prompt_for_responses_api(system_prompt),
             "input": [{"role": "user", "content": system_prompt}],
         }

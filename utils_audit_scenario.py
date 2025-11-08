@@ -262,7 +262,20 @@ def _audit_scenario_json(
     violations: List[Dict[str, Any]] = []
     
     # Extract operation model data if provided
-    op_model_data = _extract_operation_model_data(operation_model) if operation_model else None
+    op_model_data = None
+    if operation_model:
+        op_model_data = _extract_operation_model_data(operation_model)
+        # Validate extraction was successful
+        if op_model_data and (len(op_model_data.get("all_input_events", set())) == 0 and len(op_model_data.get("all_output_events", set())) == 0):
+            # Log warning if no events were extracted (might indicate a problem)
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Operation model extraction resulted in empty event sets. Operation model structure may be invalid.")
+    else:
+        # Log when operation model is not provided (this will cause false violations for LSC12-LSC17)
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Operation model not provided to scenario auditor. Rules LSC5, LSC6, LSC12-LSC17 will be skipped, but this may indicate a bug in the orchestrator.")
     
     # Validate top-level structure
     if not isinstance(scenario_data, dict):
@@ -485,6 +498,12 @@ def _audit_scenario_json(
     
     # Rules requiring Operation Model (LSC5, LSC6, LSC12-LSC17)
     if op_model_data:
+        # Additional validation: ensure op_model_data has events extracted
+        if len(op_model_data.get("all_input_events", set())) == 0 and len(op_model_data.get("all_output_events", set())) == 0:
+            # Operation model was provided but extraction failed - log warning but continue
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Operation model data provided but no events extracted. This may cause false violations for LSC14-LSC17.")
         # Track actor instance to type mapping for LSC12 and LSC13
         actor_instance_to_type = {}  # instance_name -> actor_type
         scenario_actor_types = set()  # actor types found in scenario

@@ -167,13 +167,16 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
         instructions = f"{self.persona_text}\n\n{effective_rules}".strip() if (self.persona_text and self.persona_text.strip()) else ""
 
         # Build input blocks with required tagged sections (without repeating instructions)
+        # Use raw text copy without json.dumps or markdown fences
         input_text = ""
         if lucim_operation_model:
+            if isinstance(lucim_operation_model, str):
+                operation_model_text = lucim_operation_model
+            else:
+                operation_model_text = str(lucim_operation_model)
             input_text = f"""
 <LUCIM-OPERATION-MODEL>
-```json
-{json.dumps(lucim_operation_model, indent=2)}
-```
+{operation_model_text}
 </LUCIM-OPERATION-MODEL>
 
 """
@@ -186,13 +189,21 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
         
         # Attach auditor feedback and previous scenario if provided (allowed to be empty on first run)
         try:
-            if isinstance(scenario_auditor_feedback, dict):
-                input_text += ("\n<SCENARIO-AUDITOR-FEEDBACK>\n" "```json\n" + json.dumps(scenario_auditor_feedback, indent=2) + "\n```\n" "</SCENARIO-AUDITOR-FEEDBACK>\n")
+            if scenario_auditor_feedback:
+                if isinstance(scenario_auditor_feedback, str):
+                    auditor_text = scenario_auditor_feedback
+                else:
+                    auditor_text = str(scenario_auditor_feedback)
+                input_text += f"\n<SCENARIO-AUDITOR-FEEDBACK>\n{auditor_text}\n</SCENARIO-AUDITOR-FEEDBACK>\n"
         except Exception:
             pass
         try:
             if previous_scenario is not None:
-                input_text += ("\n<PREVIOUS-LUCIM-SCENARIO>\n" "```json\n" + json.dumps(previous_scenario, indent=2) + "\n```\n" "</PREVIOUS-LUCIM-SCENARIO>\n")
+                if isinstance(previous_scenario, str):
+                    prev_scenario_text = previous_scenario
+                else:
+                    prev_scenario_text = str(previous_scenario)
+                input_text += f"\n<PREVIOUS-LUCIM-SCENARIO>\n{prev_scenario_text}\n</PREVIOUS-LUCIM-SCENARIO>\n"
         except Exception:
             pass
 
@@ -277,7 +288,7 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
             return {
                 "reasoning_summary": reasoning_summary,
                 "data": scenario_raw_text,  # Store raw text content (no JSON parsing)
-                "errors": [],
+                "errors": None,
                 "tokens_used": tokens_used,
                 "input_tokens": input_tokens,
                 "visible_output_tokens": visible_output_tokens,

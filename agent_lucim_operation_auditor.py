@@ -7,13 +7,21 @@ from utils_response_dump import write_input_instructions_before_api, serialize_r
 from utils_audit_core import extract_audit_core
 
 
-def audit_operation_model(operation_model_raw_content: str, output_dir: str | None = None, model_name: str | None = None) -> Dict[str, Any]:
+def audit_operation_model(
+    operation_model_raw_content: str,
+    netlogo_lucim_mapping: str,
+    netlogo_source_code: str,
+    output_dir: str,
+    model_name: str
+) -> Dict[str, Any]:
     """Audit Operation Model with LLM persona.
 
     Args:
         operation_model_raw_content: Raw content from output-data.json (may be JSON or other text)
-        output_dir: Optional output directory (kept for interface parity; not used here)
-        model_name: Optional model name to use (defaults to DEFAULT_MODEL if not provided)
+        netlogo_lucim_mapping: NetLogo to LUCIM mapping content (mandatory, matches generator context)
+        netlogo_source_code: NetLogo source code (mandatory, matches generator context)
+        output_dir: Output directory (mandatory)
+        model_name: Model name to use (mandatory)
     
     Note: Python auditor is called separately by orchestrator, not as a fallback.
     """
@@ -28,26 +36,34 @@ def audit_operation_model(operation_model_raw_content: str, output_dir: str | No
 
     # Pass raw content to LLM (may be JSON or other text)
     om_content = operation_model_raw_content or ""
-    instructions = f"{persona_text}\n\n{rules_lucim_operation_model}"
+    
+    # Build instructions matching generator: persona + mapping + rules
+    # Both netlogo_lucim_mapping and rules are mandatory (matching generator structure)
+    instructions = f"{persona_text}\n\n{netlogo_lucim_mapping}\n\n{rules_lucim_operation_model}"
+    
+    # Build input_text matching generator structure: NETLOGO-SOURCE-CODE + LUCIM-OPERATION-MODEL
+    # Both blocks are mandatory (matching generator structure)
     input_text = f"""
+<NETLOGO-SOURCE-CODE>
+{netlogo_source_code}
+</NETLOGO-SOURCE-CODE>
+
 <LUCIM-OPERATION-MODEL>
 {om_content}
 </LUCIM-OPERATION-MODEL>
 """
     system_prompt = f"{instructions}\n\n{input_text}"
     try:
-        # Persist exact prompt before API call (prefer caller-provided folder)
-        target_dir = output_dir if isinstance(output_dir, str) and output_dir else OUTPUT_DIR
-        write_input_instructions_before_api(target_dir, system_prompt)
+        # Persist exact prompt before API call
+        write_input_instructions_before_api(output_dir, system_prompt)
     except Exception:
         pass
 
     try:
-        # Use provided model or fallback to DEFAULT_MODEL
-        effective_model = model_name if model_name else DEFAULT_MODEL
-        client = get_openai_client_for_model(effective_model)
+        # Use provided model (mandatory parameter)
+        client = get_openai_client_for_model(model_name)
         api_config = {
-            "model": effective_model,
+            "model": model_name,
             "instructions": format_prompt_for_responses_api(system_prompt),
             "input": [{"role": "user", "content": system_prompt}],
         }

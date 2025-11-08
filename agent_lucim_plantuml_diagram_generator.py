@@ -189,11 +189,15 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
             elif all(k in first_item for k in ("name", "description", "messages")):
                 scenario_block = first_item
         # Build input text with required tagged sections
+        # Use raw text copy without json.dumps or markdown fences
+        scenario_data = {"scenario": scenario_block} if scenario_block is not None else normalized_input
+        if isinstance(scenario_data, str):
+            scenario_text = scenario_data
+        else:
+            scenario_text = str(scenario_data)
         input_text = f"""
 <LUCIM-SCENARIO>
-```json
-{json.dumps({"scenario": scenario_block} if scenario_block is not None else normalized_input, indent=2)}
-```
+{scenario_text}
 </LUCIM-SCENARIO>
 """
 
@@ -201,33 +205,24 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
         # Prefer embedding full report when a dict is provided; otherwise accept legacy list of non-compliant rules
         if isinstance(audit_report, dict):
             try:
-                input_text += (
-                    "\n<AUDIT-REPORT>\n"
-                    "```json\n" + json.dumps(audit_report, indent=2) + "\n```\n"
-                    "</AUDIT-REPORT>\n"
-                )
+                audit_text = str(audit_report)
+                input_text += f"\n<AUDIT-REPORT>\n{audit_text}\n</AUDIT-REPORT>\n"
             except Exception:
                 pass
         elif isinstance(audit_report, list):
             try:
-                input_text += (
-                    "\n<NON-COMPLIANT-RULES>\n"
-                    "```json\n" + json.dumps(audit_report, indent=2) + "\n```\n"
-                    "</NON-COMPLIANT-RULES>\n"
-                )
+                audit_text = str(audit_report)
+                input_text += f"\n<NON-COMPLIANT-RULES>\n{audit_text}\n</NON-COMPLIANT-RULES>\n"
             except Exception:
                 pass
         # Optional: previous diagram to support iterative corrections
         if previous_diagram is not None:
             try:
                 if isinstance(previous_diagram, str):
-                    input_text += ("\n<PLANTUML-DIAGRAM-PREVIOUS>\n" + previous_diagram + "\n</PLANTUML-DIAGRAM-PREVIOUS>\n")
+                    input_text += f"\n<PLANTUML-DIAGRAM-PREVIOUS>\n{previous_diagram}\n</PLANTUML-DIAGRAM-PREVIOUS>\n"
                 else:
-                    input_text += (
-                        "\n<PREVIOUS-DIAGRAM-DATA>\n"
-                        "```json\n" + json.dumps(previous_diagram, indent=2) + "\n```\n"
-                        "</PREVIOUS-DIAGRAM-DATA>\n"
-                    )
+                    prev_diagram_text = str(previous_diagram)
+                    input_text += f"\n<PREVIOUS-DIAGRAM-DATA>\n{prev_diagram_text}\n</PREVIOUS-DIAGRAM-DATA>\n"
             except Exception:
                 pass
 
@@ -292,7 +287,7 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
             return {
                 "reasoning_summary": reasoning_summary,
                 "data": plantuml_diagram_raw_text,  # Store raw text content (no JSON parsing)
-                "errors": [],
+                "errors": None,
                 "tokens_used": tokens_used,
                 "input_tokens": input_tokens,
                 "visible_output_tokens": visible_output_tokens,
@@ -360,7 +355,7 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
                                 "plantuml": uml_text
                             }
                         },
-                        "errors": []
+                        "errors": None
                     }
             except Exception:
                 pass
@@ -400,7 +395,7 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
               "plantuml": "@startuml\n...\n@enduml"
             }
           },
-          "errors": []
+          "errors": null
         }
         """
         # Accept dict or list structures and find the first PlantUML block

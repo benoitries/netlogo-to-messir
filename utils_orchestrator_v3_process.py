@@ -15,6 +15,7 @@ previous audit report. The workflow stops early when compliant, or proceeds to
 the next stage / ends when reaching MAX_AUDIT.
 """
 
+import json
 import time
 from typing import Dict, Any
 from pathlib import Path
@@ -92,7 +93,6 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
     # Lightweight writers for per-iteration artifacts
     def _dump_json(folder: Path, filename: str, obj: Any) -> None:
         try:
-            import json
             (folder / filename).write_text(json.dumps(obj, indent=2, ensure_ascii=False), encoding="utf-8")
         except Exception:
             pass
@@ -165,8 +165,10 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         # Delegate input-instructions.md writing to the auditor (includes persona + rules + OM raw content)
         operation_model_audit = audit_operation_model(
             operation_model_raw_content,
-            output_dir=str(operation_model_auditor_dir),
-            model_name=orchestrator_instance.model
+            netlogo_lucim_mapping_content,
+            code_content,
+            str(operation_model_auditor_dir),
+            orchestrator_instance.model
         )
         operation_model_core = extract_audit_core(operation_model_audit)
         orchestrator_instance.processed_results["lucim_operation_model_auditor"] = {
@@ -185,7 +187,8 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         auditor_results = {
             "reasoning_summary": operation_model_audit.get("reasoning_summary", ""),
             "data": operation_model_audit.get("data", {}),
-            "errors": operation_model_audit.get("errors", []),
+            # Preserve None values for errors (standardized structure: None on success, list on failure)
+            "errors": operation_model_audit.get("errors"),
             "tokens_used": operation_model_audit.get("tokens_used", 0),
             "input_tokens": operation_model_audit.get("input_tokens", 0),
             "total_output_tokens": operation_model_audit.get("total_output_tokens", 0),
@@ -214,9 +217,31 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
             operation_model_audit.get("violations") or operation_model_core["non_compliant_rules"],
         )
         # Python deterministic audit (no-LLM)
+        # Parse operation_model_data as JSON if it's a string (new standardized format)
+        # Handle standardized response structure: extract content from "data" if present
+        parsed_operation_model = {}
+        if isinstance(operation_model_data, dict):
+            # Check if it's the standardized structure {"data": {...}, "errors": null}
+            if "data" in operation_model_data and operation_model_data.get("data") is not None:
+                # Extract the actual operation model from the "data" field
+                parsed_operation_model = operation_model_data.get("data")
+            else:
+                # Direct operation model structure (no wrapping)
+                parsed_operation_model = operation_model_data
+        elif isinstance(operation_model_data, str) and operation_model_data.strip():
+            try:
+                parsed_json = json.loads(operation_model_data)
+                # Check if it's the standardized structure
+                if isinstance(parsed_json, dict) and "data" in parsed_json and parsed_json.get("data") is not None:
+                    parsed_operation_model = parsed_json.get("data")
+                else:
+                    parsed_operation_model = parsed_json
+            except (json.JSONDecodeError, ValueError):
+                # If parsing fails, use empty dict (raw_content will still be used for LOM0 validation)
+                parsed_operation_model = {}
         # Pass raw_content for LOM0-JSON-BLOCK-ONLY validation
         py_operation_model_audit = py_audit_environment(
-            operation_model_data if isinstance(operation_model_data, dict) else {},
+            parsed_operation_model,
             raw_content=operation_model_raw_content
         )
         orchestrator_instance.processed_results.setdefault("python_audits", {})["operation_model"] = py_operation_model_audit
@@ -302,11 +327,70 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
     # end Operation Model loop
 
     # Validate Operation Model Generator output before proceeding to Scenario stage
-    operation_model_data_for_scenario = orchestrator_instance.processed_results.get("lucim_operation_model_generator", {}).get("data")
+    # Get the operation model from the last iteration (stored in processed_results)
+    operation_model_result = orchestrator_instance.processed_results.get("lucim_operation_model_generator", {})
+    operation_model_raw_data = operation_model_result.get("data") if operation_model_result else None
+    
+    # The generator returns raw text (JSON string), so we need to parse it
+    operation_model_data_for_scenario = None
+    if operation_model_raw_data:
+        if isinstance(operation_model_raw_data, str):
+            # Parse JSON string to dict
+            try:
+                operation_model_data_for_scenario = json.loads(operation_model_raw_data)
+            except (json.JSONDecodeError, ValueError) as e:
+                orchestrator_instance.logger.error(f"[ADK] Failed to parse operation model JSON: {e}")
+                operation_model_data_for_scenario = None
+        elif isinstance(operation_model_raw_data, dict):
+            # Already a dict, use directly
+            operation_model_data_for_scenario = operation_model_raw_data
+        else:
+            orchestrator_instance.logger.error(f"[ADK] Operation Model data has unexpected type: {type(operation_model_raw_data)}")
+            operation_model_data_for_scenario = None
+    
+    # Additional validation: ensure operation_model_data_for_scenario is a valid dict with actors
     if not operation_model_data_for_scenario:
         orchestrator_instance.logger.error("[ADK] Operation Model Generator produced no valid data; cannot proceed to Scenario stage.")
         orchestrator_instance.adk_monitor.stop_monitoring()
         return {"status": "FAIL", "stage": "operation_model", "results": orchestrator_instance.processed_results}
+    
+    # Validate that operation model contains actors
+    if not isinstance(operation_model_data_for_scenario, dict):
+        orchestrator_instance.logger.error(f"[ADK] Operation Model data is not a dict after parsing (got {type(operation_model_data_for_scenario)}); cannot proceed to Scenario stage.")
+        orchestrator_instance.adk_monitor.stop_monitoring()
+        return {"status": "FAIL", "stage": "operation_model", "results": orchestrator_instance.processed_results}
+    
+    # Check if operation model has actors (support both wrapped and direct formats)
+    has_actors = False
+    if "actors" in operation_model_data_for_scenario:
+        actors = operation_model_data_for_scenario.get("actors")
+        if isinstance(actors, dict) and len(actors) > 0:
+            has_actors = True
+    elif "data" in operation_model_data_for_scenario:
+        data_node = operation_model_data_for_scenario.get("data")
+        if isinstance(data_node, dict) and "actors" in data_node:
+            actors = data_node.get("actors")
+            if isinstance(actors, dict) and len(actors) > 0:
+                has_actors = True
+    
+    if not has_actors:
+        orchestrator_instance.logger.error("[ADK] Operation Model does not contain valid actors; cannot proceed to Scenario stage.")
+        orchestrator_instance.adk_monitor.stop_monitoring()
+        return {"status": "FAIL", "stage": "operation_model", "results": orchestrator_instance.processed_results}
+    
+    # Count actors for logging (support both direct and wrapped formats)
+    actors_count = 0
+    if "actors" in operation_model_data_for_scenario:
+        actors = operation_model_data_for_scenario.get("actors")
+        if isinstance(actors, dict):
+            actors_count = len(actors)
+    elif "data" in operation_model_data_for_scenario:
+        data_node = operation_model_data_for_scenario.get("data")
+        if isinstance(data_node, dict) and "actors" in data_node:
+            actors = data_node.get("actors")
+            if isinstance(actors, dict):
+                actors_count = len(actors)
+    orchestrator_instance.logger.info(f"[ADK] Operation Model validated: {actors_count} actors found. Proceeding to Scenario stage.")
 
     # Step 2: Scenario (Generator → Auditor) with iterations
     scen_attempt = 0
@@ -359,27 +443,40 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         scen_text = ""
         try:
             lines: list[str] = []
-            # Handle new JSON format: { "data": { "scenario": {...} }, "errors": [] }
+            # Parse scen_data if it's a string (new standardized format: output-data.json contains raw text)
+            parsed_scen_data = None
+            if isinstance(scen_data, str) and scen_data.strip():
+                try:
+                    parsed_scen_data = json.loads(scen_data)
+                except (json.JSONDecodeError, ValueError):
+                    # Not valid JSON, treat as raw text
+                    parsed_scen_data = None
+            elif isinstance(scen_data, dict):
+                parsed_scen_data = scen_data
+            elif isinstance(scen_data, list):
+                parsed_scen_data = scen_data
+            
+            # Handle standardized JSON format: { "data": { "scenario": {...} }, "errors": null }
             scenario_to_process = None
-            if isinstance(scen_data, dict):
-                # New format: extract scenario from data.scenario
-                if "data" in scen_data and isinstance(scen_data.get("data"), dict):
-                    data_node = scen_data.get("data")
+            if isinstance(parsed_scen_data, dict):
+                # New standardized format: extract scenario from data.scenario
+                if "data" in parsed_scen_data and isinstance(parsed_scen_data.get("data"), dict):
+                    data_node = parsed_scen_data.get("data")
                     if "scenario" in data_node:
                         scenario_to_process = data_node.get("scenario")
-                # Old format fallback: check if scen_data itself is a scenario dict or contains scenario key
-                elif "scenario" in scen_data:
-                    scenario_to_process = scen_data.get("scenario")
+                # Old format fallback: check if parsed_scen_data itself is a scenario dict or contains scenario key
+                elif "scenario" in parsed_scen_data:
+                    scenario_to_process = parsed_scen_data.get("scenario")
                 # Also handle list format (old format)
-                elif isinstance(scen_data, list) and len(scen_data) > 0:
+                elif isinstance(parsed_scen_data, list) and len(parsed_scen_data) > 0:
                     # Old format: list of scenario objects
-                    for item in scen_data:
+                    for item in parsed_scen_data:
                         if isinstance(item, dict) and "scenario" in item:
                             scenario_to_process = item.get("scenario")
                             break
-            elif isinstance(scen_data, list):
+            elif isinstance(parsed_scen_data, list):
                 # Old format: list of scenario objects
-                for item in scen_data:
+                for item in parsed_scen_data:
                     if isinstance(item, dict) and "scenario" in item:
                         scenario_to_process = item.get("scenario")
                         break
@@ -414,7 +511,17 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
 
         # Pass raw content from output-data.json to LLM auditor (per LSC0 rule: scenario must be JSON only)
         # Note: We pass the raw file content as-is, without assuming it's valid JSON
-        scen_audit = audit_scenario_text(scen_raw_content, output_dir=scenario_auditor_dir, model_name=orchestrator_instance.model)
+        # Ensure operation_model_data_for_scenario is available (mandatory parameter)
+        if operation_model_data_for_scenario is None:
+            orchestrator_instance.logger.error("[ADK] LUCIM operation model data is missing; cannot proceed with scenario audit.")
+            orchestrator_instance.adk_monitor.stop_monitoring()
+            return {"status": "FAIL", "stage": "lucim_scenario_auditor", "results": orchestrator_instance.processed_results}
+        scen_audit = audit_scenario_text(
+            scen_raw_content,
+            operation_model_data_for_scenario,
+            output_dir=scenario_auditor_dir, 
+            model_name=orchestrator_instance.model
+        )
         try:
             # Persona + scenario raw content + rules (insert rules once)
             # Note: scen_raw_content is the raw text from output-data.json, may or may not be valid JSON
@@ -439,7 +546,8 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         auditor_results = {
             "reasoning_summary": scen_audit.get("reasoning_summary", ""),
             "data": scen_audit.get("data", {}),
-            "errors": scen_audit.get("errors", []),
+            # Preserve None values for errors (standardized structure: None on success, list on failure)
+            "errors": scen_audit.get("errors"),
             "tokens_used": scen_audit.get("tokens_used", 0),
             "input_tokens": scen_audit.get("input_tokens", 0),
             "total_output_tokens": scen_audit.get("total_output_tokens", 0),
@@ -471,8 +579,28 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         # Pass JSON raw content first (preferred), fallback to PlantUML text
         # The audit_scenario function will automatically detect JSON vs PlantUML text
         # Pass operation model for rules requiring it (LSC5, LSC6, LSC12-LSC17)
+        # Validate operation model is available before calling audit
+        if not operation_model_data_for_scenario:
+            orchestrator_instance.logger.warning(f"[ADK] Scenario audit iteration {iter_index}: Operation model data is None or empty. Python audit may report false violations.")
+        else:
+            # Log operation model validation info for debugging
+            actors_count = 0
+            if isinstance(operation_model_data_for_scenario, dict):
+                if "actors" in operation_model_data_for_scenario:
+                    actors = operation_model_data_for_scenario.get("actors")
+                    if isinstance(actors, dict):
+                        actors_count = len(actors)
+                elif "data" in operation_model_data_for_scenario:
+                    data_node = operation_model_data_for_scenario.get("data")
+                    if isinstance(data_node, dict) and "actors" in data_node:
+                        actors = data_node.get("actors")
+                        if isinstance(actors, dict):
+                            actors_count = len(actors)
+            orchestrator_instance.logger.debug(f"[ADK] Scenario audit iteration {iter_index}: Using operation model with {actors_count} actors for Python audit.")
+        
         py_scen_audit = py_audit_scenario(
             scen_raw_content if scen_raw_content else scen_text,
+            raw_content=scen_raw_content if scen_raw_content else None,
             operation_model=operation_model_data_for_scenario
         )
         orchestrator_instance.processed_results.setdefault("python_audits", {})["scenario"] = py_scen_audit
@@ -554,13 +682,17 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         writer_base_dir = _ensure_dir(puml_iter_dir / "1-generator")
         # Write input-instructions.md for writer with exact system_prompt (TASK + persona + DSL + scenario data)
         try:
-            import json as _json
             persona_dir = INPUT_PERSONA_DIR / orchestrator_instance.selected_persona_set
             persona_writer_path = persona_dir / "PSN_LUCIM_PlantUML_Diagram_Generator.md"
             persona_writer_text = persona_writer_path.read_text(encoding="utf-8") if persona_writer_path.exists() else ""
-            scen_data_json = _json.dumps(orchestrator_instance.processed_results["lucim_scenario_generator"]["data"], indent=2, ensure_ascii=False)
+            # Use raw text copy (no json.dumps or normalization)
+            scen_data = orchestrator_instance.processed_results["lucim_scenario_generator"]["data"]
+            if isinstance(scen_data, str):
+                scen_data_text = scen_data
+            else:
+                scen_data_text = str(scen_data)
             diagram_rules_content = orchestrator_instance.fileio.load_rules_diagram()
-            system_prompt_writer = f"{persona_writer_text}\n\n<SCENARIO-DATA>\n{scen_data_json}\n</SCENARIO-DATA>\n\n{diagram_rules_content}"
+            system_prompt_writer = f"{persona_writer_text}\n\n<SCENARIO-DATA>\n{scen_data_text}\n</SCENARIO-DATA>\n\n{diagram_rules_content}"
             _dump_text(writer_base_dir, "input-instructions.md", system_prompt_writer)
         except Exception:
             pass
@@ -586,9 +718,16 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
 
         # 3.2 PlantUML Auditor — outputs under plantuml/iter-<k>/2-auditor
         auditor_iter_dir = _ensure_dir(puml_iter_dir / "2-auditor")
+        # Ensure lucim_scenario is available (mandatory parameter)
+        lucim_scenario_for_audit = orchestrator_instance.processed_results.get("lucim_scenario_generator", {}).get("data")
+        if lucim_scenario_for_audit is None:
+            orchestrator_instance.logger.error("[ADK] LUCIM scenario data is missing; cannot proceed with PlantUML diagram audit.")
+            orchestrator_instance.adk_monitor.stop_monitoring()
+            return {"status": "FAIL", "stage": "lucim_plantuml_diagram_auditor", "results": orchestrator_instance.processed_results}
         audit_res = orchestrator_instance.lucim_plantuml_diagram_auditor_agent.audit_plantuml_diagrams(
             str(plantuml_file_path),
-            output_dir=auditor_iter_dir
+            lucim_scenario_for_audit,
+            auditor_iter_dir
         )
         orchestrator_instance.processed_results["lucim_plantuml_diagram_auditor"] = audit_res
         try:
@@ -620,7 +759,8 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
             "verdict": puml_core.get("verdict", "non-compliant"),
             "non-compliant-rules": puml_core.get("non_compliant_rules", []),
             "coverage": puml_core.get("coverage", {}),
-            "errors": puml_core.get("errors", []),
+            # Preserve None values for errors (standardized structure: None on success, list on failure)
+            "errors": puml_core.get("errors"),
         }
         # Build dict for compare_verdicts (maps non-compliant-rules to violations)
         puml_audit_for_compare = {
@@ -629,44 +769,23 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         }
         verdict = puml_core.get("verdict", "non-compliant")
         # Python deterministic audit (no-LLM) on .puml text
-        # Read raw content for LDR0-PLANTUML-BLOCK-ONLY validation
+        # Read raw content - the auditor will automatically extract PlantUML by searching for @startuml/@enduml
+        # This is robust even if the file contains JSON or corrupted JSON
         try:
             import pathlib
-            import json as _json
             puml_file_content = pathlib.Path(str(plantuml_file_path)).read_text(encoding="utf-8")
-            # Try to extract PlantUML text from JSON if the file contains JSON
+            # Pass raw content directly to auditor - it will extract PlantUML automatically
+            # raw_content is used for LDR0 validation (checking for text outside PlantUML block)
+            # text parameter will also be set to raw_content, and auditor extracts PlantUML from it
+            puml_raw_content = puml_file_content
             puml_text = puml_file_content
-            # Check if content is JSON (starts with { or [)
-            if puml_file_content.strip().startswith(("{", "[")):
-                try:
-                    puml_json = _json.loads(puml_file_content)
-                    # Try to find PlantUML text in the JSON structure
-                    def find_plantuml_in_json(obj, path=""):
-                        if isinstance(obj, dict):
-                            for key, value in obj.items():
-                                if isinstance(value, str) and "@startuml" in value and "@enduml" in value:
-                                    return value
-                                result = find_plantuml_in_json(value, f"{path}.{key}")
-                                if result:
-                                    return result
-                        elif isinstance(obj, list):
-                            for i, item in enumerate(obj):
-                                result = find_plantuml_in_json(item, f"{path}[{i}]")
-                                if result:
-                                    return result
-                        return None
-                    found_puml = find_plantuml_in_json(puml_json)
-                    if found_puml:
-                        puml_text = found_puml
-                        orchestrator_instance.logger.info("[ADK] Extracted PlantUML text from JSON in diagram.puml")
-                except Exception as e:
-                    orchestrator_instance.logger.warning(f"[ADK] Failed to parse JSON from diagram.puml: {e}")
-            puml_raw_content = puml_text  # Use same content as raw for LDR0 validation
+            orchestrator_instance.logger.info("[ADK] Reading diagram.puml for Python audit (auditor will extract PlantUML automatically)")
         except Exception as e:
             orchestrator_instance.logger.error(f"[ADK] Failed to read PlantUML file: {e}")
             puml_text = ""
             puml_raw_content = ""
         # Pass raw_content for LDR0-PLANTUML-BLOCK-ONLY validation
+        # The auditor will automatically extract PlantUML from the text by searching for @startuml/@enduml
         py_puml_audit = py_audit_diagram(puml_text, raw_content=puml_raw_content)
         orchestrator_instance.processed_results.setdefault("python_audits", {})["diagram"] = py_puml_audit
         # Compare agent 6 verdict vs python verdict (use puml_audit_for_compare with proper structure)

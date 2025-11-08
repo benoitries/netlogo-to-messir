@@ -166,28 +166,35 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
         input_text = f"""
 
 <NETLOGO-SOURCE-CODE>
-```
 {netlogo_source_code}
-```
 </NETLOGO-SOURCE-CODE>
 
 """
         # Always include auditor report and previous model blocks (empty on first call)
+        # Use raw text copy without json.dumps or markdown fences
         try:
-            auditor_json = json.dumps(auditor_feedback, indent=2) if isinstance(auditor_feedback, dict) and auditor_feedback else "{}"
+            if auditor_feedback:
+                if isinstance(auditor_feedback, str):
+                    auditor_text = auditor_feedback
+                else:
+                    auditor_text = str(auditor_feedback)
+            else:
+                auditor_text = ""
         except Exception:
-            auditor_json = "{}"
-        input_text += ("\n<AUDIT-REPORT>\n" "```json\n" + auditor_json + "\n```\n" "</AUDIT-REPORT>\n")
+            auditor_text = ""
+        input_text += f"\n<AUDIT-REPORT>\n{auditor_text}\n</AUDIT-REPORT>\n"
 
         try:
-            prev_model_json = json.dumps(previous_operation_model, indent=2) if previous_operation_model is not None else "{}"
+            if previous_operation_model is not None:
+                if isinstance(previous_operation_model, str):
+                    prev_model_text = previous_operation_model
+                else:
+                    prev_model_text = str(previous_operation_model)
+            else:
+                prev_model_text = ""
         except Exception:
-            prev_model_json = "{}"
-        input_text += (
-            "\n<PREVIOUS-LUCIM-OPERATION-MODEL>\n"
-            "```json\n" + prev_model_json + "\n```\n"
-            "</PREVIOUS-LUCIM-OPERATION-MODEL>\n"
-        )
+            prev_model_text = ""
+        input_text += f"\n<PREVIOUS-LUCIM-OPERATION-MODEL>\n{prev_model_text}\n</PREVIOUS-LUCIM-OPERATION-MODEL>\n"
         system_prompt = f"{instructions}\n\n{input_text}"
         base_output_dir = output_dir if output_dir is not None else OUTPUT_DIR
         write_input_instructions_before_api(base_output_dir, system_prompt)
@@ -234,7 +241,7 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
             return {
                 "reasoning_summary": reasoning_summary,
                 "data": operation_model_raw_text,  # Store raw text content (no JSON parsing)
-                "errors": [],
+                "errors": None,
                 "tokens_used": tokens_used,
                 "input_tokens": input_tokens,
                 "visible_output_tokens": visible_output_tokens,

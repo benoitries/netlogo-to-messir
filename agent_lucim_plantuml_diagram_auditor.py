@@ -143,27 +143,24 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
             estimated_tokens = len(full_input) // 4  # Rough estimate: 4 chars per token
             return estimated_tokens
         
-    def audit_plantuml_diagrams(self, plantuml_diagram_file_path: str, step: int = 6, output_dir: Optional[pathlib.Path] = None) -> Dict[str, Any]:
+    def audit_plantuml_diagrams(self, plantuml_diagram_file_path: str, lucim_scenario: Dict[str, Any] | str, output_dir: pathlib.Path | str, step: int = 6) -> Dict[str, Any]:
         """
         Audit PlantUML sequence diagrams for LUCIM UCI compliance using the PlantUML Auditor persona.
 
         Args:
             plantuml_diagram_file_path: Path to the standalone .puml file from Step 5 (mandatory)
-            lucim_dsl_file_path: Path to the LUCIM DSL full definition file (mandatory)
+            lucim_scenario: LUCIM scenario data to include in the audit context (mandatory, matches generator context)
+            output_dir: Output directory for results (mandatory)
             step: Step number for task file selection (default: 6)
-            output_dir: Optional output directory for results
 
         Returns:
             Dictionary containing reasoning, non-compliant rules, and any errors
         """
-        # Resolve base output directory (use provided output_dir or fall back to OUTPUT_DIR)
-        if output_dir is not None:
-            if isinstance(output_dir, str):
-                base_output_dir = pathlib.Path(output_dir)
-            else:
-                base_output_dir = output_dir
+        # Resolve base output directory (mandatory parameter)
+        if isinstance(output_dir, str):
+            base_output_dir = pathlib.Path(output_dir)
         else:
-            base_output_dir = OUTPUT_DIR
+            base_output_dir = output_dir
         
         # Ensure output directory exists before writing files
         try:
@@ -196,9 +193,63 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
                 "output_tokens": 0
             }
         
-        # Build input text with required tagged sections
-        # Do not insert Markdown code fences - follow same practice as Operation Model Auditor
-        input_text = f"""
+        # Validate mandatory lucim_scenario parameter
+        if lucim_scenario is None:
+            return {
+                "reasoning_summary": "Error: lucim_scenario is mandatory but not provided",
+                "data": None,
+                "errors": ["lucim_scenario parameter is required for PlantUML diagram audit"],
+                "verdict": "non-compliant",
+                "non-compliant-rules": [],
+                "coverage": {"total_rules_in_dsl": "0", "evaluated": [], "not_applicable": [], "missing_evaluation": []},
+                "tokens_used": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+            }
+        
+        # Build input text matching generator structure: LUCIM-SCENARIO (mandatory) + PLANTUML-DIAGRAM
+        # Normalize lucim_scenario (mandatory parameter, same normalization as generator)
+        normalized_input = lucim_scenario
+        # Unwrap top-level {"data": ...}
+        if isinstance(normalized_input, dict) and "data" in normalized_input:
+            normalized_input = normalized_input["data"]
+        # If list, take the first item (typical scenario)
+        first_item = None
+        if isinstance(normalized_input, list) and len(normalized_input) > 0:
+            first_item = normalized_input[0]
+        elif isinstance(normalized_input, dict):
+            first_item = normalized_input
+        # Derive scenario block
+        scenario_block = None
+        if isinstance(first_item, dict):
+            if isinstance(first_item.get("scenario"), dict):
+                scenario_block = first_item.get("scenario")
+            elif all(k in first_item for k in ("name", "description", "messages")):
+                scenario_block = first_item
+        
+        # Always include LUCIM-SCENARIO (mandatory, before PLANTUML-DIAGRAM to match generator order)
+        # Use raw text copy without json.dumps or markdown fences (same as generator)
+        try:
+            scenario_data = {"scenario": scenario_block} if scenario_block is not None else normalized_input
+            if isinstance(scenario_data, str):
+                scenario_text = scenario_data
+            else:
+                scenario_text = str(scenario_data)
+            input_text = f"""
+<LUCIM-SCENARIO>
+{scenario_text}
+</LUCIM-SCENARIO>
+"""
+        except Exception:
+            # Fallback if normalization fails
+            input_text = f"""
+<LUCIM-SCENARIO>
+{str(lucim_scenario)}
+</LUCIM-SCENARIO>
+"""
+        
+        # Add PLANTUML-DIAGRAM block (after LUCIM-SCENARIO to match generator order)
+        input_text += f"""
 <PLANTUML-DIAGRAM>
 {puml_content}
 </PLANTUML-DIAGRAM>

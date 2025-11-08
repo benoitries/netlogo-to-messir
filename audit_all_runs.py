@@ -85,10 +85,28 @@ def audit_run(run_dir: Path) -> Dict[str, Any]:
             output_data = generator_dir / "output-data.json"
             if output_data.exists():
                 try:
-                    with open(output_data, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                    # Handle both direct structure and wrapped in "data" key
-                    op_model_data = data if isinstance(data, dict) and ("actors" in data or "system" in data) else data.get("data", {})
+                    # Read as text (new format: output-data.json contains EITHER data string OR errors string)
+                    content = output_data.read_text(encoding='utf-8')
+                    if not content.strip():
+                        continue
+                    # Try to parse as JSON
+                    try:
+                        data = json.loads(content)
+                    except (json.JSONDecodeError, ValueError):
+                        # Not valid JSON, skip this file
+                        print(f"  {iter_dir.name}: ⚠️  output-data.json is not valid JSON (may contain errors string)")
+                        continue
+                    
+                    # Handle standardized structure: extract from "data" if present
+                    op_model_data = None
+                    if isinstance(data, dict):
+                        # Check if it's standardized structure {"data": {...}, "errors": null}
+                        if "data" in data and data.get("data") is not None:
+                            op_model_data = data.get("data")
+                        # Old format: direct structure
+                        elif "actors" in data or "system" in data:
+                            op_model_data = data
+                    
                     if op_model_data and isinstance(op_model_data, dict):
                         audit_result = audit_operation_model(op_model_data)
                         results["operation_model"].append({
@@ -99,6 +117,8 @@ def audit_run(run_dir: Path) -> Dict[str, Any]:
                         verdict = "✅ COMPLIANT" if audit_result.get("verdict") else "❌ NON-COMPLIANT"
                         violations_count = len(audit_result.get("violations", []))
                         print(f"  {iter_dir.name}: {verdict} ({violations_count} violations)")
+                    else:
+                        print(f"  {iter_dir.name}: ⚠️  No operation model data found in output-data.json")
                 except Exception as e:
                     error_msg = f"Error auditing {output_data}: {str(e)}"
                     results["errors"].append(error_msg)
@@ -113,10 +133,30 @@ def audit_run(run_dir: Path) -> Dict[str, Any]:
             output_data = generator_dir / "output-data.json"
             if output_data.exists():
                 try:
-                    with open(output_data, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                    # Handle both direct list and wrapped in "data" key
-                    scenario_data = data if isinstance(data, list) else data.get("data", [])
+                    # Read as text (new format: output-data.json contains EITHER data string OR errors string)
+                    content = output_data.read_text(encoding='utf-8')
+                    if not content.strip():
+                        continue
+                    # Try to parse as JSON
+                    try:
+                        data = json.loads(content)
+                    except (json.JSONDecodeError, ValueError):
+                        # Not valid JSON, skip this file
+                        print(f"  {iter_dir.name}: ⚠️  output-data.json is not valid JSON (may contain errors string)")
+                        continue
+                    
+                    # Handle standardized structure: extract from "data" if present
+                    scenario_data = None
+                    if isinstance(data, dict):
+                        # Check if it's standardized structure {"data": {...}, "errors": null}
+                        if "data" in data and data.get("data") is not None:
+                            scenario_data = data.get("data")
+                        # Old format: direct structure
+                        elif isinstance(data, list):
+                            scenario_data = data
+                    elif isinstance(data, list):
+                        scenario_data = data
+                    
                     if scenario_data:
                         scenario_text = extract_scenario_text(scenario_data)
                         if scenario_text:
@@ -129,6 +169,8 @@ def audit_run(run_dir: Path) -> Dict[str, Any]:
                             verdict = "✅ COMPLIANT" if audit_result.get("verdict") else "❌ NON-COMPLIANT"
                             violations_count = len(audit_result.get("violations", []))
                             print(f"  {iter_dir.name}: {verdict} ({violations_count} violations)")
+                    else:
+                        print(f"  {iter_dir.name}: ⚠️  No scenario data found in output-data.json")
                 except Exception as e:
                     error_msg = f"Error auditing {output_data}: {str(e)}"
                     results["errors"].append(error_msg)

@@ -131,12 +131,63 @@ def _check_ldr0_plantuml_block_only(raw_content: str) -> List[Dict[str, Any]]:
     return violations
 
 
+def _extract_plantuml_from_text(content: str) -> str | None:
+    """
+    Extract PlantUML block from text by finding @startuml and @enduml markers.
+    This is robust even if the content is JSON or contains other text.
+    
+    Args:
+        content: Raw content string that may contain PlantUML block
+        
+    Returns:
+        Extracted PlantUML text (between @startuml and @enduml), or None if not found
+    """
+    if not content:
+        return None
+    
+    # Find @startuml and @enduml positions (case-insensitive search)
+    startuml_pos = content.find("@startuml")
+    if startuml_pos == -1:
+        # Try case-insensitive
+        startuml_pos_lower = content.lower().find("@startuml")
+        if startuml_pos_lower != -1:
+            startuml_pos = startuml_pos_lower
+    
+    if startuml_pos == -1:
+        return None
+    
+    # Find @enduml after @startuml
+    search_start = startuml_pos + len("@startuml")
+    enduml_pos = content.find("@enduml", search_start)
+    if enduml_pos == -1:
+        # Try case-insensitive
+        enduml_pos_lower = content.lower().find("@enduml", search_start)
+        if enduml_pos_lower != -1:
+            enduml_pos = enduml_pos_lower
+    
+    if enduml_pos == -1:
+        return None
+    
+    # Extract the PlantUML block (include @startuml and @enduml)
+    enduml_end = enduml_pos + len("@enduml")
+    plantuml_text = content[startuml_pos:enduml_end]
+    
+    # Handle escaped newlines in JSON strings (\\n -> \n)
+    # This handles cases where PlantUML is in a JSON string with escaped newlines
+    plantuml_text = plantuml_text.replace("\\n", "\n").replace("\\t", "\t")
+    
+    return plantuml_text
+
+
 def audit_diagram(text: str, raw_content: str | None = None) -> Dict[str, Any]:
     """
     Audit PlantUML Diagram for LDR rule compliance.
     
+    This function automatically extracts PlantUML content by searching for @startuml and @enduml
+    markers, making it robust against JSON corruption or mixed content.
+    
     Args:
-        text: PlantUML diagram content (parsed/cleaned)
+        text: PlantUML diagram content (parsed/cleaned) or raw content containing PlantUML
         raw_content: Optional raw content string for LDR0 validation (PlantUML block format check)
         
     Returns:
@@ -145,11 +196,26 @@ def audit_diagram(text: str, raw_content: str | None = None) -> Dict[str, Any]:
     violations: List[Dict[str, Any]] = []
     
     # LDR0-PLANTUML-BLOCK-ONLY: Check raw content format if provided
+    # This validates that the raw content is a valid PlantUML block (no extra text)
     if raw_content is not None:
         ldr0_violations = _check_ldr0_plantuml_block_only(raw_content)
         violations.extend(ldr0_violations)
 
-    lines = (text or "").splitlines()
+    # Extract PlantUML from text or raw_content
+    # Priority: use text if it contains PlantUML, otherwise try raw_content
+    plantuml_text = None
+    if text:
+        plantuml_text = _extract_plantuml_from_text(text)
+    
+    if not plantuml_text and raw_content:
+        plantuml_text = _extract_plantuml_from_text(raw_content)
+    
+    # If no PlantUML found, this will be caught by LDR1 check below
+    if not plantuml_text:
+        plantuml_text = text or raw_content or ""
+    
+    # Split into lines for rule checking
+    lines = plantuml_text.splitlines()
     participants_order: List[str] = []  # aliases encountered order
     has_system_decl = False
     system_decl_line = -1
