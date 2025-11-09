@@ -55,7 +55,6 @@ Generator: `agent_lucim_scenario_generator.py`
 - LUCIM operation model raw text from Stage 01: `../lucim_operation_model_generator/output-data.json` (plain text)
 - Persona instructions: `input-persona/<PERSONA-SET>/PSN_LUCIM_Scenario_Generator.md`
 - Scenario rules (mandatory): `input-persona/<PERSONA-SET>/RULES_LUCIM_Scenario.md`
-- Scenario rules (mandatory): `input-persona/<PERSONA-SET>/RULES_LUCIM_Scenario.md`
 
 **Outputs:**
 - `output-response.json` (agent response)

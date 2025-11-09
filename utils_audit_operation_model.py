@@ -26,6 +26,8 @@ Rules implemented (from RULES_LUCIM_Operation_model.md):
 - LOM4-IE-EVENT-DIRECTION: IE must be System → Actor
 - LOM5-OE-EVENT-DIRECTION: OE must be Actor → System
 - LOM7-CONDITIONS-VALIDATION: postF required and non-empty, preF/preP optional arrays
+- LOM8-INPUT-EVENTS-LIMITATION: Each actor must have at least one input event
+- LOM9-OUTPUT-EVENTS-LIMITATION: Each actor must have at least one output event
 Note: LOM6-CONDITIONS-DEFINITION is a definition rule, not a validation rule.
 Note: Actor instance names (if provided) should be camelCase, but this is not a strict LOM rule.
 """
@@ -514,6 +516,121 @@ def audit_operation_model(env: Dict[str, Any], raw_content: str | None = None) -
                             "event_content": json.dumps(evt, indent=2, ensure_ascii=False)
                         }
                     })
+
+    # LOM8 and LOM9 — Check that each actor has at least one input event and one output event
+    # Count input and output events per actor
+    actor_input_events = {}  # actor identifier -> count of input events
+    actor_output_events = {}  # actor identifier -> count of output events
+    
+    # Count from events list if present
+    if events:
+        for evt in events:
+            kind = (evt.get("kind") or "").lower().strip()
+            sender = (evt.get("sender") or "").strip()
+            receiver = (evt.get("receiver") or "").strip()
+            
+            sender_l = sender.lower()
+            receiver_l = receiver.lower()
+            
+            sender_is_actor = sender_l in actor_index
+            receiver_is_actor = receiver_l in actor_index
+            
+            if kind == "ie" and receiver_is_actor:
+                # Input event: System → Actor
+                actor_input_events[receiver_l] = actor_input_events.get(receiver_l, 0) + 1
+            elif kind == "oe" and sender_is_actor:
+                # Output event: Actor → System
+                actor_output_events[sender_l] = actor_output_events.get(sender_l, 0) + 1
+    
+    # Also count from actors' input_events and output_events blocks (new JSON format)
+    for actor in actors_list:
+        inst_name = (actor.get("name") or "").strip()
+        if not inst_name and id(actor) in actor_type_map:
+            inst_name = actor_type_map[id(actor)].strip()
+        
+        # Get actor identifier (prefer type key, fallback to instance name)
+        actor_id = None
+        if id(actor) in actor_type_map:
+            actor_id = actor_type_map[id(actor)].lower()
+        elif inst_name:
+            actor_id = inst_name.lower()
+        
+        if not actor_id:
+            continue
+        
+        # Count input events from actor's input_events block
+        inp = actor.get("input_events")
+        if isinstance(inp, dict):
+            input_count = sum(1 for ev in inp.values() if isinstance(ev, dict))
+            if input_count > 0:
+                actor_input_events[actor_id] = actor_input_events.get(actor_id, 0) + input_count
+        
+        # Count output events from actor's output_events block
+        outp = actor.get("output_events")
+        if isinstance(outp, dict):
+            output_count = sum(1 for ev in outp.values() if isinstance(ev, dict))
+            if output_count > 0:
+                actor_output_events[actor_id] = actor_output_events.get(actor_id, 0) + output_count
+    
+    # LOM8-INPUT-EVENTS-LIMITATION: Each actor must have at least one input event
+    for actor in actors_list:
+        inst_name = (actor.get("name") or "").strip()
+        type_name = (actor.get("type") or "").strip()
+        if not type_name and id(actor) in actor_type_map:
+            type_name = actor_type_map[id(actor)].strip()
+        
+        # Get actor identifier
+        actor_id = None
+        if id(actor) in actor_type_map:
+            actor_id = actor_type_map[id(actor)].lower()
+        elif inst_name:
+            actor_id = inst_name.lower()
+        elif type_name:
+            actor_id = type_name.lower()
+        
+        if not actor_id:
+            continue
+        
+        if actor_input_events.get(actor_id, 0) == 0:
+            violations.append({
+                "id": "LOM8-INPUT-EVENTS-LIMITATION",
+                "message": "Each actor must have at least one input event in the operation model.",
+                "location": _location(actor, type_name or inst_name or "actor"),
+                "extracted_values": {
+                    "actor_type": type_name or inst_name or "unknown",
+                    "actor_content": json.dumps(actor, indent=2, ensure_ascii=False)
+                }
+            })
+    
+    # LOM9-OUTPUT-EVENTS-LIMITATION: Each actor must have at least one output event
+    for actor in actors_list:
+        inst_name = (actor.get("name") or "").strip()
+        type_name = (actor.get("type") or "").strip()
+        if not type_name and id(actor) in actor_type_map:
+            type_name = actor_type_map[id(actor)].strip()
+        
+        # Get actor identifier
+        actor_id = None
+        if id(actor) in actor_type_map:
+            actor_id = actor_type_map[id(actor)].lower()
+        elif inst_name:
+            actor_id = inst_name.lower()
+        elif type_name:
+            actor_id = type_name.lower()
+        
+        if not actor_id:
+            continue
+        
+        if actor_output_events.get(actor_id, 0) == 0:
+            violations.append({
+                "id": "LOM9-OUTPUT-EVENTS-LIMITATION",
+                "message": "Each actor must have at least one output event in the operation model.",
+                "location": _location(actor, type_name or inst_name or "actor"),
+                "extracted_values": {
+                    "actor_type": type_name or inst_name or "unknown",
+                    "actor_content": json.dumps(actor, indent=2, ensure_ascii=False)
+                }
+            })
 
     verdict = len(violations) == 0
     return {"verdict": verdict, "violations": violations}

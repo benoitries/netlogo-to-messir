@@ -328,69 +328,32 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
 
     # Validate Operation Model Generator output before proceeding to Scenario stage
     # Get the operation model from the last iteration (stored in processed_results)
+    # output-data.json contains raw text (may include markdown fences), not parsed JSON
     operation_model_result = orchestrator_instance.processed_results.get("lucim_operation_model_generator", {})
     operation_model_raw_data = operation_model_result.get("data") if operation_model_result else None
     
-    # The generator returns raw text (JSON string), so we need to parse it
-    operation_model_data_for_scenario = None
-    if operation_model_raw_data:
-        if isinstance(operation_model_raw_data, str):
-            # Parse JSON string to dict
-            try:
-                operation_model_data_for_scenario = json.loads(operation_model_raw_data)
-            except (json.JSONDecodeError, ValueError) as e:
-                orchestrator_instance.logger.error(f"[ADK] Failed to parse operation model JSON: {e}")
-                operation_model_data_for_scenario = None
-        elif isinstance(operation_model_raw_data, dict):
-            # Already a dict, use directly
-            operation_model_data_for_scenario = operation_model_raw_data
-        else:
-            orchestrator_instance.logger.error(f"[ADK] Operation Model data has unexpected type: {type(operation_model_raw_data)}")
-            operation_model_data_for_scenario = None
-    
-    # Additional validation: ensure operation_model_data_for_scenario is a valid dict with actors
-    if not operation_model_data_for_scenario:
-        orchestrator_instance.logger.error("[ADK] Operation Model Generator produced no valid data; cannot proceed to Scenario stage.")
+    # Validate that operation model raw text exists (no JSON parsing - treat as raw text)
+    if not operation_model_raw_data:
+        orchestrator_instance.logger.error("[ADK] Operation Model Generator produced no data; cannot proceed to Scenario stage.")
         orchestrator_instance.adk_monitor.stop_monitoring()
         return {"status": "FAIL", "stage": "operation_model", "results": orchestrator_instance.processed_results}
     
-    # Validate that operation model contains actors
-    if not isinstance(operation_model_data_for_scenario, dict):
-        orchestrator_instance.logger.error(f"[ADK] Operation Model data is not a dict after parsing (got {type(operation_model_data_for_scenario)}); cannot proceed to Scenario stage.")
+    # Ensure it's a string (raw text from LLM response)
+    if not isinstance(operation_model_raw_data, str):
+        # Convert to string if it's not already (e.g., if it's a dict from old format)
+        operation_model_raw_data = str(operation_model_raw_data)
+    
+    # Check that the raw text is not empty
+    if not operation_model_raw_data.strip():
+        orchestrator_instance.logger.error("[ADK] Operation Model data is empty; cannot proceed to Scenario stage.")
         orchestrator_instance.adk_monitor.stop_monitoring()
         return {"status": "FAIL", "stage": "operation_model", "results": orchestrator_instance.processed_results}
     
-    # Check if operation model has actors (support both wrapped and direct formats)
-    has_actors = False
-    if "actors" in operation_model_data_for_scenario:
-        actors = operation_model_data_for_scenario.get("actors")
-        if isinstance(actors, dict) and len(actors) > 0:
-            has_actors = True
-    elif "data" in operation_model_data_for_scenario:
-        data_node = operation_model_data_for_scenario.get("data")
-        if isinstance(data_node, dict) and "actors" in data_node:
-            actors = data_node.get("actors")
-            if isinstance(actors, dict) and len(actors) > 0:
-                has_actors = True
+    # Pass raw text directly to Scenario Generator (no JSON parsing, no markdown extraction)
+    # The Scenario Generator will use this raw text in <LUCIM-OPERATION-MODEL> tag
+    operation_model_data_for_scenario = operation_model_raw_data
     
-    if not has_actors:
-        orchestrator_instance.logger.error("[ADK] Operation Model does not contain valid actors; cannot proceed to Scenario stage.")
-        orchestrator_instance.adk_monitor.stop_monitoring()
-        return {"status": "FAIL", "stage": "operation_model", "results": orchestrator_instance.processed_results}
-    
-    # Count actors for logging (support both direct and wrapped formats)
-    actors_count = 0
-    if "actors" in operation_model_data_for_scenario:
-        actors = operation_model_data_for_scenario.get("actors")
-        if isinstance(actors, dict):
-            actors_count = len(actors)
-    elif "data" in operation_model_data_for_scenario:
-        data_node = operation_model_data_for_scenario.get("data")
-        if isinstance(data_node, dict) and "actors" in data_node:
-            actors = data_node.get("actors")
-            if isinstance(actors, dict):
-                actors_count = len(actors)
-    orchestrator_instance.logger.info(f"[ADK] Operation Model validated: {actors_count} actors found. Proceeding to Scenario stage.")
+    orchestrator_instance.logger.info(f"[ADK] Operation Model raw text validated ({len(operation_model_raw_data)} chars). Proceeding to Scenario stage.")
 
     # Step 2: Scenario (Generator → Auditor) with iterations
     scen_attempt = 0
@@ -578,25 +541,14 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         # Python deterministic audit (no-LLM)
         # Pass JSON raw content first (preferred), fallback to PlantUML text
         # The audit_scenario function will automatically detect JSON vs PlantUML text
-        # Pass operation model for rules requiring it (LSC5, LSC6, LSC12-LSC17)
+        # Pass operation model raw text for rules requiring it (LSC5, LSC6, LSC12-LSC17)
         # Validate operation model is available before calling audit
         if not operation_model_data_for_scenario:
             orchestrator_instance.logger.warning(f"[ADK] Scenario audit iteration {iter_index}: Operation model data is None or empty. Python audit may report false violations.")
         else:
-            # Log operation model validation info for debugging
-            actors_count = 0
-            if isinstance(operation_model_data_for_scenario, dict):
-                if "actors" in operation_model_data_for_scenario:
-                    actors = operation_model_data_for_scenario.get("actors")
-                    if isinstance(actors, dict):
-                        actors_count = len(actors)
-                elif "data" in operation_model_data_for_scenario:
-                    data_node = operation_model_data_for_scenario.get("data")
-                    if isinstance(data_node, dict) and "actors" in data_node:
-                        actors = data_node.get("actors")
-                        if isinstance(actors, dict):
-                            actors_count = len(actors)
-            orchestrator_instance.logger.debug(f"[ADK] Scenario audit iteration {iter_index}: Using operation model with {actors_count} actors for Python audit.")
+            # Log operation model info for debugging (raw text, no parsing)
+            text_length = len(operation_model_data_for_scenario) if isinstance(operation_model_data_for_scenario, str) else 0
+            orchestrator_instance.logger.debug(f"[ADK] Scenario audit iteration {iter_index}: Using operation model raw text ({text_length} chars) for Python audit.")
         
         py_scen_audit = py_audit_scenario(
             scen_raw_content if scen_raw_content else scen_text,

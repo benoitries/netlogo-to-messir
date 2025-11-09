@@ -34,7 +34,7 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
     persona_path: str = ""
     persona_text: str = ""
     lucim_rules_path: str = ""
-    lucim_rules_text: str = ""
+    rules_lucim_operation_model: str = ""
 
     def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
         super().__init__(
@@ -53,9 +53,9 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
             self.persona_text = ""
         try:
             self.lucim_rules_path = str(RULES_LUCIM_OPERATION_MODEL)
-            self.lucim_rules_text = pathlib.Path(self.lucim_rules_path).read_text(encoding="utf-8")
+            self.rules_lucim_operation_model = pathlib.Path(self.lucim_rules_path).read_text(encoding="utf-8")
         except Exception:
-            self.lucim_rules_text = ""
+            self.rules_lucim_operation_model = ""
 
     def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
         self.reasoning_effort = reasoning_effort
@@ -78,9 +78,9 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
             return
         self.lucim_rules_path = rules_path
         try:
-            self.lucim_rules_text = pathlib.Path(rules_path).read_text(encoding="utf-8")
+            self.rules_lucim_operation_model = pathlib.Path(rules_path).read_text(encoding="utf-8")
         except Exception:
-            self.lucim_rules_text = ""
+            self.rules_lucim_operation_model = ""
 
     def count_input_tokens(self, instructions: str, input_text: str) -> int:
         try:
@@ -130,38 +130,11 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
             raise last_err if last_err else RuntimeError("Failed to import utils_openai_client")
 
         create_and_wait, get_output_text, get_reasoning_summary, get_usage_tokens, format_prompt_for_responses_api = _import_utils_openai_client()
-        if not netlogo_source_code or netlogo_source_code.strip() == "":
-            return {
-                "reasoning_summary": "MISSING MANDATORY INPUT: NetLogo source code is required",
-                "data": None,
-                "errors": ["MANDATORY INPUT MISSING: NetLogo source code must be provided"],
-                "tokens_used": 0,
-                "input_tokens": 0,
-                "output_tokens": 0
-            }
-        if not netlogo_lucim_mapping or netlogo_lucim_mapping.strip() == "":
-            return {
-                "reasoning_summary": "MISSING MANDATORY INPUT: NetLogo to LUCIM mapping is required",
-                "data": None,
-                "errors": ["MANDATORY INPUT MISSING: NetLogo to LUCIM mapping must be provided"],
-                "tokens_used": 0,
-                "input_tokens": 0,
-                "output_tokens": 0
-            }
-        if not self.persona_text or self.persona_text.strip() == "":
-            return {
-                "reasoning_summary": "MISSING MANDATORY INPUT: Persona file is required",
-                "data": None,
-                "errors": ["MANDATORY INPUT MISSING: Persona PSN_LUCIM_Operation_Model_Generator.md must be provided"],
-                "tokens_used": 0,
-                "input_tokens": 0,
-                "output_tokens": 0
-            }
 
         instructions = (
             f"{self.persona_text}\n\n"
             f"{netlogo_lucim_mapping}\n\n"
-            f"{self.lucim_rules_text}\n\n"
+            f"{self.rules_lucim_operation_model}\n\n"
         )
         input_text = f"""
 
