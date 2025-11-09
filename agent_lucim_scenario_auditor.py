@@ -2,7 +2,7 @@
 from typing import Dict, Any
 import json
 from openai import OpenAI
-from utils_openai_client import create_and_wait, get_output_text, format_prompt_for_responses_api, get_openai_client_for_model, build_error_raw_payload, get_usage_tokens
+from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, format_prompt_for_responses_api, get_openai_client_for_model, build_error_raw_payload, get_usage_tokens
 from utils_config_constants import DEFAULT_MODEL, PERSONA_LUCIM_SCENARIO_AUDITOR, OUTPUT_DIR, RULES_LUCIM_SCENARIO
 from utils_response_dump import write_input_instructions_before_api, serialize_response_to_dict
 from utils_audit_core import extract_audit_core
@@ -76,6 +76,8 @@ def audit_scenario_text(
         # Serialize raw response for output-raw_response.json
         raw_response_serialized = serialize_response_to_dict(resp)
         content = get_output_text(resp) or ""
+        # Extract reasoning summary from response (same as Generator and other auditors)
+        reasoning_summary = get_reasoning_summary(resp)
         # Store raw LLM response text directly (no JSON parsing)
         # extract_audit_core will handle the raw text content
         core = extract_audit_core(content)
@@ -90,7 +92,7 @@ def audit_scenario_text(
         visible_output_tokens = max((total_output_tokens or 0) - (reasoning_tokens or 0), 0)
         
         return {
-            "reasoning_summary": "",  # Scenario auditor doesn't use reasoning summary
+            "reasoning_summary": reasoning_summary,
             "data": core["data"],
             "verdict": core["verdict"],
             "non-compliant-rules": core["non_compliant_rules"],
