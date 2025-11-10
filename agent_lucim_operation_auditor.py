@@ -2,7 +2,7 @@
 from typing import Dict, Any
 import json
 from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, format_prompt_for_responses_api, get_openai_client_for_model, build_error_raw_payload, get_usage_tokens
-from utils_config_constants import DEFAULT_MODEL, PERSONA_LUCIM_OPERATION_MODEL_AUDITOR, RULES_LUCIM_OPERATION_MODEL, OUTPUT_DIR, get_reasoning_config, AGENT_TIMEOUTS
+from utils_config_constants import DEFAULT_MODEL, PERSONA_LUCIM_OPERATION_MODEL_AUDITOR, RULES_LUCIM_OPERATION_MODEL, OUTPUT_DIR, get_reasoning_config, AGENT_TIMEOUTS, REVERSE_ENGINEERING_DRIVERS
 from utils_response_dump import write_input_instructions_before_api, serialize_response_to_dict
 from utils_audit_core import extract_audit_core
 
@@ -33,13 +33,17 @@ def audit_operation_model(
         rules_lucim_operation_model = RULES_LUCIM_OPERATION_MODEL.read_text(encoding="utf-8")
     except Exception:
         rules_lucim_operation_model = ""
+    try:
+        reverse_engineering_drivers_text = REVERSE_ENGINEERING_DRIVERS.read_text(encoding="utf-8")
+    except Exception:
+        reverse_engineering_drivers_text = ""
 
     # Pass raw content to LLM (may be JSON or other text)
     om_content = operation_model_raw_content or ""
     
-    # Build instructions matching generator: persona + mapping + rules
+    # Build instructions matching generator: persona + reverse engineering drivers + mapping + rules
     # Both netlogo_lucim_mapping and rules are mandatory (matching generator structure)
-    instructions = f"{persona_text}\n\n{netlogo_lucim_mapping}\n\n{rules_lucim_operation_model}"
+    instructions = f"{persona_text}\n\n{reverse_engineering_drivers_text}\n\n{netlogo_lucim_mapping}\n\n{rules_lucim_operation_model}"
     
     # Build input_text matching generator structure: NETLOGO-SOURCE-CODE + LUCIM-OPERATION-MODEL
     # Both blocks are mandatory (matching generator structure)

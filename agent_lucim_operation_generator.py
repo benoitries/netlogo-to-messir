@@ -16,7 +16,7 @@ from utils_response_dump import serialize_response_to_dict, write_input_instruct
 
 from utils_config_constants import (
     PERSONA_LUCIM_OPERATION_MODEL_GENERATOR, OUTPUT_DIR,
-    get_reasoning_config, DEFAULT_MODEL, RULES_LUCIM_OPERATION_MODEL)
+    get_reasoning_config, DEFAULT_MODEL, RULES_LUCIM_OPERATION_MODEL, REVERSE_ENGINEERING_DRIVERS)
 from utils_path import sanitize_agent_name
 
 
@@ -35,6 +35,8 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
     persona_text: str = ""
     lucim_rules_path: str = ""
     rules_lucim_operation_model: str = ""
+    reverse_engineering_drivers_path: str = ""
+    reverse_engineering_drivers_text: str = ""
 
     def __init__(self, model_name: str = DEFAULT_MODEL, external_timestamp: str = None):
         super().__init__(
@@ -56,6 +58,11 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
             self.rules_lucim_operation_model = pathlib.Path(self.lucim_rules_path).read_text(encoding="utf-8")
         except Exception:
             self.rules_lucim_operation_model = ""
+        try:
+            self.reverse_engineering_drivers_path = str(REVERSE_ENGINEERING_DRIVERS)
+            self.reverse_engineering_drivers_text = pathlib.Path(self.reverse_engineering_drivers_path).read_text(encoding="utf-8")
+        except Exception:
+            self.reverse_engineering_drivers_text = ""
 
     def update_reasoning_config(self, reasoning_effort: str, reasoning_summary: str):
         self.reasoning_effort = reasoning_effort
@@ -81,6 +88,15 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
             self.rules_lucim_operation_model = pathlib.Path(rules_path).read_text(encoding="utf-8")
         except Exception:
             self.rules_lucim_operation_model = ""
+
+    def update_reverse_engineering_drivers_path(self, drivers_path: str) -> None:
+        if not drivers_path:
+            return
+        self.reverse_engineering_drivers_path = drivers_path
+        try:
+            self.reverse_engineering_drivers_text = pathlib.Path(drivers_path).read_text(encoding="utf-8")
+        except Exception:
+            self.reverse_engineering_drivers_text = ""
 
     def count_input_tokens(self, instructions: str, input_text: str) -> int:
         try:
@@ -133,6 +149,7 @@ class LucimOperationModelGeneratorAgent(LlmAgent):
 
         instructions = (
             f"{self.persona_text}\n\n"
+            f"{self.reverse_engineering_drivers_text}\n\n"
             f"{netlogo_lucim_mapping}\n\n"
             f"{self.rules_lucim_operation_model}\n\n"
         )

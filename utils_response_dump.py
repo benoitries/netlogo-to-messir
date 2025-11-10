@@ -361,67 +361,103 @@ def write_all_output_files(
         data_value = results.get("data")
         errors_value = results.get("errors")
         
-        # Helper function to extract content from JSON string if it contains "data" or "errors"
-        # If the string is invalid JSON, returns None (caller will write the string as-is)
-        def extract_json_content(value, field_name):
-            """Extract field content from JSON string if present.
+        # Helper function to remove markdown code fences from text
+        def remove_markdown_fences(text: str) -> str:
+            """Remove markdown code fences (```json ... ``` or ``` ... ```) from text.
             
+            Args:
+                text: Text that may contain markdown code fences
+                
             Returns:
-                - The extracted field content if valid JSON with the field
-                - None if invalid JSON, not a dict, or field not present (caller writes value as-is)
+                Text with markdown fences removed
             """
-            if isinstance(value, str):
-                try:
-                    parsed_json = json.loads(value)
-                    if isinstance(parsed_json, dict) and field_name in parsed_json:
-                        return parsed_json[field_name]
-                except (json.JSONDecodeError, TypeError):
-                    # Invalid JSON string - return None so caller writes the string as-is
-                    pass
-            return None
+            if not isinstance(text, str):
+                return text
+            text = text.strip()
+            
+            # Handle ```json at start
+            if text.startswith("```json"):
+                text = text[7:].strip()
+            # Handle ``` at start (generic code fence)
+            elif text.startswith("```"):
+                text = text[3:].strip()
+            
+            # Handle closing fence: check lines first (most common case)
+            lines = text.split("\n")
+            if lines and lines[-1].strip() == "```":
+                # Remove the last line if it's just "```"
+                lines = lines[:-1]
+                text = "\n".join(lines)
+            
+            # Also check if text ends with "```" (in case it's on the same line)
+            text = text.rstrip()
+            if text.endswith("```"):
+                text = text[:-3].rstrip()
+            
+            return text.strip()
         
         # Priority 1: Extract "data" from data_value if it's a JSON string with "data" field
         # If "data" is not present but "errors" is, extract "errors" instead
         if data_value is not None:
-            extracted_data = extract_json_content(data_value, "data")
-            if extracted_data is not None:
-                # Found "data" field in JSON string, write only that content
-                data_file.write_text(json.dumps(extracted_data, indent=2, ensure_ascii=False), encoding="utf-8")
-                print(f"OK: {base_name} -> output-data.json (data extracted)")
+            # If data_value is a string, try to parse it as JSON first (handles fences)
+            if isinstance(data_value, str):
+                cleaned_data = remove_markdown_fences(data_value)
+                try:
+                    # Try to parse as JSON
+                    parsed_json = json.loads(cleaned_data)
+                    if isinstance(parsed_json, dict):
+                        # If it's a dict with "data" field, extract that
+                        if "data" in parsed_json:
+                            data_file.write_text(json.dumps(parsed_json["data"], indent=2, ensure_ascii=False), encoding="utf-8")
+                            print(f"OK: {base_name} -> output-data.json (data extracted from JSON)")
+                        # If it's a dict with "errors" field but no "data", extract errors
+                        elif "errors" in parsed_json:
+                            data_file.write_text(json.dumps(parsed_json["errors"], indent=2, ensure_ascii=False), encoding="utf-8")
+                            print(f"OK: {base_name} -> output-data.json (errors extracted from JSON)")
+                        else:
+                            # Dict without "data" or "errors" - write the whole dict
+                            data_file.write_text(json.dumps(parsed_json, indent=2, ensure_ascii=False), encoding="utf-8")
+                            print(f"OK: {base_name} -> output-data.json (JSON dict written)")
+                    else:
+                        # Parsed JSON is not a dict (list, etc.) - write as-is
+                        data_file.write_text(json.dumps(parsed_json, indent=2, ensure_ascii=False), encoding="utf-8")
+                        print(f"OK: {base_name} -> output-data.json (JSON written)")
+                except (json.JSONDecodeError, TypeError):
+                    # Invalid JSON - write cleaned string (fences already removed)
+                    data_file.write_text(cleaned_data, encoding="utf-8")
+                    print(f"OK: {base_name} -> output-data.json (cleaned string written)")
             else:
-                # "data" not found, check if "errors" is present in data_value
-                extracted_errors_from_data = extract_json_content(data_value, "errors")
-                if extracted_errors_from_data is not None:
-                    # Found "errors" field in JSON string (but no "data"), write only that content
-                    data_file.write_text(json.dumps(extracted_errors_from_data, indent=2, ensure_ascii=False), encoding="utf-8")
-                    print(f"OK: {base_name} -> output-data.json (errors extracted from data)")
-                elif isinstance(data_value, str):
-                    # String but not JSON with "data" or "errors" field, or invalid JSON - write as-is
-                    data_file.write_text(data_value, encoding="utf-8")
-                    print(f"OK: {base_name} -> output-data.json (data)")
-                else:
-                    # Non-string data, convert to JSON
-                    data_file.write_text(json.dumps(data_value, indent=2, ensure_ascii=False), encoding="utf-8")
-                    print(f"OK: {base_name} -> output-data.json (data)")
+                # Non-string data, convert to JSON
+                data_file.write_text(json.dumps(data_value, indent=2, ensure_ascii=False), encoding="utf-8")
+                print(f"OK: {base_name} -> output-data.json (data converted to JSON)")
         # Priority 2: Extract "errors" from errors_value if it's a JSON string with "errors" field
         elif errors_value is not None:
-            extracted_errors = extract_json_content(errors_value, "errors")
-            if extracted_errors is not None:
-                # Found "errors" field in JSON string, write only that content
-                data_file.write_text(json.dumps(extracted_errors, indent=2, ensure_ascii=False), encoding="utf-8")
-                print(f"OK: {base_name} -> output-data.json (errors extracted)")
-            elif isinstance(errors_value, str):
-                # String but not JSON with "errors" field, or invalid JSON - write as-is
-                data_file.write_text(errors_value, encoding="utf-8")
-                print(f"OK: {base_name} -> output-data.json (errors)")
+            # If errors_value is a string, try to parse it as JSON first (handles fences)
+            if isinstance(errors_value, str):
+                cleaned_errors = remove_markdown_fences(errors_value)
+                try:
+                    # Try to parse as JSON
+                    parsed_json = json.loads(cleaned_errors)
+                    if isinstance(parsed_json, dict) and "errors" in parsed_json:
+                        # Extract "errors" field
+                        data_file.write_text(json.dumps(parsed_json["errors"], indent=2, ensure_ascii=False), encoding="utf-8")
+                        print(f"OK: {base_name} -> output-data.json (errors extracted from JSON)")
+                    else:
+                        # Parsed JSON is not a dict with "errors" - write as-is
+                        data_file.write_text(json.dumps(parsed_json, indent=2, ensure_ascii=False), encoding="utf-8")
+                        print(f"OK: {base_name} -> output-data.json (JSON written)")
+                except (json.JSONDecodeError, TypeError):
+                    # Invalid JSON - write cleaned string (fences already removed)
+                    data_file.write_text(cleaned_errors, encoding="utf-8")
+                    print(f"OK: {base_name} -> output-data.json (cleaned string written)")
             elif isinstance(errors_value, list):
                 # List of errors, convert to JSON
                 data_file.write_text(json.dumps(errors_value, indent=2, ensure_ascii=False), encoding="utf-8")
-                print(f"OK: {base_name} -> output-data.json (errors)")
+                print(f"OK: {base_name} -> output-data.json (errors list converted to JSON)")
             else:
-                # Other error types, convert to string
-                data_file.write_text(str(errors_value), encoding="utf-8")
-                print(f"OK: {base_name} -> output-data.json (errors)")
+                # Other error types, convert to JSON
+                data_file.write_text(json.dumps(errors_value, indent=2, ensure_ascii=False), encoding="utf-8")
+                print(f"OK: {base_name} -> output-data.json (errors converted to JSON)")
         else:
             # Edge case: neither data nor errors provided
             print(f"WARNING: No data or errors to save for {base_name}, writing empty file")
