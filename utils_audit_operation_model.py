@@ -2,7 +2,19 @@
 Deterministic auditor for LUCIM Operation Model (Step 1) — no LLM.
 
 Input: operation model JSON (dict-like)
-Output: { "verdict": bool, "violations": [ { "id": str, "message": str, "location": str } ] }
+Output: {
+    "verdict": bool,
+    "violations": [ { "id": str, "message": str, "location": str, "extracted_values": dict } ],
+    "fix_suggestions": [ {
+        "rule": str,
+        "location": str,
+        "change_type": str,
+        "proposed_change": str,
+        "example_before": str,
+        "example_after": str,
+        "rationale": str
+    } ]
+}
 
 Minimal schema (tolerant):
 {
@@ -91,6 +103,112 @@ def _location(item: Any, fallback: str) -> str:
     if isinstance(item, dict):
         name = item.get("name") or item.get("id") or item.get("message")
     return name or fallback
+
+
+def _generate_fix_suggestion(violation: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Generate a fix suggestion based on a violation.
+    
+    Args:
+        violation: Violation dictionary with "id", "message", "location", and optionally "extracted_values"
+        
+    Returns:
+        Fix suggestion dictionary matching the persona schema
+    """
+    rule_id = violation.get("id", "")
+    location = violation.get("location", "")
+    message = violation.get("message", "")
+    extracted = violation.get("extracted_values", {})
+    
+    # Determine change_type based on rule ID
+    change_type = "other"
+    if "FORMAT" in rule_id:
+        change_type = "retype"
+    elif "DIRECTION" in rule_id:
+        change_type = "reverse_direction"
+    elif "LIMITATION" in rule_id or "CONDITIONS" in rule_id:
+        change_type = "add"
+    elif "JSON-BLOCK" in rule_id:
+        change_type = "delete"
+    
+    # Generate proposed_change based on rule
+    proposed_change = ""
+    example_before = ""
+    example_after = ""
+    rationale = message
+    
+    if rule_id == "LOM0-JSON-BLOCK-ONLY":
+        proposed_change = "Remove Markdown code fences and any text outside the JSON object"
+        example_before = "```json\n{...}\n```"
+        example_after = "{...}"
+        rationale = "Operation Model must be solely a JSON block without Markdown fences or surrounding text"
+    elif rule_id == "LOM1-ACT-TYPE-FORMAT":
+        type_name = extracted.get("type_name", "")
+        proposed_change = f"Rename actor type to FirstCapitalLetterFormat prefixed by 'Act' (e.g., 'Act{type_name.capitalize() if type_name else 'Example'}')"
+        example_before = type_name or "actorType"
+        example_after = f"Act{type_name.capitalize() if type_name else 'Example'}"
+        rationale = "Actor type names must be FirstCapitalLetterFormat and prefixed by 'Act'"
+    elif rule_id == "LOM2-IE-EVENT-NAME-FORMAT":
+        event_name = extracted.get("event_name", "")
+        proposed_change = f"Rename input event to camelCase format"
+        example_before = event_name or "EventName"
+        example_after = "eventName" if event_name else "inputEventName"
+        rationale = "Input event names must be in camelCase format"
+    elif rule_id == "LOM3-OE-EVENT-NAME-FORMAT":
+        event_name = extracted.get("event_name", "")
+        proposed_change = f"Rename output event to camelCase format"
+        example_before = event_name or "EventName"
+        example_after = "eventName" if event_name else "outputEventName"
+        rationale = "Output event names must be in camelCase format"
+    elif rule_id == "LOM4-IE-EVENT-DIRECTION":
+        source = extracted.get("source", "")
+        target = extracted.get("target", "")
+        proposed_change = "Set source to 'System' and target to the actor instance name"
+        example_before = f"source: '{source}', target: '{target}'"
+        example_after = "source: 'System', target: 'ActUser'"
+        rationale = "Input events must flow from System to Actor"
+    elif rule_id == "LOM5-OE-EVENT-DIRECTION":
+        source = extracted.get("source", "")
+        target = extracted.get("target", "")
+        proposed_change = "Set source to the actor instance name and target to 'System'"
+        example_before = f"source: '{source}', target: '{target}'"
+        example_after = "source: 'ActUser', target: 'System'"
+        rationale = "Output events must flow from Actor to System"
+    elif rule_id == "LOM6-CONDITIONS-DEFINITION":
+        proposed_change = "Add required 'postF' array or fix condition structure"
+        example_before = '{"name": "eventName"}'
+        example_after = '{"name": "eventName", "postF": [{"text": "condition", "severity": "must"}]}'
+        rationale = "Events must include a required 'postF' array with condition objects"
+    elif rule_id == "LOM7-CONDITIONS-VALIDATION":
+        proposed_change = "Ensure postF is a non-empty array; preF and preP must be arrays when provided"
+        example_before = '{"postF": null}'
+        example_after = '{"postF": [{"text": "condition", "severity": "must"}]}'
+        rationale = "postF must be present and non-empty; preF/preP must be arrays when provided"
+    elif rule_id == "LOM8-INPUT-EVENTS-LIMITATION":
+        actor_type = extracted.get("actor_type", "actor")
+        proposed_change = f"Add at least one input event to {actor_type}"
+        example_before = f'{{"type": "{actor_type}"}}'
+        example_after = f'{{"type": "{actor_type}", "input_events": {{"eventName": {{"postF": [...]}}}}}}'
+        rationale = "Each actor must have at least one input event"
+    elif rule_id == "LOM9-OUTPUT-EVENTS-LIMITATION":
+        actor_type = extracted.get("actor_type", "actor")
+        proposed_change = f"Add at least one output event to {actor_type}"
+        example_before = f'{{"type": "{actor_type}"}}'
+        example_after = f'{{"type": "{actor_type}", "output_events": {{"eventName": {{"postF": [...]}}}}}}'
+        rationale = "Each actor must have at least one output event"
+    else:
+        proposed_change = "Fix the violation according to the rule requirements"
+        rationale = message
+    
+    return {
+        "rule": rule_id,
+        "location": location,
+        "change_type": change_type,
+        "proposed_change": proposed_change,
+        "example_before": example_before,
+        "example_after": example_after,
+        "rationale": rationale
+    }
 
 
 def _check_lom0_json_block_only(raw_content: str) -> List[Dict[str, str]]:
@@ -211,9 +329,12 @@ def audit_operation_model(env: Dict[str, Any], raw_content: str | None = None) -
         raw_content: Optional raw content string for LOM0 validation (JSON block format check)
         
     Returns:
-        Dictionary with "verdict" (bool) and "violations" (list of violation dicts)
+        Dictionary with:
+        - "verdict" (bool): True if compliant, False if non-compliant
+        - "violations" (list): List of violation dicts with "id", "message", "location", "extracted_values"
+        - "fix_suggestions" (list): List of fix suggestion dicts matching persona schema
     """
-    violations: List[Dict[str, str]] = []
+    violations: List[Dict[str, Any]] = []
     
     # LOM0-JSON-BLOCK-ONLY: Check raw content format if provided
     if raw_content is not None:
@@ -633,7 +754,18 @@ def audit_operation_model(env: Dict[str, Any], raw_content: str | None = None) -
             })
 
     verdict = len(violations) == 0
-    return {"verdict": verdict, "violations": violations}
+    
+    # Generate fix suggestions for each violation
+    fix_suggestions: List[Dict[str, str]] = []
+    for violation in violations:
+        suggestion = _generate_fix_suggestion(violation)
+        fix_suggestions.append(suggestion)
+    
+    return {
+        "verdict": verdict,
+        "violations": violations,
+        "fix_suggestions": fix_suggestions
+    }
 
 
 def extract_event_conditions(env: Dict[str, Any]) -> Dict[str, Any]:

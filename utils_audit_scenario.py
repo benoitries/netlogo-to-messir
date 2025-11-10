@@ -26,6 +26,8 @@ Note: Rules LSC5, LSC6, LSC12-LSC17 require the operation_model parameter to be 
 JSON format validation:
 - Expected format: { "data": { "scenario": { "name": str, "description": str, "messages": [...] } }, "errors": [] }
 - Each message must have: source, target, event_type, event_name, parameters
+- Source/target format: "System" or "actorInstanceName:ActActorType" (e.g., "chris:ActEcologist", "actAdmin:ActAdministrator")
+- Event type format: "inputEvent" or "outputEvent" (also accepts "input_event" and "output_event" for backward compatibility)
 """
 from __future__ import annotations
 
@@ -37,15 +39,83 @@ from typing import Dict, List, Any, Optional, Union
 _MSG_RE = re.compile(r"^(?P<lhs>\S+)\s*(?P<arrow>--?>|-->>|-->)\s*(?P<rhs>\S+)\s*:\s*(?P<name>\w+)\s*\((?P<params>[^)]*)\)\s*$")
 
 
+def _parse_actor_identifier(identifier: str) -> tuple[str, str | None]:
+    """
+    Parse actor identifier in format "actorInstanceName:ActActorType" or "System".
+    
+    Args:
+        identifier: Actor identifier string (e.g., "System", "chris:ActEcologist", "actAdmin:ActAdministrator")
+    
+    Returns:
+        Tuple of (instance_name, actor_type):
+        - For "System": returns ("System", None)
+        - For "actorInstanceName:ActActorType": returns ("actorInstanceName", "ActActorType")
+        - For plain instance name: returns (instance_name, None)
+    """
+    if not identifier:
+        return ("", None)
+    
+    identifier = identifier.strip()
+    
+    # Check if it's System
+    if identifier == "System" or identifier == "system":
+        return ("System", None)
+    
+    # Check if it contains colon (format: "instanceName:ActActorType")
+    if ":" in identifier:
+        parts = identifier.split(":", 1)
+        instance_name = parts[0].strip()
+        actor_type = parts[1].strip() if len(parts) > 1 else None
+        return (instance_name, actor_type)
+    
+    # Plain instance name (no type specified)
+    return (identifier, None)
+
+
 def _is_system(token: str) -> bool:
-    t = token.strip()
-    return t == "system" or t == "System"
+    """
+    Check if token represents System.
+    Supports both "System" and "actorInstanceName:ActActorType|System" format.
+    """
+    instance_name, _ = _parse_actor_identifier(token)
+    return instance_name == "System" or instance_name == "system"
 
 
 def _is_actor_token(token: str) -> bool:
-    t = token.strip()
-    # Heuristic: not system
-    return not _is_system(t)
+    """
+    Check if token represents an actor (not System).
+    Supports both plain instance names and "actorInstanceName:ActActorType" format.
+    """
+    instance_name, _ = _parse_actor_identifier(token)
+    return instance_name and instance_name != "System" and instance_name != "system"
+
+
+def _extract_actor_instance_name(identifier: str) -> str:
+    """
+    Extract actor instance name from identifier.
+    
+    Args:
+        identifier: Actor identifier (e.g., "System", "chris:ActEcologist", "actAdmin")
+    
+    Returns:
+        Instance name (e.g., "System", "chris", "actAdmin")
+    """
+    instance_name, _ = _parse_actor_identifier(identifier)
+    return instance_name
+
+
+def _extract_actor_type(identifier: str) -> str | None:
+    """
+    Extract actor type from identifier if present.
+    
+    Args:
+        identifier: Actor identifier (e.g., "chris:ActEcologist", "System")
+    
+    Returns:
+        Actor type if present (e.g., "ActEcologist"), None otherwise
+    """
+    _, actor_type = _parse_actor_identifier(identifier)
+    return actor_type
 
 
 def _check_lsc0_json_block_only(raw_content: str) -> List[Dict[str, Any]]:
@@ -390,13 +460,23 @@ def _audit_scenario_json(
         event_type = msg.get("event_type", "")
         
         # Validate event_type
-        if event_type not in ["input_event", "output_event"]:
+        if event_type not in ["inputEvent", "outputEvent", "input_event", "output_event"]:
             violations.append({
                 "id": "JSON-FORMAT-ERROR",
-                "message": f"Message at index {msg_idx} has invalid event_type '{event_type}'. Must be 'input_event' or 'output_event'",
+                "message": f"Message at index {msg_idx} has invalid event_type '{event_type}'. Must be 'inputEvent', 'outputEvent', 'input_event', or 'output_event'",
                 "line": msg_idx + 1,
                 "extracted_values": {"message_index": msg_idx, "event_type": event_type}
             })
+        
+        # Normalize event_type (support both formats: inputEvent/input_event, outputEvent/output_event)
+        if event_type == "inputEvent":
+            event_type = "input_event"
+        elif event_type == "outputEvent":
+            event_type = "output_event"
+        
+        # Parse actor identifiers (support format: "actorInstanceName:ActActorType" or "System")
+        src_instance, src_type = _parse_actor_identifier(src)
+        tgt_instance, tgt_type = _parse_actor_identifier(tgt)
         
         # Apply validation rules
         lhs_is_system = _is_system(src)
@@ -438,9 +518,10 @@ def _audit_scenario_json(
                     "line": msg_idx + 1,
                     "extracted_values": {"message_index": msg_idx, "event_name": name, "event_type": event_type}
                 })
-            # Track input events per actor (LSC3)
+            # Track input events per actor (LSC3) - use instance name for tracking
             if rhs_is_actor:
-                actor_input_events[tgt] = actor_input_events.get(tgt, 0) + 1
+                actor_instance = _extract_actor_instance_name(tgt)
+                actor_input_events[actor_instance] = actor_input_events.get(actor_instance, 0) + 1
         
         # LSC10 — Output events must be Actor → System
         if event_type == "output_event" or name.startswith("oe"):
@@ -458,15 +539,18 @@ def _audit_scenario_json(
                     "line": msg_idx + 1,
                     "extracted_values": {"message_index": msg_idx, "event_name": name, "event_type": event_type}
                 })
-            # Track output events per actor (LSC4)
+            # Track output events per actor (LSC4) - use instance name for tracking
             if lhs_is_actor:
-                actor_output_events[src] = actor_output_events.get(src, 0) + 1
+                actor_instance = _extract_actor_instance_name(src)
+                actor_output_events[actor_instance] = actor_output_events.get(actor_instance, 0) + 1
         
-        # Collect actors for LSC2
+        # Collect actors for LSC2 - use instance names
         if lhs_is_actor:
-            actors_set.add(src)
+            actor_instance = _extract_actor_instance_name(src)
+            actors_set.add(actor_instance)
         if rhs_is_actor:
-            actors_set.add(tgt)
+            actor_instance = _extract_actor_instance_name(tgt)
+            actors_set.add(actor_instance)
     
     # LSC2 — At most five actors
     if len(actors_set) > 5:
@@ -521,6 +605,16 @@ def _audit_scenario_json(
             event_type = msg.get("event_type", "")
             params = msg.get("parameters", [])
             
+            # Normalize event_type (support both formats)
+            if event_type == "inputEvent":
+                event_type = "input_event"
+            elif event_type == "outputEvent":
+                event_type = "output_event"
+            
+            # Parse actor identifiers
+            src_instance, src_type_from_id = _parse_actor_identifier(src)
+            tgt_instance, tgt_type_from_id = _parse_actor_identifier(tgt)
+            
             lhs_is_system = _is_system(src)
             rhs_is_system = _is_system(tgt)
             lhs_is_actor = _is_actor_token(src)
@@ -528,31 +622,61 @@ def _audit_scenario_json(
             
             # LSC12 & LSC16 — Actor type and instance consistency
             if lhs_is_actor:
-                inferred_type = _infer_actor_type_from_instance(src, op_model_data)
-                if inferred_type:
-                    actor_instance_to_type[src] = inferred_type
-                    scenario_actor_types.add(inferred_type)
+                # If actor type is specified in identifier, use it; otherwise infer from instance name
+                actor_type = src_type_from_id
+                if not actor_type:
+                    actor_type = _infer_actor_type_from_instance(src_instance, op_model_data)
+                
+                if actor_type:
+                    actor_instance_to_type[src_instance] = actor_type
+                    scenario_actor_types.add(actor_type)
+                    
+                    # Validate that the specified type matches the inferred type
+                    if src_type_from_id:
+                        inferred_type = _infer_actor_type_from_instance(src_instance, op_model_data)
+                        if inferred_type and inferred_type != src_type_from_id:
+                            violations.append({
+                                "id": "LSC12-ACTOR-TYPE-NAME-CONSISTENCY",
+                                "message": f"Actor instance '{src_instance}' has type '{src_type_from_id}' in identifier but should be '{inferred_type}' based on Operation Model.",
+                                "line": msg_idx + 1,
+                                "extracted_values": {"message_index": msg_idx, "actor_instance": src_instance, "specified_type": src_type_from_id, "expected_type": inferred_type}
+                            })
                 else:
                     # LSC16 — Actor persistence: actor instance must correspond to a type in operation model
                     violations.append({
                         "id": "LSC16-ACTORS-PERSISTENCE",
-                        "message": f"Actor instance '{src}' does not correspond to any actor type defined in the Operation Model. Do not invent new actor types.",
+                        "message": f"Actor instance '{src_instance}' does not correspond to any actor type defined in the Operation Model. Do not invent new actor types.",
                         "line": msg_idx + 1,
-                        "extracted_values": {"message_index": msg_idx, "actor_instance": src}
+                        "extracted_values": {"message_index": msg_idx, "actor_instance": src_instance}
                     })
             
             if rhs_is_actor:
-                inferred_type = _infer_actor_type_from_instance(tgt, op_model_data)
-                if inferred_type:
-                    actor_instance_to_type[tgt] = inferred_type
-                    scenario_actor_types.add(inferred_type)
+                # If actor type is specified in identifier, use it; otherwise infer from instance name
+                actor_type = tgt_type_from_id
+                if not actor_type:
+                    actor_type = _infer_actor_type_from_instance(tgt_instance, op_model_data)
+                
+                if actor_type:
+                    actor_instance_to_type[tgt_instance] = actor_type
+                    scenario_actor_types.add(actor_type)
+                    
+                    # Validate that the specified type matches the inferred type
+                    if tgt_type_from_id:
+                        inferred_type = _infer_actor_type_from_instance(tgt_instance, op_model_data)
+                        if inferred_type and inferred_type != tgt_type_from_id:
+                            violations.append({
+                                "id": "LSC12-ACTOR-TYPE-NAME-CONSISTENCY",
+                                "message": f"Actor instance '{tgt_instance}' has type '{tgt_type_from_id}' in identifier but should be '{inferred_type}' based on Operation Model.",
+                                "line": msg_idx + 1,
+                                "extracted_values": {"message_index": msg_idx, "actor_instance": tgt_instance, "specified_type": tgt_type_from_id, "expected_type": inferred_type}
+                            })
                 else:
                     # LSC16 — Actor persistence
                     violations.append({
                         "id": "LSC16-ACTORS-PERSISTENCE",
-                        "message": f"Actor instance '{tgt}' does not correspond to any actor type defined in the Operation Model. Do not invent new actor types.",
+                        "message": f"Actor instance '{tgt_instance}' does not correspond to any actor type defined in the Operation Model. Do not invent new actor types.",
                         "line": msg_idx + 1,
-                        "extracted_values": {"message_index": msg_idx, "actor_instance": tgt}
+                        "extracted_values": {"message_index": msg_idx, "actor_instance": tgt_instance}
                     })
             
             # LSC14 & LSC15 — Event name consistency
@@ -649,25 +773,25 @@ def _audit_scenario_json(
                     })
             
             # LSC12 — Actor type name consistency
-            # This is validated implicitly through LSC16, but we add explicit check
-            if lhs_is_actor and src in actor_instance_to_type:
-                actor_type = actor_instance_to_type[src]
+            # This is validated implicitly through LSC16 and in the first pass above, but we add explicit check
+            if lhs_is_actor and src_instance in actor_instance_to_type:
+                actor_type = actor_instance_to_type[src_instance]
                 if actor_type not in op_model_data["actor_types"]:
                     violations.append({
                         "id": "LSC12-ACTOR-TYPE-NAME-CONSISTENCY",
-                        "message": f"Actor type '{actor_type}' (inferred from instance '{src}') must be strictly the same type name as defined in the Operation Model.",
+                        "message": f"Actor type '{actor_type}' (inferred from instance '{src_instance}') must be strictly the same type name as defined in the Operation Model.",
                         "line": msg_idx + 1,
-                        "extracted_values": {"message_index": msg_idx, "actor_instance": src, "actor_type": actor_type}
+                        "extracted_values": {"message_index": msg_idx, "actor_instance": src_instance, "actor_type": actor_type}
                     })
             
-            if rhs_is_actor and tgt in actor_instance_to_type:
-                actor_type = actor_instance_to_type[tgt]
+            if rhs_is_actor and tgt_instance in actor_instance_to_type:
+                actor_type = actor_instance_to_type[tgt_instance]
                 if actor_type not in op_model_data["actor_types"]:
                     violations.append({
                         "id": "LSC12-ACTOR-TYPE-NAME-CONSISTENCY",
-                        "message": f"Actor type '{actor_type}' (inferred from instance '{tgt}') must be strictly the same type name as defined in the Operation Model.",
+                        "message": f"Actor type '{actor_type}' (inferred from instance '{tgt_instance}') must be strictly the same type name as defined in the Operation Model.",
                         "line": msg_idx + 1,
-                        "extracted_values": {"message_index": msg_idx, "actor_instance": tgt, "actor_type": actor_type}
+                        "extracted_values": {"message_index": msg_idx, "actor_instance": tgt_instance, "actor_type": actor_type}
                     })
         
         # LSC5 — Event sequence validation (preF, preP, postF)

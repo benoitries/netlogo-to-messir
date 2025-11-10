@@ -2,7 +2,26 @@
 Deterministic auditor for LUCIM PlantUML Diagram rules (Step 3) — no LLM.
 
 Input: PlantUML textual diagram (.puml content string)
-Output: { "verdict": bool, "violations": [ { "id": str, "message": str, "line": int } ] }
+Output: {
+  "data": {
+    "verdict": "compliant|non-compliant",
+    "non-compliant-rules": [
+      {
+        "rule": "RULE_NUMBER_AND_NAME",
+        "line": "line_number",
+        "msg": "violation rationale with specific extract from the diagram"
+      }
+    ],
+    "fix_suggestions": [],
+    "coverage": {
+      "evaluated": [EVALUATED_RULE_ID_LIST],
+      "not_applicable": [NOT_APPLICABLE_RULE_ID_LIST],
+      "missing_evaluation": [MISSING_EVALUATION_RULE_ID_LIST],
+      "total_rules_in_dsl": "TOTAL_RULES_IN_DSL"
+    }
+  },
+  "errors": null
+}
 
 Rules implemented (complete coverage of all validation rules):
 
@@ -18,7 +37,7 @@ Textual Rules (fully implemented):
 - LDR8-ACTIVATION-BAR-NESTING-FORBIDDEN: activation bars must never be nested
 - LDR9-ACTIVATION-BAR-OVERLAPPING-FORBIDDEN: activation bars must never overlap
 - LDR10-ACTIVATION-BAR-ON-SYSTEM-FORBIDDEN: no activation bar on System lifeline
-- LDR17-ACTOR-DECLARATION-SYNTAX: actor declaration syntax validation
+- LDR17-ACTOR-DECLARATION-SYNTAX: actor declaration syntax validation (validates against scenario if provided)
 - LDR19-DIAGRAM-ALLOW-BLANK-LINES-AND-COMMENTS: blank lines and all comment types are ignored (//, ', note blocks, note syntax - respected throughout parsing)
 - LDR20-ACTIVATION-BAR-SEQUENCE: strict sequence: event → activate → deactivate
 - LDR23-EVENT-PARAMETER-COMMA-SEPARATED: parameters must be comma-separated
@@ -48,8 +67,47 @@ import json
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set
 
+# All LDR rules defined in RULES_LUCIM_PlantUML_Diagram.md (LDR0 through LDR28)
+ALL_LDR_RULES: Set[str] = {
+    "LDR0-PLANTUML-BLOCK-ONLY",
+    "LDR1-SYS-UNIQUE",
+    "LDR2-ACTOR-DECLARED-AFTER-SYSTEM",
+    "LDR3-SYSTEM-DECLARED-FIRST",
+    "LDR4-EVENT-DIRECTIONALITY",
+    "LDR5-SYSTEM-NO-SELF-LOOP",
+    "LDR6-ACTOR-NO-ACTOR-LOOP",
+    "LDR7-ACTIVATION-BAR-SEQUENCE",
+    "LDR8-ACTIVATION-BAR-NESTING-FORBIDDEN",
+    "LDR9-ACTIVATION-BAR-OVERLAPPING-FORBIDDEN",
+    "LDR10-ACTIVATION-BAR-ON-SYSTEM-FORBIDDEN",
+    "LDR11-SYSTEM-SHAPE",
+    "LDR12-SYSTEM-COLOR",
+    "LDR13-ACTOR-SHAPE",
+    "LDR14-ACTOR-COLOR",
+    "LDR15-ACTIVATION-BAR-INPUT-EVENT-COLOR",
+    "LDR16-ACTIVATION-BAR-OUTPUT-EVENT-COLOR",
+    "LDR17-ACTOR-DECLARATION-SYNTAX",
+    "LDR18-DIAGRAM-LUCIM-REPRESENTATION",
+    "LDR19-DIAGRAM-ALLOW-BLANK-LINES-AND-COMMENTS",
+    "LDR20-ACTIVATION-BAR-SEQUENCE",
+    "LDR21-EVENT-PARAMETER-TYPE",
+    "LDR22-EVENT-PARAMETER-FLEX-QUOTING",
+    "LDR23-EVENT-PARAMETER-COMMA-SEPARATED",
+    "LDR24-SYSTEM-DECLARATION",
+    "LDR25-INPUT-EVENT-SYNTAX",
+    "LDR26-OUTPUT-EVENT-SYNTAX",
+    "LDR27-ACTOR-INSTANCE-FORMAT",
+    "LDR28-ACTOR-INSTANCE-NAME-CONSISTENCY",
+}
+
+# Permissive rules that don't require validation (always satisfied)
+PERMISSIVE_RULES: Set[str] = {
+    "LDR18-DIAGRAM-LUCIM-REPRESENTATION",  # Implicitly satisfied by PlantUML sequence format
+    "LDR21-EVENT-PARAMETER-TYPE",  # Allows any parameter type (permissive)
+    "LDR22-EVENT-PARAMETER-FLEX-QUOTING",  # Allows flexible quoting (permissive)
+}
 
 _PARTICIPANT_RE = re.compile(r"^participant\s+\"?(?P<label>[^\"]+)\"?\s+as\s+(?P<alias>\w+)(\s+#[0-9A-Fa-f]{6})?\s*$")
 _SYSTEM_SIMPLE_RE = re.compile(r"^participant\s+System\s+as\s+system(\s+#[0-9A-Fa-f]{6})?\s*$")
@@ -326,6 +384,87 @@ def _validate_ldr11_ldr16_graphical_rules(svg_path: Path | str) -> List[Dict[str
     return violations
 
 
+def _extract_actor_types_and_instances_from_scenario(scenario: Dict[str, Any] | None) -> Dict[str, Any]:
+    """
+    Extract actor types and instance names from scenario data structure.
+    
+    Scenario format:
+    {
+      "data": {
+        "scenario": {
+          "messages": [
+            {
+              "source": "actorInstanceName:ActActorType|System",
+              "target": "actorInstanceName:ActActorType|System",
+              ...
+            }
+          ]
+        }
+      }
+    }
+    
+    Args:
+        scenario: Scenario dictionary
+        
+    Returns:
+        Dictionary with:
+        - "actor_types": set of actor type strings (e.g., {"ActMsrCreator", "ActEcologist"})
+        - "actor_instances": set of actor instance name strings (e.g., {"theCreator", "chris"})
+        - "actor_instance_to_type": dict mapping instance name to type (e.g., {"theCreator": "ActMsrCreator"})
+    """
+    result = {
+        "actor_types": set(),
+        "actor_instances": set(),
+        "actor_instance_to_type": {}
+    }
+    
+    if not scenario:
+        return result
+    
+    scenario_data = scenario.get("data", {})
+    if not isinstance(scenario_data, dict):
+        return result
+    
+    scenario_obj = scenario_data.get("scenario", {})
+    if not isinstance(scenario_obj, dict):
+        return result
+    
+    messages = scenario_obj.get("messages", [])
+    if not isinstance(messages, list):
+        return result
+    
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        
+        source = msg.get("source", "")
+        target = msg.get("target", "")
+        
+        # Parse source: "actorInstanceName:ActActorType" or "System"
+        if source and source != "System" and ":" in source:
+            parts = source.split(":", 1)
+            if len(parts) == 2:
+                instance_name = parts[0].strip()
+                actor_type = parts[1].strip()
+                if instance_name and actor_type:
+                    result["actor_types"].add(actor_type)
+                    result["actor_instances"].add(instance_name)
+                    result["actor_instance_to_type"][instance_name] = actor_type
+        
+        # Parse target: "actorInstanceName:ActActorType" or "System"
+        if target and target != "System" and ":" in target:
+            parts = target.split(":", 1)
+            if len(parts) == 2:
+                instance_name = parts[0].strip()
+                actor_type = parts[1].strip()
+                if instance_name and actor_type:
+                    result["actor_types"].add(actor_type)
+                    result["actor_instances"].add(instance_name)
+                    result["actor_instance_to_type"][instance_name] = actor_type
+    
+    return result
+
+
 def _validate_ldr28_actor_instance_consistency(
     plantuml_text: str,
     operation_model: Dict[str, Any] | None = None,
@@ -349,12 +488,7 @@ def _validate_ldr28_actor_instance_consistency(
     """
     violations: List[Dict[str, Any]] = []
     
-    # LDR28 requires BOTH operation_model AND scenario
-    if not operation_model or not scenario:
-        # Missing required data, skip validation
-        return violations
-    
-    # Extract actor instances from PlantUML
+    # Extract actor instances from PlantUML first (needed to check if scenario is required)
     lines = plantuml_text.splitlines()
     actor_instances: Dict[str, Dict[str, str]] = {}  # alias -> {"type": actor_type, "name": actor_name, "line": line_number}
     
@@ -381,6 +515,42 @@ def _validate_ldr28_actor_instance_consistency(
                     "line": idx
                 }
     
+    # LDR28 requires BOTH operation_model AND scenario
+    # If scenario is missing and there are actors, mark as non-compliant
+    if not scenario:
+        if actor_instances:
+            # Scenario is required for LDR28, but it's missing
+            for alias, actor_data in actor_instances.items():
+                violations.append({
+                    "id": "LDR28-ACTOR-INSTANCE-NAME-CONSISTENCY",
+                    "message": f"LUCIM Scenario is required for LDR28 validation. Actor instance '{alias}' (name: '{actor_data['name']}', type: '{actor_data['type']}') must be consistent with actor type names defined in the Operation Model and Scenario, but the scenario is not provided.",
+                    "line": actor_data["line"],
+                    "extracted_values": {
+                        "actor_instance": alias,
+                        "actor_instance_name": actor_data["name"],
+                        "actor_type": actor_data["type"],
+                        "source": "Scenario Missing"
+                    }
+                })
+        return violations
+    
+    # If operation_model is missing but scenario is present, also mark as non-compliant
+    if not operation_model:
+        if actor_instances:
+            for alias, actor_data in actor_instances.items():
+                violations.append({
+                    "id": "LDR28-ACTOR-INSTANCE-NAME-CONSISTENCY",
+                    "message": f"LUCIM Operation Model is required for LDR28 validation. Actor instance '{alias}' (name: '{actor_data['name']}', type: '{actor_data['type']}') must be consistent with actor type names defined in the Operation Model and Scenario, but the operation model is not provided.",
+                    "line": actor_data["line"],
+                    "extracted_values": {
+                        "actor_instance": alias,
+                        "actor_instance_name": actor_data["name"],
+                        "actor_type": actor_data["type"],
+                        "source": "Operation Model Missing"
+                    }
+                })
+        return violations
+    
     # Build expected actor types and instance names from Operation Model
     expected_types_from_om: set[str] = set()
     expected_instances_from_om: Dict[str, str] = {}  # type -> instance_name (if specified)
@@ -406,23 +576,9 @@ def _validate_ldr28_actor_instance_consistency(
                         if instance_name:
                             expected_instances_from_om[actor_type] = instance_name
     
-    # Build expected actor types from Scenario
-    expected_types_from_scenario: set[str] = set()
-    if scenario:
-        # Scenario format can vary, try to extract actor types
-        scenario_data = scenario.get("data", {})
-        if isinstance(scenario_data, dict):
-            scenario_obj = scenario_data.get("scenario", {})
-            if isinstance(scenario_obj, dict):
-                messages = scenario_obj.get("messages", [])
-                for msg in messages:
-                    if isinstance(msg, dict):
-                        # Try to extract actor type from source or target
-                        source = msg.get("source", "")
-                        target = msg.get("target", "")
-                        # Actor types might be embedded in the message structure
-                        # This is a simplified extraction; may need refinement based on actual scenario format
-                        pass
+    # Build expected actor types from Scenario using helper function
+    scenario_actor_data = _extract_actor_types_and_instances_from_scenario(scenario)
+    expected_types_from_scenario = scenario_actor_data.get("actor_types", set())
     
     # Validate each actor instance against both Operation Model and Scenario
     # LDR28 requires consistency with type definitions from both sources
@@ -495,10 +651,22 @@ def _validate_ldr28_actor_instance_consistency(
             })
         
         # Check 4: Against Scenario (required)
-        # Note: Scenario validation extracts actor types from messages
-        # For now, we validate against Operation Model as the primary source
-        # Scenario validation can be enhanced when scenario format is finalized
-        if expected_types_from_scenario and actor_type not in expected_types_from_scenario:
+        # Scenario is required for LDR28 - validate even if empty
+        if not expected_types_from_scenario:
+            # Scenario is present but contains no actor types
+            violations.append({
+                "id": "LDR28-ACTOR-INSTANCE-NAME-CONSISTENCY",
+                "message": f"Actor instance '{alias}' (name: '{actor_name}') has type '{actor_type}' which is not consistent with the Scenario. The scenario is provided but contains no actor types. Actor instance names must be consistent with their type definition.",
+                "line": line_num,
+                "extracted_values": {
+                    "actor_instance": alias,
+                    "actor_instance_name": actor_name,
+                    "actor_type": actor_type,
+                    "expected_types_from_scenario": [],
+                    "source": "Scenario Empty"
+                }
+            })
+        elif actor_type not in expected_types_from_scenario:
             violations.append({
                 "id": "LDR28-ACTOR-INSTANCE-NAME-CONSISTENCY",
                 "message": f"Actor instance '{alias}' (name: '{actor_name}') has type '{actor_type}' which is not consistent with the Scenario. Actor instance names must be consistent with their type definition.",
@@ -708,19 +876,31 @@ def audit_diagram(
                  If not provided or file does not exist, all graphical rules are marked as violations.
         operation_model: Operation Model dictionary (required for LDR28 validation, must be provided together with scenario).
                          Actor instance names must be consistent with their type definition.
-        scenario: Scenario dictionary (required for LDR28 validation, must be provided together with operation_model).
-                   Actor instance names must be consistent with their type definition.
+        scenario: Scenario dictionary (required for LDR17 and LDR28 validation).
+                   For LDR17: ActActorType and actorInstanceName must be valid as defined in the <LUCIM-SCENARIO>.
+                   For LDR28: Actor instance names must be consistent with their type definition (must be provided together with operation_model).
         
     Returns:
-        Dictionary with "verdict" (bool) and "violations" (list of violation dicts)
+        Dictionary with format:
+        {
+          "data": {
+            "verdict": "compliant|non-compliant",
+            "non-compliant-rules": [...],
+            "fix_suggestions": [],
+            "coverage": {...}
+          },
+          "errors": null
+        }
     """
     violations: List[Dict[str, Any]] = []
+    evaluated_rules: Set[str] = set()  # Track which rules were evaluated
     
     # LDR0-PLANTUML-BLOCK-ONLY: Check raw content format if provided
     # This validates that the raw content is a valid PlantUML block (no extra text)
     if raw_content is not None:
         ldr0_violations = _check_ldr0_plantuml_block_only(raw_content)
         violations.extend(ldr0_violations)
+        evaluated_rules.add("LDR0-PLANTUML-BLOCK-ONLY")
 
     # Extract PlantUML from text or raw_content
     # First, try to parse as JSON and extract from new format
@@ -786,6 +966,35 @@ def audit_diagram(
     participants_order: List[str] = []  # aliases encountered order
     has_system_decl = False
     system_decl_line = -1
+    
+    # Extract actor types and instances from scenario for LDR17 validation
+    scenario_actor_data = _extract_actor_types_and_instances_from_scenario(scenario)
+    scenario_actor_types = scenario_actor_data.get("actor_types", set())
+    scenario_actor_instances = scenario_actor_data.get("actor_instances", set())
+    scenario_instance_to_type = scenario_actor_data.get("actor_instance_to_type", {})
+    
+    # Mark rules that are always checked when we have PlantUML content
+    if plantuml_text:
+        evaluated_rules.update([
+            "LDR1-SYS-UNIQUE",
+            "LDR2-ACTOR-DECLARED-AFTER-SYSTEM",
+            "LDR3-SYSTEM-DECLARED-FIRST",
+            "LDR4-EVENT-DIRECTIONALITY",
+            "LDR5-SYSTEM-NO-SELF-LOOP",
+            "LDR6-ACTOR-NO-ACTOR-LOOP",
+            "LDR7-ACTIVATION-BAR-SEQUENCE",
+            "LDR8-ACTIVATION-BAR-NESTING-FORBIDDEN",
+            "LDR9-ACTIVATION-BAR-OVERLAPPING-FORBIDDEN",
+            "LDR10-ACTIVATION-BAR-ON-SYSTEM-FORBIDDEN",
+            "LDR17-ACTOR-DECLARATION-SYNTAX",
+            "LDR19-DIAGRAM-ALLOW-BLANK-LINES-AND-COMMENTS",  # Always respected in parsing
+            "LDR20-ACTIVATION-BAR-SEQUENCE",
+            "LDR23-EVENT-PARAMETER-COMMA-SEPARATED",
+            "LDR24-SYSTEM-DECLARATION",
+            "LDR25-INPUT-EVENT-SYNTAX",
+            "LDR26-OUTPUT-EVENT-SYNTAX",
+            "LDR27-ACTOR-INSTANCE-FORMAT",
+        ])
 
     for idx, raw in enumerate(lines, start=1):
         line = raw.strip()
@@ -829,6 +1038,8 @@ def audit_diagram(
             # LDR17 — actor declaration strict syntax
             # Expect label formatted as "actorName:ActActorType" and alias == actorName
             # Also prefer quoted label per examples
+            # Per updated rule: ActActorType must be a valid actor type as defined in the <LUCIM-SCENARIO>,
+            # and actorInstanceName must be a valid actor instance name as defined in the <LUCIM-SCENARIO>.
             if ":" not in label:
                 violations.append({
                     "id": "LDR17-ACTOR-DECLARATION-SYNTAX",
@@ -854,6 +1065,96 @@ def audit_diagram(
                         "line": idx,
                         "extracted_values": {"line_content": raw.rstrip(), "actor_type": actor_type}
                     })
+                
+                # LDR17 updated: Validate against scenario
+                # ActActorType must be a valid actor type as defined in the <LUCIM-SCENARIO>
+                # If scenario is not present, this rule is non-compliant
+                if not scenario:
+                    violations.append({
+                        "id": "LDR17-ACTOR-DECLARATION-SYNTAX",
+                        "message": f"LUCIM Scenario is required for LDR17 validation. ActActorType '{actor_type}' and actorInstanceName '{actor_name}' must be valid as defined in the <LUCIM-SCENARIO>, but the scenario is not provided.",
+                        "line": idx,
+                        "extracted_values": {
+                            "line_content": raw.rstrip(),
+                            "actor_type": actor_type,
+                            "actor_instance_name": actor_name,
+                            "source": "Scenario Missing"
+                        }
+                    })
+                else:
+                    # Scenario is present - always validate (even if empty, it should be a violation)
+                    if not scenario_actor_types:
+                        # Scenario is present but contains no actor types
+                        violations.append({
+                            "id": "LDR17-ACTOR-DECLARATION-SYNTAX",
+                            "message": f"Actor type '{actor_type}' is not defined in the LUCIM Scenario. The scenario is provided but contains no actor types. ActActorType must be a valid actor type as defined in the <LUCIM-SCENARIO>.",
+                            "line": idx,
+                            "extracted_values": {
+                                "line_content": raw.rstrip(),
+                                "actor_type": actor_type,
+                                "expected_actor_types": [],
+                                "source": "Scenario Empty"
+                            }
+                        })
+                    elif actor_type not in scenario_actor_types:
+                        violations.append({
+                            "id": "LDR17-ACTOR-DECLARATION-SYNTAX",
+                            "message": f"Actor type '{actor_type}' is not defined in the LUCIM Scenario. ActActorType must be a valid actor type as defined in the <LUCIM-SCENARIO>.",
+                            "line": idx,
+                            "extracted_values": {
+                                "line_content": raw.rstrip(),
+                                "actor_type": actor_type,
+                                "expected_actor_types": list(scenario_actor_types),
+                                "source": "Scenario"
+                            }
+                        })
+                
+                # LDR17 updated: actorInstanceName must be a valid actor instance name as defined in the <LUCIM-SCENARIO>
+                if not scenario:
+                    # Already handled above, skip
+                    pass
+                elif not scenario_actor_instances:
+                    # Scenario is present but contains no actor instances
+                    violations.append({
+                        "id": "LDR17-ACTOR-DECLARATION-SYNTAX",
+                        "message": f"Actor instance name '{actor_name}' is not defined in the LUCIM Scenario. The scenario is provided but contains no actor instances. actorInstanceName must be a valid actor instance name as defined in the <LUCIM-SCENARIO>.",
+                        "line": idx,
+                        "extracted_values": {
+                            "line_content": raw.rstrip(),
+                            "actor_instance_name": actor_name,
+                            "expected_actor_instances": [],
+                            "source": "Scenario Empty"
+                        }
+                    })
+                elif actor_name not in scenario_actor_instances:
+                    violations.append({
+                        "id": "LDR17-ACTOR-DECLARATION-SYNTAX",
+                        "message": f"Actor instance name '{actor_name}' is not defined in the LUCIM Scenario. actorInstanceName must be a valid actor instance name as defined in the <LUCIM-SCENARIO>.",
+                        "line": idx,
+                        "extracted_values": {
+                            "line_content": raw.rstrip(),
+                            "actor_instance_name": actor_name,
+                            "expected_actor_instances": list(scenario_actor_instances),
+                            "source": "Scenario"
+                        }
+                    })
+                elif actor_name in scenario_instance_to_type:
+                    # Also validate that the instance name matches the expected type for that instance
+                    expected_type_for_instance = scenario_instance_to_type[actor_name]
+                    if actor_type != expected_type_for_instance:
+                        violations.append({
+                            "id": "LDR17-ACTOR-DECLARATION-SYNTAX",
+                            "message": f"Actor instance name '{actor_name}' is associated with type '{expected_type_for_instance}' in the LUCIM Scenario, but the diagram declares it as '{actor_type}'. Actor instance names must be consistent with their type definition in the <LUCIM-SCENARIO>.",
+                            "line": idx,
+                            "extracted_values": {
+                                "line_content": raw.rstrip(),
+                                "actor_instance_name": actor_name,
+                                "actor_type": actor_type,
+                                "expected_type_for_instance": expected_type_for_instance,
+                                "source": "Scenario"
+                            }
+                        })
+            
             # Prefer quoted label — if not quoted in original line, flag (soft) LDR17
             # Heuristic: there should be a quoted segment before " as "
             if ' as ' in line and '"' not in line.split(' as ')[0]:
@@ -1282,15 +1583,26 @@ def audit_diagram(
                     })
 
     # LDR28: Actor instance name consistency (requires BOTH operation_model AND scenario)
-    if operation_model is not None and scenario is not None:
+    # Always evaluate LDR28 - the function will handle missing scenario/operation_model by returning violations
+    if plantuml_text:
         ldr28_violations = _validate_ldr28_actor_instance_consistency(
             plantuml_text,
             operation_model,
             scenario
         )
         violations.extend(ldr28_violations)
+        evaluated_rules.add("LDR28-ACTOR-INSTANCE-NAME-CONSISTENCY")
 
     # Graphical rules validation (LDR11-LDR16)
+    graphical_rule_ids = {
+        "LDR11-SYSTEM-SHAPE",
+        "LDR12-SYSTEM-COLOR",
+        "LDR13-ACTOR-SHAPE",
+        "LDR14-ACTOR-COLOR",
+        "LDR15-ACTIVATION-BAR-INPUT-EVENT-COLOR",
+        "LDR16-ACTIVATION-BAR-OUTPUT-EVENT-COLOR",
+    }
+    
     if svg_path is not None:
         # Convert Path to string if needed
         svg_file_path = str(svg_path) if isinstance(svg_path, Path) else svg_path
@@ -1300,17 +1612,73 @@ def audit_diagram(
             # Validate graphical rules using SVG
             graphical_violations = _validate_graphical_rules(svg_file_path, plantuml_text)
             violations.extend(graphical_violations)
+            # Track which graphical rules were evaluated (based on violations found)
+            for v in graphical_violations:
+                rule_id = v.get("id", "")
+                if rule_id in graphical_rule_ids:
+                    evaluated_rules.add(rule_id)
+            # Also mark all graphical rules as evaluated if SVG exists
+            evaluated_rules.update(graphical_rule_ids)
         else:
             # SVG path provided but file doesn't exist - treat as missing
             missing_svg_violations = _generate_missing_svg_violations()
             violations.extend(missing_svg_violations)
+            # Mark graphical rules as evaluated (we checked, but SVG was missing)
+            evaluated_rules.update(graphical_rule_ids)
     else:
         # No SVG path provided - all graphical rules are violations
         missing_svg_violations = _generate_missing_svg_violations()
         violations.extend(missing_svg_violations)
+        # Mark graphical rules as evaluated (we checked, but SVG was not provided)
+        evaluated_rules.update(graphical_rule_ids)
 
-    verdict = len(violations) == 0
-    return {"verdict": verdict, "violations": violations}
+    # Convert violations to new format: {"rule": "...", "line": "...", "msg": "..."}
+    non_compliant_rules = []
+    for v in violations:
+        rule_id = v.get("id", "UNKNOWN")
+        line_num = v.get("line", 0)
+        message = v.get("message", "")
+        
+        # Track rule as evaluated if it's a valid rule ID
+        if rule_id in ALL_LDR_RULES:
+            evaluated_rules.add(rule_id)
+        
+        non_compliant_rules.append({
+            "rule": rule_id,
+            "line": str(line_num) if line_num > 0 else "0",
+            "msg": message
+        })
+    
+    # Build coverage information
+    # Permissive rules are always satisfied (not_applicable means we don't need to check them)
+    not_applicable_rules = PERMISSIVE_RULES.copy()
+    
+    # Rules that were evaluated
+    evaluated_list = sorted(list(evaluated_rules))
+    
+    # Rules that were not evaluated (missing_evaluation)
+    missing_evaluation = sorted(list(ALL_LDR_RULES - evaluated_rules - not_applicable_rules))
+    
+    # Total rules in DSL
+    total_rules = len(ALL_LDR_RULES)
+    
+    # Determine verdict
+    verdict_str = "compliant" if len(non_compliant_rules) == 0 else "non-compliant"
+    
+    return {
+        "data": {
+            "verdict": verdict_str,
+            "non-compliant-rules": non_compliant_rules,
+            "fix_suggestions": [],  # Deterministic auditor doesn't provide fix suggestions
+            "coverage": {
+                "evaluated": evaluated_list,
+                "not_applicable": sorted(list(not_applicable_rules)),
+                "missing_evaluation": missing_evaluation,
+                "total_rules_in_dsl": str(total_rules)
+            }
+        },
+        "errors": None
+    }
 
 
 if __name__ == "__main__":
