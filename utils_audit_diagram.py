@@ -783,12 +783,19 @@ def _validate_graphical_rules(svg_file_path: str, plantuml_text: str) -> List[Di
     bars = _find_activation_bars(rects, participants)
     msg_texts = _index_message_labels(texts)
     
+    # Extract message label contents for fast exclusion lookup
+    # Message labels contain colons in their parameters but are not participants
+    message_label_contents = {t.content.strip() for t in msg_texts}
+    
     # LDR11/LDR13: participant headers must be rectangles
     for t in texts:
         label = t.content.strip()
         if not label:
             continue
         if label in participants:
+            continue
+        # Skip message labels (they contain colons in parameters but are not participants)
+        if label in message_label_contents:
             continue
         # Only enforce for labels that look like participant identifiers
         if label == "System" or ":" in label:
