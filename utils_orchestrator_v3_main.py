@@ -27,7 +27,7 @@ async def main():
     
     ui = OrchestratorUI()
     # Note: API key validation will be done per-model after selection
-    # to support different providers (OpenAI, Gemini, OpenRouter)
+    # to support different providers (OpenAI, OpenRouter - includes Gemini, Mistral, Llama)
     
     base_names = ui.get_available_base_names()
     if not base_names:
@@ -45,10 +45,9 @@ async def main():
             print("   Please ensure the appropriate API key is set in your .env file:")
             from utils_api_key import get_provider_for_model
             provider = get_provider_for_model(model)
-            if provider == "gemini":
-                print("   GEMINI_API_KEY=your-gemini-api-key")
-            elif provider == "router":
+            if provider == "router":
                 print("   OPENROUTER_API_KEY=your-openrouter-api-key")
+                print("   (Note: Gemini models now use OpenRouter API key)")
             else:
                 print("   OPENAI_API_KEY=your-openai-api-key")
             return

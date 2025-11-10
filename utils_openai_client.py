@@ -514,41 +514,30 @@ class GeminiResponseWrapper:
         
         self.usage = Usage()
 
-def get_openai_client_for_model(model_name: str) -> Union[OpenAI, GeminiClientWrapper]:
+def get_openai_client_for_model(model_name: str) -> OpenAI:
     """Get a configured client for a specific model with automatic provider detection.
     
-    This function automatically detects the provider (OpenAI, Gemini, OpenRouter) based on the model name
+    This function automatically detects the provider (OpenAI, OpenRouter) based on the model name
     and configures the client accordingly with the correct API key and base URL.
     
-    For OpenRouter models, it also sets up the required headers (HTTP-Referer and X-Title).
+    For OpenRouter models (including Gemini, Mistral, Llama, etc.), it also sets up the required headers (HTTP-Referer and X-Title).
     
     Args:
         model_name: The model name (e.g., "gpt-5-mini-2025-08-07", "gemini-2.5-flash", "mistral-reasoning-latest")
     
     Returns:
-        Union[OpenAI, GeminiClientWrapper]: Configured client with appropriate API key and base URL
+        OpenAI: Configured client with appropriate API key and base URL
         - OpenAI client for OpenAI models
-        - GeminiClientWrapper for Gemini models
-        - OpenAI client with OpenRouter base_url and headers for OpenRouter models
+        - OpenAI client with OpenRouter base_url and headers for OpenRouter models (Gemini, Mistral, Llama, etc.)
         
     Raises:
         ValueError: If API key is not found or invalid
-        ImportError: If Gemini SDK is not available when using Gemini models
     """
     provider = get_provider_for_model(model_name)
     api_key = get_api_key_for_model(model_name)
     
-    # For Gemini models, use Gemini client wrapper
-    if provider == "gemini":
-        if not GEMINI_AVAILABLE:
-            raise ImportError(
-                "google-genai package is required for Gemini models. "
-                "Install with: pip install google-genai"
-            )
-        return GeminiClientWrapper(api_key=api_key, model_name=model_name)
-    
-    # For OpenRouter models (Mistral, Llama, etc.), use OpenRouter's base URL and headers
-    elif provider == "router":
+    # For OpenRouter models (Gemini, Mistral, Llama, etc.), use OpenRouter's base URL and headers
+    if provider == "router":
         # OpenRouter requires HTTP-Referer and X-Title headers
         # Note: We'll pass these headers in each API call via extra_headers parameter
         # Create client with OpenRouter base URL
@@ -606,10 +595,10 @@ def normalize_openrouter_model_name(model_name: str) -> str:
     
     Args:
         model_name: Original model name (e.g., "openrouter/mistralai/mistral-small-latest", 
-                   "mistralai/mistral-small-latest", or "mistral-medium")
+                   "mistralai/mistral-small-latest", "mistral-medium", or "gemini-2.5-flash")
         
     Returns:
-        Normalized model name without 'openrouter/' prefix (e.g., "mistralai/mistral-medium")
+        Normalized model name without 'openrouter/' prefix (e.g., "mistralai/mistral-medium" or "google/gemini-2.5-flash")
     """
     if not model_name:
         return model_name
@@ -627,6 +616,9 @@ def normalize_openrouter_model_name(model_name: str) -> str:
         "mistral-medium-3.1": "mistralai/mistral-medium",
         # Llama
         "llama-3.3-70b-instruct": "meta-llama/llama-3.3-70b-instruct",
+        # Gemini (routed through OpenRouter)
+        "gemini-2.5-flash": "google/gemini-2.5-flash",
+        "gemini-2.5-pro": "google/gemini-2.5-pro",
     }
     
     # If the model name is in our simplified format, map it to the full OpenRouter format
@@ -642,17 +634,16 @@ def normalize_openrouter_model_name(model_name: str) -> str:
 
 
 def create_and_wait(
-    client: Union["OpenAI", "GeminiClientWrapper"],
+    client: "OpenAI",
     api_config: Dict[str, Any],
     poll_interval_seconds: float = 1.0,
     timeout_seconds: Optional[float] = None,
 ) -> Any:
-    """Create a model response using SDKs for OpenAI/Gemini and OpenRouter for others.
+    """Create a model response using SDKs for OpenAI and OpenRouter for others.
 
     Routing policy:
     - OpenAI models (gpt-*, gpt-5*): OpenAI Responses API (SDK)
-    - Gemini models (gemini-*): Google Gemini SDK wrapper
-    - All others (e.g., OpenRouter/Mistral/Llama): OpenRouter via LiteLLM
+    - All others (e.g., Gemini, Mistral, Llama): OpenRouter via LiteLLM
     """
     # Build messages from api_config (instructions + first input content)
     model_name = (api_config.get("model") or "").strip()
@@ -700,26 +691,7 @@ def create_and_wait(
             raise RuntimeError(f"OpenAI response ended with status: {getattr(response, 'status', None)}")
         return response
 
-    # 2) Gemini → Gemini SDK wrapper
-    if provider == "gemini":
-        # Validate model/provider consistency to avoid leaking OpenAI model names to Gemini
-        if not isinstance(model_name, str) or "gemini" not in model_name.lower():
-            raise ValueError(
-                f"Model/provider mismatch: provider='gemini' but model='{model_name}'. "
-                f"Please use a Gemini model name (e.g., 'gemini-2.5-flash')."
-            )
-        # Build Gemini wrapper on the fly using API key for Gemini
-        api_key = get_api_key_for_model(model_name)
-        gemini_client = GeminiClientWrapper(api_key=api_key, model_name=model_name)
-        # Ensure model is not overridden downstream by reasoning configs
-        api_config = dict(api_config)
-        api_config["model"] = model_name
-        # Log payload (same structure as Responses API for consistency)
-        _log_responses_api_params(api_config)
-        response = with_retries(lambda: gemini_client.responses.create(**api_config))
-        return response
-
-    # 3) Others → OpenRouter via LiteLLM
+    # 2) OpenRouter models (Gemini, Mistral, Llama, etc.) → OpenRouter via LiteLLM
     # Relax parameter strictness to avoid provider-specific UnsupportedParamsError
     litellm.drop_params = True
 
@@ -1096,19 +1068,7 @@ def validate_model_name_and_connectivity(model_name: str, verbose: bool = True) 
                 print(diag_prefix + "OK")
             return True, provider, "OK"
 
-        if provider == "gemini":
-            if not GEMINI_AVAILABLE:
-                msg = "google-genai not installed. Install with: pip install google-genai"
-                if verbose:
-                    print(diag_prefix + msg)
-                return False, provider, msg
-            gclient = GeminiClientWrapper(api_key=api_key, model_name=model_name)
-            _ = gclient.responses.create(model=model_name, input=[{"role": "user", "content": [{"text": "ping"}]}])
-            if verbose:
-                print(diag_prefix + "OK")
-            return True, provider, "OK"
-
-        # OpenRouter via LiteLLM
+        # OpenRouter via LiteLLM (includes Gemini, Mistral, Llama, etc.)
         litellm.drop_params = True
         normalized = normalize_openrouter_model_name(model_name)
         # LiteLLM expects explicit provider for OpenRouter; prefix the model

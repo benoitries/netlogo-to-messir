@@ -124,13 +124,11 @@ def get_openai_api_key() -> str:
 
 
 def get_provider_for_model(model_name: str) -> str:
-    """Infer provider from model name: "openai" | "gemini" | "router"."""
+    """Infer provider from model name: "openai" | "router"."""
     name = (model_name or "").lower()
     if name.startswith("gpt-5") or name.startswith("gpt-"):
         return "openai"
-    if "gemini" in name:
-        return "gemini"
-    # All other models (Mistral, Llama, etc.) are routed through OpenRouter
+    # All other models (Gemini, Mistral, Llama, etc.) are routed through OpenRouter
     return "router"
 
 
@@ -150,10 +148,6 @@ def get_api_key_for_model(model_name: str) -> str:
                     f"Original value: {original_key[:50]}...\n"
                     f"Please check your .env file at: {_env_locations()[0] / '.env'}"
                 )
-    elif provider == "gemini":
-        key = os.getenv("GOOGLE_GEMINI_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_KEY")
-        if key:
-            key = clean_api_key(key)
     else:
         key = os.getenv("ROUTER_API_KEY") or os.getenv("ROUTER_KEY") or os.getenv("ROUTER") or os.getenv("OPENROUTER_API_KEY")
         if key:
