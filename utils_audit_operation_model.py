@@ -25,10 +25,10 @@ Rules implemented (from RULES_LUCIM_Operation_model.md):
 - LOM3-OE-EVENT-NAME-FORMAT: output event names in camelCase
 - LOM4-IE-EVENT-DIRECTION: IE must be System → Actor
 - LOM5-OE-EVENT-DIRECTION: OE must be Actor → System
+- LOM6-CONDITIONS-DEFINITION: condition blocks structure (preF/preP optional arrays; postF required)
 - LOM7-CONDITIONS-VALIDATION: postF required and non-empty, preF/preP optional arrays
 - LOM8-INPUT-EVENTS-LIMITATION: Each actor must have at least one input event
 - LOM9-OUTPUT-EVENTS-LIMITATION: Each actor must have at least one output event
-Note: LOM6-CONDITIONS-DEFINITION is a definition rule, not a validation rule.
 Note: Actor instance names (if provided) should be camelCase, but this is not a strict LOM rule.
 """
 from __future__ import annotations
@@ -315,29 +315,29 @@ def audit_operation_model(env: Dict[str, Any], raw_content: str | None = None) -
                     if params is not None:
                         if not isinstance(params, list) or not all(isinstance(p, str) for p in params):
                             violations.append({
-                                "id": "FORMAT-PARAMS-ARRAY-OF-STR",
+                                "id": "LOM6-CONDITIONS-DEFINITION",
                                 "message": 'Event "parameters" must be an array of strings (may be empty).',
                                 "location": _location(ev_val, f"{block_name}.{ev_key}.parameters"),
                                 "extracted_values": {
                                     "parameters": json.dumps(params, ensure_ascii=False)
                                 }
                             })
-                    # Enforce postF presence as required array (may be empty)
+                    # LOM6 — postF presence is required (validation of non-empty handled in LOM7)
                     if "postF" not in ev_val:
                         violations.append({
-                            "id": "FORMAT-POSTF-REQUIRED",
-                            "message": 'Event must include a "postF" array (may be empty).',
+                            "id": "LOM6-CONDITIONS-DEFINITION",
+                            "message": 'Event must include a required "postF" array (see LOM6-CONDITIONS-DEFINITION).',
                             "location": _location(ev_val, f"{block_name}.{ev_key}.postF")
                         })
-                    # Validate optional condition arrays: preF, preP, postF
+                    # LOM6 — Validate structure of condition arrays: preF, preP, postF
                     for cond_field in ("preF", "preP", "postF"):
                         cond_list = ev_val.get(cond_field)
                         if cond_list is None:
                             continue
                         if not isinstance(cond_list, list):
                             violations.append({
-                                "id": "FORMAT-CONDITIONS-ARRAY",
-                                "message": f'Event "{cond_field}" must be an array of condition objects.',
+                                "id": "LOM6-CONDITIONS-DEFINITION",
+                                "message": f'Event "{cond_field}" must be an array of condition objects (LOM6).',
                                 "location": _location(ev_val, f"{block_name}.{ev_key}.{cond_field}"),
                                 "extracted_values": {cond_field: json.dumps(cond_list, ensure_ascii=False)}
                             })
@@ -346,8 +346,8 @@ def audit_operation_model(env: Dict[str, Any], raw_content: str | None = None) -
                         for idx, cond in enumerate(cond_list):
                             if not isinstance(cond, dict):
                                 violations.append({
-                                    "id": "FORMAT-CONDITION-OBJECT",
-                                    "message": f'Each item in "{cond_field}" must be an object.',
+                                    "id": "LOM6-CONDITIONS-DEFINITION",
+                                    "message": f'Each item in "{cond_field}" must be an object (LOM6).',
                                     "location": _location(ev_val, f"{block_name}.{ev_key}.{cond_field}[{idx}]"),
                                     "extracted_values": {"item": json.dumps(cond, ensure_ascii=False)}
                                 })
@@ -355,15 +355,15 @@ def audit_operation_model(env: Dict[str, Any], raw_content: str | None = None) -
                             text = cond.get("text")
                             if not isinstance(text, str) or not text.strip():
                                 violations.append({
-                                    "id": "FORMAT-CONDITION-TEXT",
-                                    "message": f'Condition "text" in "{cond_field}" must be a non-empty string.',
+                                    "id": "LOM6-CONDITIONS-DEFINITION",
+                                    "message": f'Condition "text" in "{cond_field}" must be a non-empty string (LOM6).',
                                     "location": _location(ev_val, f"{block_name}.{ev_key}.{cond_field}[{idx}].text")
                                 })
                             severity = cond.get("severity")
                             if severity is not None and severity not in ("must", "should", "may"):
                                 violations.append({
-                                    "id": "FORMAT-CONDITION-SEVERITY",
-                                    "message": f'Condition "severity" must be one of: "must", "should", "may".',
+                                    "id": "LOM6-CONDITIONS-DEFINITION",
+                                    "message": f'Condition "severity" must be one of: "must", "should", "may" (LOM6).',
                                     "location": _location(ev_val, f"{block_name}.{ev_key}.{cond_field}[{idx}].severity"),
                                     "extracted_values": {"severity": json.dumps(severity, ensure_ascii=False)}
                                 })
@@ -371,8 +371,8 @@ def audit_operation_model(env: Dict[str, Any], raw_content: str | None = None) -
                             if isinstance(cond_id, str) and cond_id:
                                 if cond_id in seen_ids:
                                     violations.append({
-                                        "id": "FORMAT-CONDITION-ID-UNIQUE",
-                                        "message": f'Condition "id" must be unique within the event for field "{cond_field}".',
+                                        "id": "LOM6-CONDITIONS-DEFINITION",
+                                        "message": f'Condition "id" must be unique within the event for field "{cond_field}" (LOM6).',
                                         "location": _location(ev_val, f"{block_name}.{ev_key}.{cond_field}[{idx}].id"),
                                         "extracted_values": {"id": cond_id}
                                     })

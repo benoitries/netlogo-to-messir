@@ -655,6 +655,11 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         except Exception:
             pass
 
+        # Extract SVG path from generator results if available
+        svg_file_path = puml_write.get("svg_file")
+        if svg_file_path:
+            orchestrator_instance.processed_results.setdefault("lucim_plantuml_diagram_generator", {})["svg_file"] = svg_file_path
+
         # Resolve .puml path written by writer
         plantuml_file_path = orchestrator_instance.fileio.get_plantuml_file_path(writer_base_dir)
         if not plantuml_file_path or not orchestrator_instance.fileio.validate_plantuml_file(plantuml_file_path):
@@ -730,9 +735,14 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
             orchestrator_instance.logger.error(f"[ADK] Failed to read PlantUML file: {e}")
             puml_text = ""
             puml_raw_content = ""
+        
+        # Extract SVG path from generator results if available
+        svg_path = orchestrator_instance.processed_results.get("lucim_plantuml_diagram_generator", {}).get("svg_file")
+        
         # Pass raw_content for LDR0-PLANTUML-BLOCK-ONLY validation
         # The auditor will automatically extract PlantUML from the text by searching for @startuml/@enduml
-        py_puml_audit = py_audit_diagram(puml_text, raw_content=puml_raw_content)
+        # Pass svg_path for graphical rules validation (LDR11-LDR16)
+        py_puml_audit = py_audit_diagram(puml_text, raw_content=puml_raw_content, svg_path=svg_path)
         orchestrator_instance.processed_results.setdefault("python_audits", {})["diagram"] = py_puml_audit
         # Compare agent 6 verdict vs python verdict (use puml_audit_for_compare with proper structure)
         # Wrap in try/except to ensure Python audit report is always created even if comparison fails

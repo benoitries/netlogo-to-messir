@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """
 PlantUML Utilities for Post-Processing
-Provides functions to clean escape characters from PlantUML diagram files.
+Provides functions to clean escape characters from PlantUML diagram files and generate SVG files.
 """
 
 import re
 import pathlib
+import subprocess
+import os
+import sys
+import urllib.request
+import urllib.error
 from typing import Optional, List, Tuple
 
 
@@ -243,6 +248,148 @@ def main():
     else:
         success = process_plantuml_file(file_path)
         return 0 if success else 1
+
+
+# PlantUML JAR configuration for SVG generation
+PLANTUML_MAVEN_BASE = "https://repo1.maven.org/maven2/net/sourceforge/plantuml/plantuml"
+PLANTUML_VERSION = "1.2024.3"  # Stable version
+PLANTUML_JAR_URL = f"{PLANTUML_MAVEN_BASE}/{PLANTUML_VERSION}/plantuml-{PLANTUML_VERSION}.jar"
+PLANTUML_ALL_JAR_URL = f"{PLANTUML_MAVEN_BASE}/{PLANTUML_VERSION}/plantuml-{PLANTUML_VERSION}-all.jar"
+PLANTUML_JAR_NAME = "plantuml.jar"
+
+# Cache directory for downloaded JAR
+CACHE_DIR = pathlib.Path.home() / ".cache" / "plantuml"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+CACHE_JAR_PATH = CACHE_DIR / PLANTUML_JAR_NAME
+
+
+def _download_plantuml_jar(jar_path: pathlib.Path, use_all_version: bool = True) -> bool:
+    """
+    Download PlantUML JAR file from Maven Central.
+    
+    Args:
+        jar_path: Path where to save the JAR file
+        use_all_version: If True, download "all" version with dependencies
+        
+    Returns:
+        True if download successful, False otherwise
+    """
+    url = PLANTUML_ALL_JAR_URL if use_all_version else PLANTUML_JAR_URL
+    version_type = "all (with dependencies)" if use_all_version else "standard"
+    
+    try:
+        jar_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        def show_progress(block_num, block_size, total_size):
+            if total_size > 0:
+                percent = min(100, (block_num * block_size * 100) // total_size)
+                sys.stdout.write(f"\rDownloading PlantUML JAR: {percent}%")
+                sys.stdout.flush()
+        
+        urllib.request.urlretrieve(url, jar_path, show_progress)
+        sys.stdout.write("\n")
+        return True
+        
+    except urllib.error.HTTPError as e:
+        if e.code == 404 and use_all_version:
+            return _download_plantuml_jar(jar_path, use_all_version=False)
+        return False
+    except Exception:
+        return False
+
+
+def _find_plantuml_jar() -> Optional[pathlib.Path]:
+    """
+    Find or download PlantUML JAR file.
+    
+    Checks in order:
+    1. Environment variable PLANTUML_JAR
+    2. Cache directory (~/.cache/plantuml/plantuml.jar)
+    3. Download to cache if not found
+    
+    Returns:
+        Path to plantuml.jar if found/available, None otherwise
+    """
+    # Check environment variable
+    env_jar = os.environ.get("PLANTUML_JAR")
+    if env_jar:
+        env_path = pathlib.Path(env_jar)
+        if env_path.exists():
+            return env_path
+    
+    # Check cache directory
+    if CACHE_JAR_PATH.exists():
+        return CACHE_JAR_PATH
+    
+    # Try to download to cache
+    if _download_plantuml_jar(CACHE_JAR_PATH):
+        return CACHE_JAR_PATH
+    
+    return None
+
+
+def generate_svg_from_puml(puml_file: pathlib.Path, output_dir: pathlib.Path) -> Optional[pathlib.Path]:
+    """
+    Generate SVG file from PlantUML file using PlantUML JAR.
+    
+    Args:
+        puml_file: Path to input .puml file
+        output_dir: Directory where SVG will be generated (same name as .puml file)
+        
+    Returns:
+        Path to generated SVG file, or None on failure
+    """
+    try:
+        if not puml_file.exists():
+            print(f"[WARNING] PlantUML file not found: {puml_file}")
+            return None
+        
+        # Find PlantUML JAR
+        jar_path = _find_plantuml_jar()
+        if not jar_path:
+            print(f"[WARNING] PlantUML JAR not found. Cannot generate SVG. Set PLANTUML_JAR environment variable or install PlantUML.")
+            return None
+        
+        # Ensure output directory exists
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate SVG using PlantUML JAR
+        cmd = [
+            "java",
+            "-jar",
+            str(jar_path),
+            "-tsvg",
+            "-o",
+            str(output_dir),
+            str(puml_file)
+        ]
+        
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+            print(f"[WARNING] SVG generation failed: {error_msg}")
+            return None
+        
+        # Find generated SVG file (PlantUML generates with same base name)
+        expected_svg = output_dir / f"{puml_file.stem}.svg"
+        if expected_svg.exists():
+            return expected_svg
+        else:
+            print(f"[WARNING] SVG file not created: {expected_svg}")
+            return None
+            
+    except subprocess.TimeoutExpired:
+        print(f"[WARNING] SVG generation timed out for {puml_file}")
+        return None
+    except Exception as e:
+        print(f"[WARNING] Error generating SVG from {puml_file}: {e}")
+        return None
 
 
 if __name__ == "__main__":

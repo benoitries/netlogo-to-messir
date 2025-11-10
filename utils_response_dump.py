@@ -434,17 +434,17 @@ def write_all_output_files(
         
         # 5) Handle special files (e.g., .puml for agents 5 and 7)
         if special_files:
-            _write_special_files(output_dir, special_files, base_name, agent_type)
+            _write_special_files(output_dir, special_files, base_name, agent_type, results)
             
     except Exception as e:
         # Non-fatal: file generation should not break the run
         print(f"[WARNING] Failed to write output files for {agent_type}: {e}")
 
 
-def _write_special_files(output_dir: pathlib.Path, special_files: Dict[str, Any], base_name: str, agent_type: str) -> None:
+def _write_special_files(output_dir: pathlib.Path, special_files: Dict[str, Any], base_name: str, agent_type: str, results: Dict[str, Any]) -> None:
     """Write special files like .puml diagrams for specific agents."""
     try:
-        from utils_plantuml import process_plantuml_file
+        from utils_plantuml import process_plantuml_file, generate_svg_from_puml
         
         if "plantuml_diagram" in special_files:
             diagram_text = special_files["plantuml_diagram"]
@@ -464,6 +464,20 @@ def _write_special_files(output_dir: pathlib.Path, special_files: Dict[str, Any]
                             print(f"⚠️  Post-processing had issues for: {puml_filename}")
                     except Exception as e:
                         print(f"[WARNING] Post-processing failed for {puml_filename}: {e}")
+                
+                # Generate SVG from PlantUML file
+                try:
+                    svg_path = generate_svg_from_puml(puml_file, output_dir)
+                    if svg_path:
+                        print(f"OK: {base_name} -> diagram.svg")
+                        if hasattr(special_files, '__setitem__'):
+                            special_files["svg_file"] = str(svg_path)
+                        # Store SVG path in results for orchestrator access
+                        results["svg_file"] = str(svg_path)
+                    else:
+                        print(f"[WARNING] Failed to generate SVG from {puml_filename}")
+                except Exception as e:
+                    print(f"[WARNING] SVG generation failed for {puml_filename}: {e}")
                 
                 # Surface the path for orchestrator logging/downstream use
                 if hasattr(special_files, '__setitem__'):

@@ -15,9 +15,7 @@ Rules implemented (from RULES_LUCIM_Scenario.md):
 - LSC8-ACTOR-NO-SELF-LOOP: No Actor→Actor events
 - LSC9-INPUT-EVENT-ALLOWED-EVENTS: Input events must be System → Actor
 - LSC10-OUTPUT-EVENT-DIRECTION: Output events must be Actor → System
-- LSC11-ACTOR-INSTANCE-FORMAT: Actor instance names must be camelCase
 - LSC12-ACTOR-TYPE-NAME-CONSISTENCY: Actor types must match Operation Model
-- LSC13-ACTOR-INSTANCE-CONSISTENCY: Actor instances must be consistent with types
 - LSC14-INPUT-EVENT-NAME-CONSISTENCY: Input event names must match Operation Model
 - LSC15-OUTPUT-EVENT-NAME-CONSISTENCY: Output event names must match Operation Model
 - LSC16-ACTORS-PERSISTENCE: Only actors from Operation Model allowed
@@ -38,9 +36,6 @@ from typing import Dict, List, Any, Optional, Union
 
 _MSG_RE = re.compile(r"^(?P<lhs>\S+)\s*(?P<arrow>--?>|-->>|-->)\s*(?P<rhs>\S+)\s*:\s*(?P<name>\w+)\s*\((?P<params>[^)]*)\)\s*$")
 
-# Regex for camelCase validation (LSC11)
-_CAMEL_CASE_RE = re.compile(r'^[a-z][a-zA-Z0-9]*$')
-
 
 def _is_system(token: str) -> bool:
     t = token.strip()
@@ -51,17 +46,6 @@ def _is_actor_token(token: str) -> bool:
     t = token.strip()
     # Heuristic: not system
     return not _is_system(t)
-
-
-def _is_camel_case(name: str) -> bool:
-    """
-    Check if a name follows camelCase format (LSC11).
-    Must start with lowercase letter, followed by alphanumeric characters.
-    Examples: actAdministrator, chris, theClock, anEcologist
-    """
-    if not name or not isinstance(name, str):
-        return False
-    return bool(_CAMEL_CASE_RE.match(name.strip()))
 
 
 def _check_lsc0_json_block_only(raw_content: str) -> List[Dict[str, Any]]:
@@ -231,7 +215,7 @@ def _extract_operation_model_data(operation_model: Optional[Union[Dict[str, Any]
 
 def _infer_actor_type_from_instance(instance_name: str, operation_model_data: Dict[str, Any]) -> Optional[str]:
     """
-    Infer actor type from instance name (LSC13).
+    Infer actor type from instance name (used for LSC12 and LSC16).
     
     Examples:
     - actAdministrator -> ActAdministrator
@@ -478,22 +462,6 @@ def _audit_scenario_json(
             if lhs_is_actor:
                 actor_output_events[src] = actor_output_events.get(src, 0) + 1
         
-        # LSC11 — Actor instance format (camelCase)
-        if lhs_is_actor and not _is_camel_case(src):
-            violations.append({
-                "id": "LSC11-ACTOR-INSTANCE-FORMAT",
-                "message": f"Actor instance name '{src}' must be human-readable in camelCase (e.g., actAdministrator, chris, theClock, anEcologist)",
-                "line": msg_idx + 1,
-                "extracted_values": {"message_index": msg_idx, "actor_name": src}
-            })
-        if rhs_is_actor and not _is_camel_case(tgt):
-            violations.append({
-                "id": "LSC11-ACTOR-INSTANCE-FORMAT",
-                "message": f"Actor instance name '{tgt}' must be human-readable in camelCase (e.g., actAdministrator, chris, theClock, anEcologist)",
-                "line": msg_idx + 1,
-                "extracted_values": {"message_index": msg_idx, "actor_name": tgt}
-            })
-        
         # Collect actors for LSC2
         if lhs_is_actor:
             actors_set.add(src)
@@ -537,7 +505,7 @@ def _audit_scenario_json(
             import logging
             logger = logging.getLogger(__name__)
             logger.warning(f"Operation model data provided but no events extracted. This may cause false violations for LSC14-LSC17.")
-        # Track actor instance to type mapping for LSC12 and LSC13
+        # Track actor instance to type mapping for LSC12 and LSC16
         actor_instance_to_type = {}  # instance_name -> actor_type
         scenario_actor_types = set()  # actor types found in scenario
         scenario_event_names = set()  # event names found in scenario
@@ -558,7 +526,7 @@ def _audit_scenario_json(
             lhs_is_actor = _is_actor_token(src)
             rhs_is_actor = _is_actor_token(tgt)
             
-            # LSC12 & LSC13 — Actor type and instance consistency
+            # LSC12 & LSC16 — Actor type and instance consistency
             if lhs_is_actor:
                 inferred_type = _infer_actor_type_from_instance(src, op_model_data)
                 if inferred_type:
@@ -701,37 +669,6 @@ def _audit_scenario_json(
                         "line": msg_idx + 1,
                         "extracted_values": {"message_index": msg_idx, "actor_instance": tgt, "actor_type": actor_type}
                     })
-            
-            # LSC13 — Actor instance consistency
-            if lhs_is_actor and src in actor_instance_to_type:
-                actor_type = actor_instance_to_type[src]
-                # Check if the event is valid for this actor type
-                actor_events = op_model_data["actor_type_to_events"].get(actor_type, {})
-                if event_type == "input_event" and name not in actor_events.get("input_events", set()):
-                    # Event might be valid if it's defined for this actor type
-                    if name in op_model_data["event_to_actor_type"]:
-                        expected_actor_type = op_model_data["event_to_actor_type"][name]
-                        if expected_actor_type != actor_type:
-                            violations.append({
-                                "id": "LSC13-ACTOR-INSTANCE-CONSISTENCY",
-                                "message": f"Actor instance '{src}' (type '{actor_type}') is inconsistent. Event '{name}' is defined for actor type '{expected_actor_type}' in the Operation Model.",
-                                "line": msg_idx + 1,
-                                "extracted_values": {"message_index": msg_idx, "actor_instance": src, "actor_type": actor_type, "event_name": name, "expected_actor_type": expected_actor_type}
-                            })
-            
-            if rhs_is_actor and tgt in actor_instance_to_type:
-                actor_type = actor_instance_to_type[tgt]
-                actor_events = op_model_data["actor_type_to_events"].get(actor_type, {})
-                if event_type == "input_event" and name not in actor_events.get("input_events", set()):
-                    if name in op_model_data["event_to_actor_type"]:
-                        expected_actor_type = op_model_data["event_to_actor_type"][name]
-                        if expected_actor_type != actor_type:
-                            violations.append({
-                                "id": "LSC13-ACTOR-INSTANCE-CONSISTENCY",
-                                "message": f"Actor instance '{tgt}' (type '{actor_type}') is inconsistent. Event '{name}' is defined for actor type '{expected_actor_type}' in the Operation Model.",
-                                "line": msg_idx + 1,
-                                "extracted_values": {"message_index": msg_idx, "actor_instance": tgt, "actor_type": actor_type, "event_name": name, "expected_actor_type": expected_actor_type}
-                            })
         
         # LSC5 — Event sequence validation (preF, preP, postF)
         # This requires checking conditions in sequence
@@ -885,22 +822,6 @@ def audit_scenario(
                 # Track output events per actor (LSC4)
                 if lhs_is_actor:
                     actor_output_events[lhs] = actor_output_events.get(lhs, 0) + 1
-            
-            # LSC11 — Actor instance format (camelCase)
-            if lhs_is_actor and not _is_camel_case(lhs):
-                violations.append({
-                    "id": "LSC11-ACTOR-INSTANCE-FORMAT",
-                    "message": f"Actor instance name '{lhs}' must be human-readable in camelCase (e.g., actAdministrator, chris, theClock, anEcologist)",
-                    "line": idx,
-                    "extracted_values": {"line_content": raw.rstrip(), "actor_name": lhs}
-                })
-            if rhs_is_actor and not _is_camel_case(rhs):
-                violations.append({
-                    "id": "LSC11-ACTOR-INSTANCE-FORMAT",
-                    "message": f"Actor instance name '{rhs}' must be human-readable in camelCase (e.g., actAdministrator, chris, theClock, anEcologist)",
-                    "line": idx,
-                    "extracted_values": {"line_content": raw.rstrip(), "actor_name": rhs}
-                })
             
             # Collect actors for LSC2
             if lhs_is_actor:
