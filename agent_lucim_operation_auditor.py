@@ -2,7 +2,7 @@
 from typing import Dict, Any
 import json
 from utils_openai_client import create_and_wait, get_output_text, get_reasoning_summary, format_prompt_for_responses_api, get_openai_client_for_model, build_error_raw_payload, get_usage_tokens
-from utils_config_constants import DEFAULT_MODEL, PERSONA_LUCIM_OPERATION_MODEL_AUDITOR, RULES_LUCIM_OPERATION_MODEL, OUTPUT_DIR
+from utils_config_constants import DEFAULT_MODEL, PERSONA_LUCIM_OPERATION_MODEL_AUDITOR, RULES_LUCIM_OPERATION_MODEL, OUTPUT_DIR, get_reasoning_config, AGENT_TIMEOUTS
 from utils_response_dump import write_input_instructions_before_api, serialize_response_to_dict
 from utils_audit_core import extract_audit_core
 
@@ -62,16 +62,21 @@ def audit_operation_model(
     try:
         # Use provided model (mandatory parameter)
         client = get_openai_client_for_model(model_name)
-        api_config = {
-            "model": model_name,
+        # Use get_reasoning_config to get reasoning parameters (same as generator)
+        api_config = get_reasoning_config("lucim_operation_model_auditor")
+        # Force the run-selected model (overrides DEFAULT_MODEL from configs)
+        api_config["model"] = model_name
+        api_config.update({
             "instructions": format_prompt_for_responses_api(system_prompt),
-            "input": [{"role": "user", "content": system_prompt}],
-        }
-        resp = create_and_wait(client, api_config)
+            "input": [{"role": "user", "content": system_prompt}]
+        })
+        timeout = AGENT_TIMEOUTS.get("lucim_operation_model_auditor")
+        resp = create_and_wait(client, api_config, timeout_seconds=timeout)
         # Serialize raw response for output-raw_response.json
         raw_response_serialized = serialize_response_to_dict(resp)
         content = get_output_text(resp) or ""
-        # Extract reasoning summary from response (same as Generator and other auditors)
+        # Extract reasoning summary from response (same as Generator)
+        # Full reasoning text will be extracted from raw_response in write_all_output_files
         reasoning_summary = get_reasoning_summary(resp)
         # Store raw LLM response text directly (no JSON parsing)
         # extract_audit_core will handle the raw text content
@@ -87,6 +92,7 @@ def audit_operation_model(
         visible_output_tokens = max((total_output_tokens or 0) - (reasoning_tokens or 0), 0)
         
         # Return raw audit data alongside derived fields, raw_response, and token metrics
+        # Full reasoning text will be extracted from raw_response in write_all_output_files
         return {
             "reasoning_summary": reasoning_summary,
             "data": core["data"],

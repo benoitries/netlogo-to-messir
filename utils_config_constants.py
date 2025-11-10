@@ -96,7 +96,19 @@ AGENT_CONFIGS = {
         "reasoning_summary": "auto",
         "text_verbosity": "medium"
     },
+    "lucim_operation_model_auditor": {
+        "model": DEFAULT_MODEL,
+        "reasoning_effort": "medium",
+        "reasoning_summary": "auto",
+        "text_verbosity": "medium"
+    },
     "lucim_scenario_generator": {
+        "model": DEFAULT_MODEL,
+        "reasoning_effort": "medium",
+        "reasoning_summary": "auto",
+        "text_verbosity": "medium"
+    },
+    "lucim_scenario_auditor": {
         "model": DEFAULT_MODEL,
         "reasoning_effort": "medium",
         "reasoning_summary": "auto",
@@ -130,7 +142,9 @@ AGENT_TIMEOUTS = {
     "netlogo_interface_image_analyzer": None,
     "behavior_extractor": None,
     "lucim_operation_model_generator": None,
+    "lucim_operation_model_auditor": None,
     "lucim_scenario_generator": None,
+    "lucim_scenario_auditor": None,
     "lucim_plantuml_diagram_generator": None,
     "lucim_plantuml_diagram_auditor": None,
     "plantuml_corrector": None,

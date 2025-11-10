@@ -167,13 +167,56 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
         instructions = f"{self.persona_text}\n\n{effective_rules}".strip() if (self.persona_text and self.persona_text.strip()) else ""
 
         # Build input blocks with required tagged sections (without repeating instructions)
-        # Use raw text copy without json.dumps or markdown fences
+        # LUCIM-OPERATION-MODEL should be taken exactly as-is from the output-data.json file
+        # of the OpModel Generator agent. Do not normalize JSON. Just parse and insert as raw text.
         input_text = ""
-        if lucim_operation_model:
+        operation_model_text = ""
+        
+        # Try to read the operation model directly from the output-data.json file
+        # Look for the file in the parent directory structure: 1_lucim_operation_model/iter-*/1-generator/output-data.json
+        # Structure: {case}-{model}/2_lucim_scenario/iter-{N}/1-generator/ -> go up 3 levels to {case}-{model}/
+        if output_dir:
+            try:
+                output_path = pathlib.Path(output_dir)
+                if not output_path.is_absolute():
+                    # Resolve relative paths
+                    output_path = output_path.resolve()
+                
+                # Navigate to the run root directory (go up from 2_lucim_scenario/iter-*/1-generator/)
+                # output_path = 2_lucim_scenario/iter-*/1-generator/
+                # output_path.parent = iter-*/
+                # output_path.parent.parent = 2_lucim_scenario/
+                # output_path.parent.parent.parent = {case}-{model}/ (run root)
+                run_root = output_path.parent.parent.parent
+                
+                # Find the latest iteration of operation model
+                op_model_root = run_root / "1_lucim_operation_model"
+                if op_model_root.exists() and op_model_root.is_dir():
+                    # Find the latest iteration directory
+                    iter_dirs = sorted(
+                        [d for d in op_model_root.glob("iter-*") if d.is_dir()],
+                        key=lambda x: int(x.name.split("-")[1]) if len(x.name.split("-")) > 1 and x.name.split("-")[1].isdigit() else 0
+                    )
+                    if iter_dirs:
+                        latest_iter = iter_dirs[-1]
+                        op_model_data_file = latest_iter / "1-generator" / "output-data.json"
+                        if op_model_data_file.exists() and op_model_data_file.is_file():
+                            # Read the file content exactly as-is (raw text, no JSON parsing)
+                            operation_model_text = op_model_data_file.read_text(encoding="utf-8")
+            except Exception:
+                # Fallback to parameter if file reading fails (silent failure)
+                pass
+        
+        # If file reading failed or output_dir not provided, use the parameter
+        # But only if it's a string (raw text); never use str() on dict as it would normalize JSON
+        if not operation_model_text and lucim_operation_model:
             if isinstance(lucim_operation_model, str):
                 operation_model_text = lucim_operation_model
-            else:
-                operation_model_text = str(lucim_operation_model)
+            # If it's not a string (e.g., dict), don't convert it - it would normalize the JSON
+            # The file reading above should have worked, so this is a fallback only
+        
+        # Build the input text block
+        if operation_model_text:
             input_text = f"""
 <LUCIM-OPERATION-MODEL>
 {operation_model_text}
@@ -187,25 +230,31 @@ class LUCIMScenarioGeneratorAgent(LlmAgent):
 
 """
         
-        # Attach auditor feedback and previous scenario if provided (allowed to be empty on first run)
+        # Always include auditor report and previous scenarios blocks (empty on first call)
+        # Use raw text copy without json.dumps or markdown fences
         try:
             if scenario_auditor_feedback:
                 if isinstance(scenario_auditor_feedback, str):
                     auditor_text = scenario_auditor_feedback
                 else:
                     auditor_text = str(scenario_auditor_feedback)
-                input_text += f"\n<SCENARIO-AUDITOR-FEEDBACK>\n{auditor_text}\n</SCENARIO-AUDITOR-FEEDBACK>\n"
+            else:
+                auditor_text = ""
         except Exception:
-            pass
+            auditor_text = ""
+        input_text += f"\n<AUDIT-REPORT>\n{auditor_text}\n</AUDIT-REPORT>\n"
+
         try:
             if previous_scenario is not None:
                 if isinstance(previous_scenario, str):
                     prev_scenario_text = previous_scenario
                 else:
                     prev_scenario_text = str(previous_scenario)
-                input_text += f"\n<PREVIOUS-LUCIM-SCENARIO>\n{prev_scenario_text}\n</PREVIOUS-LUCIM-SCENARIO>\n"
+            else:
+                prev_scenario_text = ""
         except Exception:
-            pass
+            prev_scenario_text = ""
+        input_text += f"\n<PREVIOUS-LUCIM-SCENARIOS>\n{prev_scenario_text}\n</PREVIOUS-LUCIM-SCENARIOS>\n"
 
         # Build system_prompt with required tagged blocks and inputs
         system_prompt = f"{instructions}\n\n{input_text}" if instructions else input_text

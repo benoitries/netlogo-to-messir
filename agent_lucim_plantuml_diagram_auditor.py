@@ -285,6 +285,7 @@ class LUCIMPlantUMLDiagramAuditorAgent(LlmAgent):
             # Extract content and reasoning via helpers
             content = get_output_text(response)
             reasoning_summary = get_reasoning_summary(response)
+            # Full reasoning text will be extracted from raw_response in write_all_output_files
             raw_response_serialized = serialize_response_to_dict(response)
             
             # Check if response is empty

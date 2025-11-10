@@ -270,10 +270,62 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
                     "raw_response": raw_response_serialized
                 }
             
-            # Store raw text content directly (no JSON parsing)
-            # The raw text will be written to output-data.json and passed to the auditor
-            plantuml_diagram_raw_text = content
-
+            # Parse JSON response and extract data or errors following the new format
+            # Expected format: {"data": {"plantuml-diagram": "..."}, "errors": null}
+            # Or error format: {"data": null, "errors": ["error1", "error2"]}
+            parsed_data = None
+            extracted_data = None
+            extracted_errors = None
+            
+            try:
+                from utils_openai_client import parse_json_response
+                parsed_data = parse_json_response(content)
+            except (ValueError, json.JSONDecodeError) as e:
+                # If JSON parsing fails, try to extract PlantUML directly from text
+                if "@startuml" in content and "@enduml" in content:
+                    # Found PlantUML in raw text, wrap it in the new format
+                    extracted_data = {
+                        "plantuml-diagram": content
+                    }
+                else:
+                    # No valid JSON and no PlantUML found, treat as error
+                    extracted_errors = [f"Failed to parse JSON response: {e}", "Response content may be malformed"]
+            
+            # Extract data or errors from parsed JSON
+            if parsed_data is not None:
+                if isinstance(parsed_data, dict):
+                    # Check for new format: {"data": {"plantuml-diagram": "..."}, "errors": null}
+                    if "data" in parsed_data and parsed_data.get("data") is not None:
+                        data_node = parsed_data.get("data")
+                        if isinstance(data_node, dict):
+                            # Extract plantuml-diagram from data node
+                            if "plantuml-diagram" in data_node:
+                                extracted_data = {"plantuml-diagram": data_node["plantuml-diagram"]}
+                            # Fallback: check for legacy format with nested diagram
+                            elif "diagram" in data_node and isinstance(data_node["diagram"], dict):
+                                diagram_node = data_node["diagram"]
+                                if "plantuml" in diagram_node:
+                                    extracted_data = {"plantuml-diagram": diagram_node["plantuml"]}
+                            # Fallback: check if data_node itself is a string (legacy format)
+                            elif isinstance(data_node, str) and "@startuml" in data_node:
+                                extracted_data = {"plantuml-diagram": data_node}
+                    
+                    # Check for errors if data is null or not found
+                    if extracted_data is None:
+                        if "errors" in parsed_data:
+                            errors_value = parsed_data.get("errors")
+                            if errors_value is not None:
+                                if isinstance(errors_value, list):
+                                    extracted_errors = errors_value
+                                else:
+                                    extracted_errors = [str(errors_value)]
+                            else:
+                                # data is null and errors is null - treat as error
+                                extracted_errors = ["Response contains null data and null errors"]
+                        else:
+                            # No data and no errors field - treat as error
+                            extracted_errors = ["Response does not contain 'data' or 'errors' field"]
+            
             # Extract token usage from response (centralized helper)
             usage = get_usage_tokens(response, exact_input_tokens=exact_input_tokens)
             tokens_used = usage.get("total_tokens", 0)
@@ -284,10 +336,11 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
             visible_output_tokens = max((total_output_tokens or 0) - (reasoning_tokens or 0), 0)
             usage_dict = usage
 
+            # Return standardized format: data contains the extracted structure, errors is None or list
             return {
                 "reasoning_summary": reasoning_summary,
-                "data": plantuml_diagram_raw_text,  # Store raw text content (no JSON parsing)
-                "errors": None,
+                "data": extracted_data,  # Dict with "plantuml-diagram" key, or None
+                "errors": extracted_errors,  # List of errors, or None
                 "tokens_used": tokens_used,
                 "input_tokens": input_tokens,
                 "visible_output_tokens": visible_output_tokens,
@@ -330,7 +383,25 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
             print(f"[WARNING] Persona template validation failed (lucim_plantuml_diagram_generator): {e}")
 
         # Extract PlantUML diagram text for special file handling
-        diagram_text = self._extract_plantuml_text(results.get("data")) if results.get("data") else None
+        # Handle new format: results["data"] is a dict with "plantuml-diagram" key, or None
+        data_value = results.get("data")
+        diagram_text = self._extract_plantuml_text(data_value) if data_value else None
+
+        # Ensure results["data"] is in the correct format for write_all_output_files
+        # Format should be: {"plantuml-diagram": "..."} or None
+        if data_value is not None and isinstance(data_value, dict):
+            # Already in correct format (dict with "plantuml-diagram" key)
+            if "plantuml-diagram" not in data_value:
+                # Convert legacy format to new format if needed
+                diagram_text_from_data = self._extract_plantuml_text(data_value)
+                if diagram_text_from_data:
+                    results["data"] = {"plantuml-diagram": diagram_text_from_data}
+                    diagram_text = diagram_text_from_data
+        elif data_value is None:
+            # No data, check if we have errors
+            if results.get("errors") is None:
+                # Neither data nor errors - try to extract from raw_response as fallback
+                diagram_text = None
 
         # Defensive fallback: if no data detected, attempt to extract UML directly from raw_response text
         if (not diagram_text or "@startuml" not in diagram_text or "@enduml" not in diagram_text):
@@ -347,16 +418,9 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
                     uml_text = uml_text.replace("\\n", "\n").replace("\\t", "\t").replace("\\\"", '"')
                 if uml_text and "@startuml" in uml_text and "@enduml" in uml_text:
                     diagram_text = uml_text
-                    # Also backfill a minimal data structure in new format so downstream files are emitted
-                    results["data"] = {
-                        "data": {
-                            "diagram": {
-                                "name": "typical",
-                                "plantuml": uml_text
-                            }
-                        },
-                        "errors": None
-                    }
+                    # Backfill data structure in new format
+                    results["data"] = {"plantuml-diagram": uml_text}
+                    results["errors"] = None
             except Exception:
                 pass
         
@@ -382,29 +446,59 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
             special_files=special_files
         )
 
-    def _extract_plantuml_text(self, data: Dict[str, Any]) -> str:
+    def _extract_plantuml_text(self, data: Any) -> str:
         """
         Attempt to extract the PlantUML diagram text from the agent data structure.
         The method is defensive against variations in the response shape.
         
         New format (prioritized):
         {
+          "plantuml-diagram": "@startuml\n...\n@enduml"
+        }
+        
+        Or wrapped format:
+        {
           "data": {
-            "diagram": {
-              "name": "scenario name",
-              "plantuml": "@startuml\n...\n@enduml"
-            }
+            "plantuml-diagram": "@startuml\n...\n@enduml"
           },
           "errors": null
         }
+        
+        Legacy formats are also supported for backward compatibility.
         """
-        # Accept dict or list structures and find the first PlantUML block
+        # Accept dict, list, or string structures and find the first PlantUML block
         if data is None:
             return ""
         
-        # NEW FORMAT: Check for data.diagram.plantuml structure first (prioritized)
+        # Handle string data (may be JSON string or raw PlantUML)
+        if isinstance(data, str):
+            # Try to parse as JSON first
+            try:
+                parsed = json.loads(data)
+                return self._extract_plantuml_text(parsed)
+            except (json.JSONDecodeError, TypeError):
+                # Not JSON, check if it's raw PlantUML
+                if "@startuml" in data and "@enduml" in data:
+                    return data.strip()
+                return ""
+        
+        # NEW FORMAT (prioritized): Check for "plantuml-diagram" key directly
         if isinstance(data, dict):
-            # Check for new format: data.diagram.plantuml
+            # Direct "plantuml-diagram" key (new format)
+            if "plantuml-diagram" in data:
+                plantuml_text = data["plantuml-diagram"]
+                if isinstance(plantuml_text, str) and "@startuml" in plantuml_text and "@enduml" in plantuml_text:
+                    return plantuml_text.strip()
+            
+            # Wrapped format: data.plantuml-diagram
+            if "data" in data and isinstance(data["data"], dict):
+                data_node = data["data"]
+                if "plantuml-diagram" in data_node:
+                    plantuml_text = data_node["plantuml-diagram"]
+                    if isinstance(plantuml_text, str) and "@startuml" in plantuml_text and "@enduml" in plantuml_text:
+                        return plantuml_text.strip()
+            
+            # Legacy format: data.diagram.plantuml
             if "data" in data and isinstance(data["data"], dict):
                 data_node = data["data"]
                 if "diagram" in data_node and isinstance(data_node["diagram"], dict):
@@ -422,26 +516,22 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
                     if "@startuml" in plantuml_text and "@enduml" in plantuml_text:
                         return plantuml_text.strip()
         
-        # Fallback: legacy structure handling
-        candidate_nodes = []
-        if isinstance(data, dict):
-            if "typical" in data:
-                candidate_nodes.append(data["typical"])
-            if "diagram" in data:
-                candidate_nodes.append(data["diagram"])
-            candidate_nodes.extend(list(data.values()))
-        elif isinstance(data, list):
-            candidate_nodes.extend(data)
-
+        # Fallback: recursive search for PlantUML content
         def find_in_obj(obj: Any) -> str:
             # String directly containing plantuml
-            if isinstance(obj, str) and "@startuml" in obj:
+            if isinstance(obj, str) and "@startuml" in obj and "@enduml" in obj:
                 return obj
             # Dict: look for likely keys
             if isinstance(obj, dict):
+                # Check for plantuml-diagram key first
+                if "plantuml-diagram" in obj:
+                    val = obj["plantuml-diagram"]
+                    if isinstance(val, str) and "@startuml" in val and "@enduml" in val:
+                        return val
+                # Then check other common keys
                 for key in ("plantuml", "diagram", "uml", "content", "text"):
                     val = obj.get(key)
-                    if isinstance(val, str) and "@startuml" in val:
+                    if isinstance(val, str) and "@startuml" in val and "@enduml" in val:
                         return val
                 # Also scan nested values
                 for val in obj.values():
@@ -456,12 +546,12 @@ class LUCIMPlantUMLDiagramGeneratorAgent(LlmAgent):
                         return found
             return ""
 
-        for node in candidate_nodes:
-            found = find_in_obj(node)
-            if found:
-                return found.strip()
-        # Final attempt: brute-force over the whole dict
-        return find_in_obj(data).strip()
+        # Try recursive search on the whole data structure
+        found = find_in_obj(data)
+        if found:
+            return found.strip()
+        
+        return ""
 
 
 def main():

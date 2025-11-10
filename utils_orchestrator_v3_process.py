@@ -184,6 +184,7 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         
         # Prepare results dict with all required fields for write_all_output_files
+        # Full reasoning text will be extracted from raw_response in write_all_output_files
         auditor_results = {
             "reasoning_summary": operation_model_audit.get("reasoning_summary", ""),
             "data": operation_model_audit.get("data", {}),
@@ -209,13 +210,9 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
             step_number=1
         )
         
-        # Keep the old _write_reasoning call for backward compatibility
-        _write_reasoning(
-            operation_model_auditor_dir,
-            "Operation Model audit iteration report",
-            operation_model_core["verdict"],
-            operation_model_audit.get("violations") or operation_model_core["non_compliant_rules"],
-        )
+        # Note: _write_reasoning is no longer called here to avoid overwriting the detailed
+        # output-reasoning.md file created by write_all_output_files. The verdict and violations
+        # information is already included in the output-reasoning.md file via write_reasoning_md_from_payload.
         # Python deterministic audit (no-LLM)
         # Parse operation_model_data as JSON if it's a string (new standardized format)
         # Handle standardized response structure: extract content from "data" if present
@@ -506,6 +503,7 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         
         # Prepare results dict with all required fields for write_all_output_files
+        # Full reasoning text will be extracted from raw_response in write_all_output_files
         auditor_results = {
             "reasoning_summary": scen_audit.get("reasoning_summary", ""),
             "data": scen_audit.get("data", {}),
@@ -531,13 +529,9 @@ async def process_netlogo_file_v3_adk(orchestrator_instance, file_info: Dict[str
             step_number=2
         )
         
-        # Keep the old _write_reasoning call for backward compatibility
-        _write_reasoning(
-            scenario_auditor_dir,
-            "Scenario audit iteration report",
-            scen_core["verdict"],
-            scen_audit.get("violations") or scen_core["non_compliant_rules"],
-        )
+        # Note: _write_reasoning is no longer called here to avoid overwriting the detailed
+        # output-reasoning.md file created by write_all_output_files. The verdict and violations
+        # information is already included in the output-reasoning.md file via write_reasoning_md_from_payload.
         # Python deterministic audit (no-LLM)
         # Pass JSON raw content first (preferred), fallback to PlantUML text
         # The audit_scenario function will automatically detect JSON vs PlantUML text

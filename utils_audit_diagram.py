@@ -186,8 +186,11 @@ def audit_diagram(text: str, raw_content: str | None = None) -> Dict[str, Any]:
     This function automatically extracts PlantUML content by searching for @startuml and @enduml
     markers, making it robust against JSON corruption or mixed content.
     
+    Supports new format: {"data": {"plantuml-diagram": "..."}, "errors": null}
+    Also supports legacy formats and raw PlantUML text.
+    
     Args:
-        text: PlantUML diagram content (parsed/cleaned) or raw content containing PlantUML
+        text: PlantUML diagram content (parsed/cleaned), JSON string, or raw content containing PlantUML
         raw_content: Optional raw content string for LDR0 validation (PlantUML block format check)
         
     Returns:
@@ -202,13 +205,59 @@ def audit_diagram(text: str, raw_content: str | None = None) -> Dict[str, Any]:
         violations.extend(ldr0_violations)
 
     # Extract PlantUML from text or raw_content
-    # Priority: use text if it contains PlantUML, otherwise try raw_content
+    # First, try to parse as JSON and extract from new format
     plantuml_text = None
+    
+    # Try to parse text as JSON and extract plantuml-diagram
     if text:
-        plantuml_text = _extract_plantuml_from_text(text)
+        try:
+            import json
+            parsed_json = json.loads(text)
+            if isinstance(parsed_json, dict):
+                # Check for new format: {"data": {"plantuml-diagram": "..."}, "errors": null}
+                if "data" in parsed_json and isinstance(parsed_json.get("data"), dict):
+                    data_node = parsed_json["data"]
+                    if "plantuml-diagram" in data_node:
+                        plantuml_text = data_node["plantuml-diagram"]
+                    # Fallback: check for legacy format with nested diagram
+                    elif "diagram" in data_node and isinstance(data_node["diagram"], dict):
+                        diagram_node = data_node["diagram"]
+                        if "plantuml" in diagram_node:
+                            plantuml_text = diagram_node["plantuml"]
+                # Check for direct "plantuml-diagram" key (unwrapped format)
+                elif "plantuml-diagram" in parsed_json:
+                    plantuml_text = parsed_json["plantuml-diagram"]
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            # Not JSON, continue with text extraction
+            pass
+    
+    # If JSON parsing didn't yield PlantUML, try text extraction
+    if not plantuml_text or not isinstance(plantuml_text, str) or "@startuml" not in plantuml_text:
+        if text:
+            plantuml_text = _extract_plantuml_from_text(text)
     
     if not plantuml_text and raw_content:
-        plantuml_text = _extract_plantuml_from_text(raw_content)
+        # Try to parse raw_content as JSON first
+        try:
+            import json
+            parsed_json = json.loads(raw_content)
+            if isinstance(parsed_json, dict):
+                if "data" in parsed_json and isinstance(parsed_json.get("data"), dict):
+                    data_node = parsed_json["data"]
+                    if "plantuml-diagram" in data_node:
+                        plantuml_text = data_node["plantuml-diagram"]
+                    elif "diagram" in data_node and isinstance(data_node["diagram"], dict):
+                        diagram_node = data_node["diagram"]
+                        if "plantuml" in diagram_node:
+                            plantuml_text = diagram_node["plantuml"]
+                elif "plantuml-diagram" in parsed_json:
+                    plantuml_text = parsed_json["plantuml-diagram"]
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            pass
+        
+        # If JSON parsing didn't yield PlantUML, try text extraction
+        if not plantuml_text or not isinstance(plantuml_text, str) or "@startuml" not in plantuml_text:
+            plantuml_text = _extract_plantuml_from_text(raw_content)
     
     # If no PlantUML found, this will be caught by LDR1 check below
     if not plantuml_text:

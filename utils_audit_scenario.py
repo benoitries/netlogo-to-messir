@@ -111,9 +111,12 @@ def _check_lsc0_json_block_only(raw_content: str) -> List[Dict[str, Any]]:
     return violations
 
 
-def _extract_operation_model_data(operation_model: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _extract_operation_model_data(operation_model: Optional[Union[Dict[str, Any], str]]) -> Dict[str, Any]:
     """
     Extract and index operation model data for validation.
+    
+    Args:
+        operation_model: Operation model as dict or raw text string (may contain markdown fences)
     
     Returns:
         Dictionary with:
@@ -135,7 +138,31 @@ def _extract_operation_model_data(operation_model: Optional[Dict[str, Any]]) -> 
         "event_to_conditions": {}  # event_name -> {"preF": list, "preP": list, "postF": list}
     }
     
-    if not operation_model or not isinstance(operation_model, dict):
+    if not operation_model:
+        return result
+    
+    # If operation_model is a string, try to parse it as JSON
+    if isinstance(operation_model, str):
+        try:
+            # Try to extract JSON from markdown code blocks if present
+            text = operation_model.strip()
+            if "```json" in text:
+                start = text.find("```json") + 7
+                end = text.find("```", start)
+                if end > start:
+                    text = text[start:end].strip()
+            elif "```" in text:
+                start = text.find("```") + 3
+                end = text.find("```", start)
+                if end > start:
+                    text = text[start:end].strip()
+            # Parse JSON
+            operation_model = json.loads(text)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            # If parsing fails, return empty result (auditor will work without operation model data)
+            return result
+    
+    if not isinstance(operation_model, dict):
         return result
     
     # Extract actors from operation model
@@ -287,9 +314,12 @@ def _audit_scenario_json(
         })
         return violations
     
-    # Extract scenario from data.scenario
+    # Extract scenario - support both formats:
+    # 1. Standardized format: {"data": {"scenario": {...}}}
+    # 2. Direct format: {"scenario": {...}}
     scenario = None
     if "data" in scenario_data:
+        # Standardized format: {"data": {"scenario": {...}}}
         data_node = scenario_data.get("data")
         if isinstance(data_node, dict) and "scenario" in data_node:
             scenario = data_node.get("scenario")
@@ -310,10 +340,13 @@ def _audit_scenario_json(
                 "extracted_values": {}
             })
             return violations
+    elif "scenario" in scenario_data:
+        # Direct format: {"scenario": {...}}
+        scenario = scenario_data.get("scenario")
     else:
         violations.append({
             "id": "JSON-FORMAT-ERROR",
-            "message": "Scenario data must contain 'data' key",
+            "message": "Scenario data must contain either 'data.scenario' key (standardized format) or 'scenario' key (direct format)",
             "line": 0,
             "extracted_values": {}
         })
@@ -741,7 +774,7 @@ def _audit_scenario_json(
 def audit_scenario(
     text: Union[str, Dict[str, Any]],
     raw_content: Optional[str] = None,
-    operation_model: Optional[Dict[str, Any]] = None
+    operation_model: Optional[Union[Dict[str, Any], str]] = None
 ) -> Dict[str, Any]:
     """
     Audit scenario - supports both PlantUML text and JSON format.

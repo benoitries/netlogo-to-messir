@@ -296,8 +296,43 @@ def write_all_output_files(
         print(f"OK: {base_name} -> output-response-full.json")
         
         # 2) Write output-reasoning.md using centralized function
+        # Extract reasoning from raw_response if not already in results (same as generators)
+        reasoning_text = results.get("reasoning")
+        if not reasoning_text and results.get("raw_response"):
+            # Extract reasoning from output[0] in raw_response (Responses API structure)
+            # output[0] typically has type="reasoning" and may contain summary or content
+            raw_response = results.get("raw_response")
+            if isinstance(raw_response, dict) and "output" in raw_response:
+                output = raw_response.get("output")
+                if isinstance(output, list) and len(output) > 0:
+                    first_item = output[0]
+                    if isinstance(first_item, dict) and first_item.get("type") == "reasoning":
+                        # Check for summary list (common structure)
+                        summary_list = first_item.get("summary", [])
+                        if isinstance(summary_list, list) and summary_list:
+                            reasoning_chunks = []
+                            for summary_item in summary_list:
+                                if isinstance(summary_item, dict):
+                                    text_val = summary_item.get("text")
+                                    if isinstance(text_val, str) and text_val.strip():
+                                        reasoning_chunks.append(text_val.strip())
+                            if reasoning_chunks:
+                                reasoning_text = "\n".join(reasoning_chunks)
+                        # Fallback: check content list
+                        elif first_item.get("content"):
+                            content_list = first_item.get("content", [])
+                            if isinstance(content_list, list):
+                                reasoning_chunks = []
+                                for content_item in content_list:
+                                    if isinstance(content_item, dict):
+                                        text_val = content_item.get("text")
+                                        if isinstance(text_val, str) and text_val.strip():
+                                            reasoning_chunks.append(text_val.strip())
+                                if reasoning_chunks:
+                                    reasoning_text = "\n".join(reasoning_chunks)
+        
         payload = {
-            "reasoning": results.get("reasoning"),
+            "reasoning": reasoning_text,
             "reasoning_summary": results.get("reasoning_summary"),
             "tokens_used": results.get("tokens_used"),
             "input_tokens": results.get("input_tokens"),
