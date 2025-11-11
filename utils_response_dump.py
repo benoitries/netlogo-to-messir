@@ -363,16 +363,24 @@ def write_all_output_files(
         
         # Helper function to remove markdown code fences from text
         def remove_markdown_fences(text: str) -> str:
-            """Remove markdown code fences (```json ... ``` or ``` ... ```) from text.
+            """Remove markdown code fences (```json ... ``` or ``` ... ```) and XML tags (<raw_json_output>...</raw_json_output>) from text.
             
             Args:
-                text: Text that may contain markdown code fences
+                text: Text that may contain markdown code fences or XML tags
                 
             Returns:
-                Text with markdown fences removed
+                Text with markdown fences and XML tags removed
             """
             if not isinstance(text, str):
                 return text
+            text = text.strip()
+            
+            # Remove XML tags first (e.g., <raw_json_output>...</raw_json_output>)
+            import re
+            # Remove opening tag <raw_json_output> (case-insensitive, with optional whitespace)
+            text = re.sub(r'<\s*raw_json_output\s*>', '', text, flags=re.IGNORECASE)
+            # Remove closing tag </raw_json_output> (case-insensitive, with optional whitespace)
+            text = re.sub(r'<\s*/\s*raw_json_output\s*>', '', text, flags=re.IGNORECASE)
             text = text.strip()
             
             # Handle ```json at start
