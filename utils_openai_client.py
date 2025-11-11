@@ -686,7 +686,7 @@ def create_and_wait(
         # Log request payload
         _log_responses_api_params(api_config)
         # Create and poll until completion
-        response = with_retries(lambda: client.responses.create(**api_config))
+        response = with_retries(lambda: client.responses.create(**api_config), logger=logger, provider="openai")
         start_time = time.time()
         while getattr(response, "status", None) not in ("completed", "failed", "cancelled"):
             if timeout_seconds and (time.time() - start_time) > timeout_seconds:
@@ -703,7 +703,7 @@ def create_and_wait(
         if not hasattr(client, 'responses') or client.__class__.__name__ != "GeminiClientWrapper":
             client = get_openai_client_for_model(model_name)
         _log_responses_api_params(api_config)
-        response = with_retries(lambda: client.responses.create(**api_config))
+        response = with_retries(lambda: client.responses.create(**api_config), logger=logger, provider="gemini")
         start_time = time.time()
         while getattr(response, "status", None) not in ("completed", "failed", "cancelled"):
             if timeout_seconds and (time.time() - start_time) > timeout_seconds:
@@ -769,7 +769,7 @@ def create_and_wait(
     
     # Execute OpenRouter call with detailed error logging
     try:
-        response = with_retries(lambda: litellm_completion(**litellm_kwargs))
+        response = with_retries(lambda: litellm_completion(**litellm_kwargs), logger=logger, provider="router")
         # Log successful response details
         _log_openrouter_response(response)
         return response
