@@ -536,7 +536,12 @@ def get_openai_client_for_model(model_name: str) -> OpenAI:
     provider = get_provider_for_model(model_name)
     api_key = get_api_key_for_model(model_name)
     
-    # For OpenRouter models (Gemini, Mistral, Llama, etc.), use OpenRouter's base URL and headers
+    # For Gemini models, return Gemini wrapper (direct SDK)
+    if provider == "gemini":
+        api_key = get_api_key_for_model(model_name)
+        return GeminiClientWrapper(api_key=api_key, model_name=model_name)
+    
+    # For OpenRouter models (Mistral, Llama, etc.), use OpenRouter's base URL and headers
     if provider == "router":
         # OpenRouter requires HTTP-Referer and X-Title headers
         # Note: We'll pass these headers in each API call via extra_headers parameter
@@ -639,11 +644,12 @@ def create_and_wait(
     poll_interval_seconds: float = 1.0,
     timeout_seconds: Optional[float] = None,
 ) -> Any:
-    """Create a model response using SDKs for OpenAI and OpenRouter for others.
+    """Create a model response using SDKs for OpenAI, Gemini, and OpenRouter for others.
 
     Routing policy:
     - OpenAI models (gpt-*, gpt-5*): OpenAI Responses API (SDK)
-    - All others (e.g., Gemini, Mistral, Llama): OpenRouter via LiteLLM
+    - Gemini: Google SDK via GeminiClientWrapper (OpenAI-like interface)
+    - All others (e.g., Mistral, Llama): OpenRouter via LiteLLM
     """
     # Build messages from api_config (instructions + first input content)
     model_name = (api_config.get("model") or "").strip()
@@ -690,8 +696,25 @@ def create_and_wait(
         if getattr(response, "status", None) != "completed":
             raise RuntimeError(f"OpenAI response ended with status: {getattr(response, 'status', None)}")
         return response
+    
+    # 1.b) Gemini → direct Google SDK via GeminiClientWrapper (OpenAI-like interface)
+    if provider == "gemini":
+        # Ensure we have a Gemini wrapper client bound to the model
+        if not hasattr(client, 'responses') or client.__class__.__name__ != "GeminiClientWrapper":
+            client = get_openai_client_for_model(model_name)
+        _log_responses_api_params(api_config)
+        response = with_retries(lambda: client.responses.create(**api_config))
+        start_time = time.time()
+        while getattr(response, "status", None) not in ("completed", "failed", "cancelled"):
+            if timeout_seconds and (time.time() - start_time) > timeout_seconds:
+                raise TimeoutError(f"Response timed out after {timeout_seconds} seconds")
+            time.sleep(poll_interval_seconds)
+            response = client.responses.retrieve(getattr(response, "id", ""))
+        if getattr(response, "status", None) != "completed":
+            raise RuntimeError(f"Gemini response ended with status: {getattr(response, 'status', None)}")
+        return response
 
-    # 2) OpenRouter models (Gemini, Mistral, Llama, etc.) → OpenRouter via LiteLLM
+    # 2) OpenRouter models (Mistral, Llama, etc.) → OpenRouter via LiteLLM
     # Relax parameter strictness to avoid provider-specific UnsupportedParamsError
     litellm.drop_params = True
 

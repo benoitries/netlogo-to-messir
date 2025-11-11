@@ -45,9 +45,12 @@ async def main():
             print("   Please ensure the appropriate API key is set in your .env file:")
             from utils_api_key import get_provider_for_model
             provider = get_provider_for_model(model)
-            if provider == "router":
+            if provider == "gemini":
+                print("   GEMINI_API_KEY=your-gemini-api-key")
+                print("   (Alternative names: GOOGLE_GEMINI_API_KEY, GENAI_API_KEY, GEMINI_KEY)")
+            elif provider == "router":
                 print("   OPENROUTER_API_KEY=your-openrouter-api-key")
-                print("   (Note: Gemini models now use OpenRouter API key)")
+                print("   (Alternative names: ROUTER_API_KEY, ROUTER_KEY, ROUTER)")
             else:
                 print("   OPENAI_API_KEY=your-openai-api-key")
             return

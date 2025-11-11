@@ -123,12 +123,40 @@ def get_openai_api_key() -> str:
     return key
 
 
+def get_gemini_api_key() -> str:
+    """Return Gemini API key from environment after loading .env files (workspace root priority)."""
+    load_env_files()
+    # Support common env var names for Gemini API keys, with GEMINI_API_KEY as primary
+    key = (
+        os.getenv("GEMINI_API_KEY")
+        or os.getenv("GOOGLE_GEMINI_API_KEY")
+        or os.getenv("GOOGLE_GEMINI_KEY")
+        or os.getenv("GENAI_API_KEY")
+        or os.getenv("GEMINI_KEY")
+    )
+    if not key:
+        raise ValueError(
+            "GEMINI_API_KEY not found in environment variables. "
+            f"Please set GEMINI_API_KEY in your .env file at: {_env_locations()[0] / '.env'}"
+        )
+    # Clean the key to remove any formatting issues
+    key = key.strip().strip('\'"`')
+    if not key:
+        raise ValueError(
+            "GEMINI_API_KEY is invalid or empty. "
+            f"Please check your .env file at: {_env_locations()[0] / '.env'}"
+        )
+    return key
+
+
 def get_provider_for_model(model_name: str) -> str:
-    """Infer provider from model name: "openai" | "router"."""
+    """Infer provider from model name: "openai" | "gemini" | "router"."""
     name = (model_name or "").lower()
     if name.startswith("gpt-5") or name.startswith("gpt-"):
         return "openai"
-    # All other models (Gemini, Mistral, Llama, etc.) are routed through OpenRouter
+    if "gemini" in name:
+        return "gemini"
+    # All other models (Mistral, Llama, etc.) are routed through OpenRouter
     return "router"
 
 
@@ -148,6 +176,9 @@ def get_api_key_for_model(model_name: str) -> str:
                     f"Original value: {original_key[:50]}...\n"
                     f"Please check your .env file at: {_env_locations()[0] / '.env'}"
                 )
+    elif provider == "gemini":
+        # Use dedicated function to ensure .env loading from workspace root
+        key = get_gemini_api_key()
     else:
         key = os.getenv("ROUTER_API_KEY") or os.getenv("ROUTER_KEY") or os.getenv("ROUTER") or os.getenv("OPENROUTER_API_KEY")
         if key:

@@ -54,8 +54,8 @@ AVAILABLE_MODELS = [
     "gpt-5-nano-2025-08-07",
     "gpt-5-mini-2025-08-07",
     "gpt-5-2025-08-07",
-    "google/gemini-2.5-flash",          
-    "google/gemini-2.5-pro",            
+    "gemini-2.5-flash",          
+    "gemini-2.5-pro",            
     "mistralai/mistral-small-3.2-24b-instruct", # "mistralai/Mistral-Small-24B-Instruct-2501"
     "meta-llama/llama-3.3-70b-instruct" 
 ]
