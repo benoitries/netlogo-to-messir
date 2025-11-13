@@ -162,7 +162,7 @@ This project uses a provider-aware routing strategy:
 Rationale: Many OpenRouter-provided models (notably Mistral/Llama) do not expose the Responses API path and would return HTTP 404 when called there. Chat Completions is the canonical, widely supported endpoint for those models.
 
 Defaults for OpenRouter Chat Completions calls:
-- `max_tokens = 10000`
+- `max_tokens = 50000` 
 - `temperature = 0.2`
 - `top_p` left as provider default
 

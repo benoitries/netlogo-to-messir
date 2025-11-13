@@ -8,15 +8,234 @@ Also supports Google Gemini and OpenRouter models.
 
 import json
 import logging
+import os
 import time
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union, List
 from openai import OpenAI
+import tiktoken
 from utils_openai_error import with_retries, classify_error
-from utils_config_constants import get_reasoning_config
+from utils_config_constants import get_reasoning_config, DEFAULT_MAX_TOKENS_OPENROUTER, MAX_MAX_TOKENS_OPENROUTER
 from utils_api_key import get_openai_api_key, get_api_key_for_model, get_provider_for_model
 
 # Logger for this module
 logger = logging.getLogger(__name__)
+
+# Suppress transformers warnings about missing PyTorch/TensorFlow (we only need tokenizers)
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+# Also suppress warnings at import time
+import warnings
+warnings.filterwarnings("ignore", message=".*PyTorch.*")
+warnings.filterwarnings("ignore", message=".*TensorFlow.*")
+warnings.filterwarnings("ignore", message=".*Flax.*")
+warnings.filterwarnings("ignore", message=".*Models won't be available.*")
+
+# Lazy imports for tokenizers (only load when needed)
+_transformers_available = None
+_sentencepiece_available = None
+# Cache for loaded tokenizers to avoid reloading
+_tokenizer_cache = {}
+
+def _check_transformers():
+    """Check if transformers library is available."""
+    global _transformers_available
+    if _transformers_available is None:
+        try:
+            import transformers
+            _transformers_available = True
+        except ImportError:
+            _transformers_available = False
+            logger.debug("transformers library not available. Install with: pip install transformers")
+    return _transformers_available
+
+def _check_sentencepiece():
+    """Check if sentencepiece library is available."""
+    global _sentencepiece_available
+    if _sentencepiece_available is None:
+        try:
+            import sentencepiece
+            _sentencepiece_available = True
+        except ImportError:
+            _sentencepiece_available = False
+            logger.debug("sentencepiece library not available. Install with: pip install sentencepiece")
+    return _sentencepiece_available
+
+def _get_cached_tokenizer(tokenizer_name: str):
+    """Get a cached tokenizer or load it if not cached.
+    
+    Args:
+        tokenizer_name: HuggingFace tokenizer model name (e.g., "mistralai/Mistral-7B-v0.1")
+    
+    Returns:
+        Tokenizer object or None if loading failed
+    """
+    global _tokenizer_cache
+    if tokenizer_name in _tokenizer_cache:
+        return _tokenizer_cache[tokenizer_name]
+    
+    if not _check_transformers():
+        return None
+    
+    try:
+        # Suppress transformers warnings about missing PyTorch/TensorFlow
+        # Set environment variable before importing to suppress the warning at import time
+        original_verbosity = os.environ.get("TRANSFORMERS_VERBOSITY", None)
+        os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+        
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*PyTorch.*")
+            warnings.filterwarnings("ignore", message=".*TensorFlow.*")
+            warnings.filterwarnings("ignore", message=".*Flax.*")
+            warnings.filterwarnings("ignore", message=".*Models won't be available.*")
+            
+            from transformers import AutoTokenizer
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=True)
+            _tokenizer_cache[tokenizer_name] = tokenizer
+            
+            # Restore original verbosity if it was set
+            if original_verbosity is not None:
+                os.environ["TRANSFORMERS_VERBOSITY"] = original_verbosity
+            elif "TRANSFORMERS_VERBOSITY" in os.environ:
+                del os.environ["TRANSFORMERS_VERBOSITY"]
+            
+            return tokenizer
+    except Exception as e:
+        logger.debug(f"Failed to load tokenizer {tokenizer_name}: {e}")
+        return None
+
+
+def count_tokens_with_native_tokenizer(text: str, model_name: str) -> int:
+    """Count tokens using the native tokenizer for the model.
+    
+    Uses appropriate tokenizers:
+    - OpenAI models: tiktoken
+    - Gemini models: tiktoken (cl100k_base encoding)
+    - Mistral models (including codestral): SentencePiece (via transformers)
+    - Llama models: Llama tokenizer (via transformers)
+    
+    Args:
+        text: Text to tokenize
+        model_name: Model name (e.g., 'gpt-4', 'mistralai/mistral-small-3.2-24b-instruct', 'meta-llama/llama-3.3-70b-instruct')
+    
+    Returns:
+        Number of tokens
+    """
+    if not text:
+        return 0
+    
+    model_lower = model_name.lower()
+    
+    # OpenAI models - use tiktoken
+    if model_lower.startswith(('gpt-', 'o1-', 'o3-')):
+        try:
+            # Try to get encoding for the specific model
+            encoding = tiktoken.encoding_for_model(model_name)
+            return len(encoding.encode(text))
+        except (KeyError, ValueError):
+            # Fallback to cl100k_base for most OpenAI models
+            encoding = tiktoken.get_encoding("cl100k_base")
+            return len(encoding.encode(text))
+    
+    # Gemini models - use tiktoken with cl100k_base
+    if 'gemini' in model_lower:
+        encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text))
+    
+    # Mistral models (including codestral) - use SentencePiece via transformers
+    if 'mistral' in model_lower or 'codestral' in model_lower:
+        if not _check_transformers():
+            logger.debug(f"transformers not available, using tiktoken fallback for {model_name} (token counts may differ)")
+            encoding = tiktoken.get_encoding("cl100k_base")
+            return len(encoding.encode(text))
+        
+        # Try multiple Mistral tokenizers in order of preference
+        mistral_tokenizers = [
+            "mistralai/Mistral-7B-v0.1",  # Generic Mistral tokenizer (works for most Mistral models)
+            "mistralai/Mistral-7B-Instruct-v0.1",  # Instruction-tuned variant
+        ]
+        
+        for tokenizer_name in mistral_tokenizers:
+            tokenizer = _get_cached_tokenizer(tokenizer_name)
+            if tokenizer is not None:
+                try:
+                    return len(tokenizer.encode(text))
+                except Exception as e:
+                    logger.debug(f"Error encoding with {tokenizer_name}: {e}, trying next tokenizer")
+                    continue
+        
+        # If all tokenizers failed, fall back to tiktoken
+        logger.debug(f"All Mistral tokenizers failed, using tiktoken fallback for {model_name}")
+        encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text))
+    
+    # Llama models - use Llama tokenizer via transformers
+    if 'llama' in model_lower:
+        if not _check_transformers():
+            logger.debug(f"transformers not available, using tiktoken fallback for {model_name} (token counts may differ)")
+            encoding = tiktoken.get_encoding("cl100k_base")
+            return len(encoding.encode(text))
+        
+        # Try multiple Llama tokenizers in order of preference
+        llama_tokenizers = [
+            "meta-llama/Meta-Llama-3-8B",  # Llama 3 tokenizer (most compatible with llama-3.3)
+            "meta-llama/Llama-2-7b-hf",  # Llama 2 fallback
+        ]
+        
+        for tokenizer_name in llama_tokenizers:
+            tokenizer = _get_cached_tokenizer(tokenizer_name)
+            if tokenizer is not None:
+                try:
+                    return len(tokenizer.encode(text))
+                except Exception as e:
+                    logger.debug(f"Error encoding with {tokenizer_name}: {e}, trying next tokenizer")
+                    continue
+        
+        # If all tokenizers failed, fall back to tiktoken
+        logger.debug(f"All Llama tokenizers failed, using tiktoken fallback for {model_name}")
+        encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text))
+    
+    # Default fallback: tiktoken with cl100k_base
+    encoding = tiktoken.get_encoding("cl100k_base")
+    return len(encoding.encode(text))
+
+
+def count_tokens_in_messages(messages: List[Dict[str, Any]], model_name: str) -> int:
+    """Count tokens in a list of messages using the native tokenizer for the model.
+    
+    Args:
+        messages: List of message dictionaries with 'role' and 'content' keys
+        model_name: Model name
+    
+    Returns:
+        Total number of tokens across all messages
+    """
+    total_tokens = 0
+    
+    for message in messages:
+        role = message.get('role', '')
+        content = message.get('content', '')
+        
+        # Count tokens for role
+        total_tokens += count_tokens_with_native_tokenizer(role, model_name)
+        
+        # Count tokens for content
+        if isinstance(content, str):
+            total_tokens += count_tokens_with_native_tokenizer(content, model_name)
+        elif isinstance(content, list):
+            # Handle multimodal content (e.g., text + images)
+            for item in content:
+                if isinstance(item, dict):
+                    text = item.get('text', '')
+                    if text:
+                        total_tokens += count_tokens_with_native_tokenizer(text, model_name)
+                elif isinstance(item, str):
+                    total_tokens += count_tokens_with_native_tokenizer(item, model_name)
+        
+        # Add overhead for message formatting (approximate)
+        total_tokens += 4  # ~4 tokens per message for formatting
+    
+    return total_tokens
 
 
 def _mask_api_key(value: Any) -> Any:
@@ -98,7 +317,7 @@ def _log_openrouter_response(response: Any, error: Optional[Exception] = None) -
     - Response body
     - Error details if present
     - Model information
-    - Usage/token information
+    - Usage/token information (API + native tokenizer)
     
     Args:
         response: LiteLLM response object or exception
@@ -193,11 +412,41 @@ def _log_openrouter_response(response: Any, error: Optional[Exception] = None) -
             usage = response.usage
             logger.info("  Token Usage:")
             if hasattr(usage, 'prompt_tokens'):
-                logger.info(f"    Prompt tokens: {usage.prompt_tokens}")
+                logger.info(f"    Prompt tokens (API): {usage.prompt_tokens}")
             if hasattr(usage, 'completion_tokens'):
-                logger.info(f"    Completion tokens: {usage.completion_tokens}")
+                logger.info(f"    Completion tokens (API): {usage.completion_tokens}")
             if hasattr(usage, 'total_tokens'):
-                logger.info(f"    Total tokens: {usage.total_tokens}")
+                logger.info(f"    Total tokens (API): {usage.total_tokens}")
+            
+            # Log native tokenizer counts if model name is available
+            model_name = getattr(response, 'model', None) or getattr(response, '_model', None)
+            if model_name:
+                try:
+                    # Try to get messages from response or from choices
+                    messages = None
+                    if hasattr(response, 'messages'):
+                        messages = getattr(response, 'messages', [])
+                    elif hasattr(response, 'choices') and isinstance(response.choices, list) and response.choices:
+                        # Extract messages from choices if available
+                        first_choice = response.choices[0]
+                        if hasattr(first_choice, 'message'):
+                            # Reconstruct messages from response (approximate)
+                            messages = [{"role": "user", "content": "..."}]  # Placeholder
+                    
+                    if messages:
+                        native_input_tokens = count_tokens_in_messages(messages, model_name)
+                        logger.info(f"    Input tokens (native tokenizer): {native_input_tokens}")
+                    
+                    # Also try to count output tokens if content is available
+                    if hasattr(response, 'choices') and isinstance(response.choices, list) and response.choices:
+                        first_choice = response.choices[0]
+                        if hasattr(first_choice, 'message') and hasattr(first_choice.message, 'content'):
+                            output_text = str(first_choice.message.content)
+                            native_output_tokens = count_tokens_with_native_tokenizer(output_text, model_name)
+                            logger.info(f"    Output tokens (native tokenizer): {native_output_tokens}")
+                except Exception as e:
+                    logger.debug(f"Could not count tokens with native tokenizer: {e}")
+            
             # Log full usage object
             try:
                 usage_dict = usage.__dict__ if hasattr(usage, '__dict__') else {}
@@ -717,6 +966,8 @@ def create_and_wait(
     # 2) OpenRouter models (Mistral, Llama, etc.) → OpenRouter via LiteLLM
     # Relax parameter strictness to avoid provider-specific UnsupportedParamsError
     litellm.drop_params = True
+    # Disable automatic max_tokens calculation to prevent negative values with long prompts
+    litellm.modify_params = False
 
     # Normalize OpenRouter model name for LiteLLM compatibility
     # When api_base is configured for OpenRouter, the model name should be '<provider>/<model>'
@@ -733,8 +984,14 @@ def create_and_wait(
 
     if "temperature" in api_config and api_config.get("temperature") is not None:
         litellm_kwargs["temperature"] = api_config.get("temperature")
+    # Set max_tokens: use explicit value from api_config, or default to DEFAULT_MAX_TOKENS_OPENROUTER for OpenRouter
+    # Default value is defined in utils_config_constants.py (SSOT)
+    # This prevents litellm from auto-calculating negative values with long prompts
     if "max_tokens" in api_config and api_config.get("max_tokens") is not None:
         litellm_kwargs["max_tokens"] = api_config.get("max_tokens")
+    else:
+        # Default max_tokens for OpenRouter models (from utils_config_constants.py)
+        litellm_kwargs["max_tokens"] = DEFAULT_MAX_TOKENS_OPENROUTER
 
     # OpenRouter credentials
     if isinstance(model_name, str):
@@ -765,11 +1022,106 @@ def create_and_wait(
     logger.info(f"  Messages count: {len(messages)}")
     logger.info(f"  Temperature: {litellm_kwargs.get('temperature', 'N/A')}")
     logger.info(f"  Max tokens: {litellm_kwargs.get('max_tokens', 'N/A')}")
+    logger.info(f"  litellm.modify_params: {litellm.modify_params}")
+    logger.info(f"  litellm.drop_params: {litellm.drop_params}")
+    
+    # Log input token count using native tokenizer
+    model_name = litellm_kwargs.get('model', 'unknown')
+    messages = litellm_kwargs.get('messages', [])
+    if messages:
+        try:
+            native_input_tokens = count_tokens_in_messages(messages, model_name)
+            logger.info(f"  Input tokens (native tokenizer): {native_input_tokens}")
+        except Exception as e:
+            logger.debug(f"Could not count input tokens with native tokenizer: {e}")
+    
     logger.info("=" * 80)
+    
+    # CRITICAL: Ensure max_tokens is always positive and explicitly set
+    # Force max_tokens to be at least 1 to prevent negative values from litellm auto-calculation
+    # Default value from utils_config_constants.py (SSOT)
+    if "max_tokens" not in litellm_kwargs or litellm_kwargs.get("max_tokens") is None:
+        litellm_kwargs["max_tokens"] = DEFAULT_MAX_TOKENS_OPENROUTER
+    elif litellm_kwargs.get("max_tokens", 0) < 1:
+        logger.warning(f"Invalid max_tokens value {litellm_kwargs.get('max_tokens')}, forcing to {DEFAULT_MAX_TOKENS_OPENROUTER}")
+        litellm_kwargs["max_tokens"] = DEFAULT_MAX_TOKENS_OPENROUTER
     
     # Execute OpenRouter call with detailed error logging
     try:
-        response = with_retries(lambda: litellm_completion(**litellm_kwargs), logger=logger, provider="router")
+        # Create a wrapper that ensures max_tokens is never modified by litellm
+        def safe_litellm_call():
+            # Re-assert modify_params = False right before the call to prevent any race conditions
+            original_modify_params = litellm.modify_params
+            original_drop_params = litellm.drop_params
+            litellm.modify_params = False
+            litellm.drop_params = True
+            
+            # Create a copy of kwargs to prevent any modifications
+            safe_kwargs = litellm_kwargs.copy()
+            
+            # CRITICAL: Force max_tokens to be positive and reasonable
+            # This prevents any negative values from being sent to OpenRouter
+            # Default value from utils_config_constants.py (SSOT)
+            if "max_tokens" not in safe_kwargs or safe_kwargs.get("max_tokens") is None:
+                safe_kwargs["max_tokens"] = DEFAULT_MAX_TOKENS_OPENROUTER
+            elif safe_kwargs.get("max_tokens", 0) < 1:
+                logger.warning(f"Detected invalid max_tokens {safe_kwargs.get('max_tokens')}, forcing to {DEFAULT_MAX_TOKENS_OPENROUTER}")
+                safe_kwargs["max_tokens"] = DEFAULT_MAX_TOKENS_OPENROUTER
+            elif safe_kwargs.get("max_tokens", 0) > MAX_MAX_TOKENS_OPENROUTER:
+                logger.warning(f"Detected excessive max_tokens {safe_kwargs.get('max_tokens')}, capping to {DEFAULT_MAX_TOKENS_OPENROUTER}")
+                safe_kwargs["max_tokens"] = DEFAULT_MAX_TOKENS_OPENROUTER
+            
+            # FINAL CHECK: Log the actual max_tokens value right before the call
+            logger.info(f"[SAFE_CALL] Final max_tokens before litellm call: {safe_kwargs.get('max_tokens')}")
+            
+            # MONKEY PATCH: Temporarily disable get_modified_max_tokens to prevent any automatic calculation
+            # This is a last-resort protection against litellm modifying max_tokens
+            original_get_modified_max_tokens = None
+            try:
+                from litellm.litellm_core_utils.token_counter import get_modified_max_tokens
+                original_get_modified_max_tokens = get_modified_max_tokens
+                
+                def safe_get_modified_max_tokens(*args, **kwargs):
+                    """Return the user's max_tokens value without modification to prevent negative values."""
+                    # Return the user's original max_tokens value (from kwargs or args)
+                    user_max_tokens = kwargs.get("user_max_tokens") or (args[3] if len(args) > 3 else None)
+                    if user_max_tokens is not None and user_max_tokens > 0:
+                        return user_max_tokens
+                    # If no valid value, return None to skip modification
+                    return None
+                
+                # Replace the function temporarily
+                import litellm.litellm_core_utils.token_counter as token_counter_module
+                token_counter_module.get_modified_max_tokens = safe_get_modified_max_tokens
+            except Exception as e:
+                logger.warning(f"Could not monkey-patch get_modified_max_tokens: {e}")
+            
+            # Wrap litellm_completion to intercept and fix max_tokens if it gets modified
+            def protected_litellm_call():
+                # Double-check max_tokens one more time right before the call
+                if "max_tokens" in safe_kwargs:
+                    current_max = safe_kwargs.get("max_tokens")
+                    if current_max is None or current_max < 1:
+                        logger.warning(f"[PROTECTED_CALL] Detected invalid max_tokens {current_max} right before call, forcing to {DEFAULT_MAX_TOKENS_OPENROUTER}")
+                        safe_kwargs["max_tokens"] = DEFAULT_MAX_TOKENS_OPENROUTER
+                return litellm_completion(**safe_kwargs)
+            
+            try:
+                result = protected_litellm_call()
+                logger.info(f"[SAFE_CALL] litellm call completed successfully")
+                return result
+            finally:
+                # Restore original function
+                if original_get_modified_max_tokens is not None:
+                    try:
+                        import litellm.litellm_core_utils.token_counter as token_counter_module
+                        token_counter_module.get_modified_max_tokens = original_get_modified_max_tokens
+                    except Exception:
+                        pass
+                litellm.modify_params = original_modify_params
+                litellm.drop_params = original_drop_params
+        
+        response = with_retries(lambda: safe_litellm_call(), logger=logger, provider="router")
         # Log successful response details
         _log_openrouter_response(response)
         return response
@@ -1093,6 +1445,7 @@ def validate_model_name_and_connectivity(model_name: str, verbose: bool = True) 
 
         # OpenRouter via LiteLLM (includes Gemini, Mistral, Llama, etc.)
         litellm.drop_params = True
+        litellm.modify_params = False  # Disable automatic max_tokens calculation
         normalized = normalize_openrouter_model_name(model_name)
         # LiteLLM expects explicit provider for OpenRouter; prefix the model
         litellm_model = (

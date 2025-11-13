@@ -4,7 +4,12 @@ pathlib2>=2.3.7
 typing-extensions>=4.0.0
 google-adk>=1.12.0
 google-genai>=1.0.0
+litellm>=1.79.3
+python-dotenv>=1.2.1
 tiktoken>=0.7,<1
+# Native tokenizers for Mistral and Llama models (for accurate token counting in logs)
+transformers>=4.30.0  # Required for native tokenizer support for Mistral/Llama
+sentencepiece>=0.1.99  # Required for native SentencePiece support
 # Note: google-cloud-storage version is controlled by google-adk dependency
 # The FutureWarning about google-cloud-storage <3.0.0 is non-blocking and will be resolved
 # when google-adk updates to support google-cloud-storage>=3.0.0

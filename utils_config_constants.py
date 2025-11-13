@@ -50,14 +50,18 @@ NETLOGO_INTERFACE_PATTERN = "*-netlogo-interface-*.png"
 
 # Available AI models (single source of truth)
 # Note: Only update model names here.
+# legacy models used wrongly in early experiments
+# "mistralai/mistral-small-3.2-24b-instruct"
+# "mistralai/Mistral-Small-24B-Instruct-2501"
+# "meta-llama/llama-3.3-70b-instruct"
 AVAILABLE_MODELS = [
     "gpt-5-nano-2025-08-07",
     "gpt-5-mini-2025-08-07",
     "gpt-5-2025-08-07",
     "gemini-2.5-flash",          
     "gemini-2.5-pro",            
-    "mistralai/mistral-small-3.2-24b-instruct", # "mistralai/Mistral-Small-24B-Instruct-2501"
-    "meta-llama/llama-3.3-70b-instruct" 
+    "mistralai/codestral-2508",
+    "meta-llama/llama-4-scout-17b-16e-instruct"
 ]
 
 # Default model derived from AVAILABLE_MODELS
@@ -65,6 +69,24 @@ DEFAULT_MODEL = AVAILABLE_MODELS[6]
 
 # API key selected dynamically based on the default model/provider
 OPENAI_API_KEY = get_api_key_for_model(DEFAULT_MODEL)
+
+# OpenRouter max_tokens default (SSOT - Single Source of Truth)
+# Value: 100,000 tokens (updated 2025-11-12 for new models with larger context windows)
+# Analysis based on:
+#   - Maximum prompt_tokens observed: 107,647 tokens (from curated-set analysis)
+#   - Active models context windows: 256k-327k tokens (codestral-2508, llama-4-scout)
+#   - Safety margin: ~20k tokens even with maximum prompt
+#   - Compatible with all active models while allowing better utilization
+# This prevents litellm from auto-calculating negative values with long prompts
+DEFAULT_MAX_TOKENS_OPENROUTER = 100000
+
+# OpenRouter max_tokens upper limit (SSOT - Single Source of Truth)
+# Maximum allowed value for max_tokens to prevent excessive token usage
+# Based on actual context windows:
+# - mistralai/codestral-2508: 256,000 tokens (https://openrouter.ai/mistralai/codestral-2508)
+# - meta-llama/llama-4-scout-17b-16e-instruct: 327,680 tokens (https://openrouter.ai/meta-llama/llama-4-scout)
+# Values above this threshold will be capped to DEFAULT_MAX_TOKENS_OPENROUTER
+MAX_MAX_TOKENS_OPENROUTER = 250000
 
 # Agent-specific configurations
 # Each agent can be configured with:

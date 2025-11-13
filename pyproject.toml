@@ -1,0 +1,16 @@
+[project]
+name = "code-netlogo-to-lucim-agentic-workflow"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13.0"
+dependencies = [
+    "google-adk>=1.12.0",
+    "google-genai>=1.0.0",
+    "litellm>=1.79.3",
+    "openai>=2,<3",
+    "pathlib2>=2.3.7",
+    "python-dotenv>=1.2.1",
+    "tiktoken>=0.7,<1",
+    "typing-extensions>=4.0.0",
+]
